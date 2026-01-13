@@ -1,0 +1,319 @@
+# ============================================================================
+# SECTION 1: CORE SERVER CONFIGURATION
+# ============================================================================
+# This section contains the fundamental server settings and memory management
+# configuration that define how Aries operates.
+
+[server]
+host = "127.0.0.1"   # The host to listen on.
+port = 3389          # The port to listen on.
+
+# Plan mode configuration
+# Aries operates exclusively in Plan mode, which decomposes complex user requests
+# into structured subtasks with dependencies, then executes them in topological
+# order using React loops for each subtask.
+#
+# Task Planning Configuration:
+# max_plan_subtasks = 10           # Maximum number of subtasks in a plan (default: 10)
+# plan_timeout_secs = 600          # Total timeout in seconds for plan execution (default: 600)
+#
+# Subtask Retry Configuration:
+# subtask_max_retries = 2          # Maximum retries for failed subtasks (default: 2)
+#                                  # Retryable errors: tool failures, timeouts, max iterations exceeded
+#
+# Subtask React Loop Configuration:
+# subtask_react_max_iterations = 5 # Maximum React iterations per subtask (default: 5)
+# subtask_react_timeout_secs = 60  # Timeout in seconds for each subtask (default: 60)
+#
+# Tool Call Configuration:
+# max_tools_per_iteration = 5      # Maximum tool calls per iteration (default: 5)
+# tool_call_max_retries = 2        # Maximum retries for failed tool calls (default: 2)
+# tool_call_retry_delay_ms = 500   # Delay in milliseconds between retries (default: 500)
+
+# Memory configuration
+[memory]
+enable = false                                    # Enable/disable memory functionality
+database_path = "data/memory.db"                 # Path to SQLite database file or URL
+                                                 # Examples:
+                                                 #   - Simple path: "data/memory.db", "/tmp/app.db"
+                                                 #   - SQLite URL: "sqlite:data/memory.db?mode=rwc"
+                                                 #   - Memory DB: "sqlite::memory:" (temporary, lost on restart)
+context_window = 8192                            # Maximum context window for conversations
+auto_summarize = true                            # Enable automatic message summarization
+summary_service_base_url = "http://localhost:10086/v1"  # Base URL for summary service
+summary_service_api_key = ""                            # API key for summary service (leave empty if not required)
+
+# Summarization strategies:
+# - "Incremental": Use existing summary + new messages (default, more efficient)
+# - "FullHistory": Re-summarize all historical messages (better context, more expensive)
+summarization_strategy = "Incremental"
+
+# Message summarization configuration:
+# - When message count reaches 'max_stored_messages', summarization is triggered
+# - After summarization, at least 'summarize_threshold/2' recent messages are kept
+# - Relationship: max_stored_messages > summarize_threshold (recommended)
+# - Example: 20 messages trigger → keep 6 recent → summarize 14 old messages
+max_stored_messages = 20                         # Trigger summarization when message count reaches this limit
+summarize_threshold = 12                         # Base number for calculating minimum kept messages (kept = threshold/2)
+
+
+# ============================================================================
+# SECTION 1.5: SKILLS CONFIGURATION
+# ============================================================================
+# Skills are modular capabilities that extend the AI's abilities.
+# Each skill contains a SKILL.md file with metadata and optional scripts.
+
+[skill]
+enabled = true                              # Enable Skills system
+directories = [                             # Directories to scan for Skills
+    # "/path/to/custom/skills",   # Your custom skills directory
+    ".skills",                              # Project-local skills
+    "~/.aries/skills"                 # User-level skills
+]
+
+# Skills API configuration for authentication and rate limiting
+# Controls access to Skills management API endpoints
+[skill.api]
+# api_key = "sk-your-secret-key"  # API key for Skills API (or set SKILLS_API_KEY env var)
+# rate_limit_requests = 100       # Maximum requests per window (default: 100, 0 to disable)
+# rate_limit_window_secs = 60     # Rate limit window in seconds (default: 60)
+
+# Skills marketplace configuration (skillsmp.com)
+# Use: aries skill install skillsmp:<name>
+[skill.market]
+# url = "https://skillsmp.com/api/v1"       # API URL (default)
+# api_key = "your-api-key"                  # API key (or set SKILLSMP_API_KEY env var)
+# cache_dir = "~/.aries/cache/skills" # Download cache directory (optional)
+
+# Script execution configuration for Skills
+[skill.execution]
+enabled = true                              # Enable script execution
+
+# Default resource limits for script execution
+[skill.execution.limits]
+max_memory_bytes = 268435456    # Maximum memory: 256MB (default)
+timeout = "30s"                 # Maximum execution time (default: 30s)
+max_output_bytes = 1048576      # Maximum output size: 1MB (default)
+network_access = false          # Whether to allow network access (default: false)
+
+# Deno executor configuration (for JavaScript/TypeScript)
+# Supported extensions: js, ts, mjs, mts, jsx, tsx
+[skill.execution.deno]
+deno_path = "deno"              # Path to Deno binary (default: "deno" from PATH)
+allow_net = false               # Allow network access by default
+allow_env = false               # Allow environment variable access by default
+allow_hrtime = false            # Allow high-resolution time measurement
+unstable = false                # Run in unstable mode
+cache = true                    # Cache compiled scripts
+# cache_dir = "/tmp/deno-cache" # Custom cache directory (optional)
+# v8_flags = []                 # Additional V8 flags (optional)
+
+# Docker executor configuration (for Python, Shell, Ruby, etc.)
+# Supported extensions: py, sh, bash, rb
+# NOTE: Requires Docker daemon running. Enable this section to use Docker sandbox.
+[skill.execution.docker]
+# socket = "/var/run/docker.sock"  # Docker socket path (auto-detect if not set)
+default_image = "alpine:latest"    # Default image for unknown script types
+auto_remove = true                 # Auto-remove containers after execution
+read_only = true                   # Use read-only root filesystem for security
+network_mode = "none"              # Network mode: "none" for isolation (recommended)
+container_prefix = "aries-exec"  # Container name prefix
+auto_pull = true                   # Auto-pull images if not present locally
+
+# File access strategy for data files referenced in script arguments
+# - "auto": (Default) Try bind mount first, fall back to file copy if not in data_dirs
+# - "bind_only": Only use bind mounts (fail if file not in data_dirs)
+# - "copy_only": Always copy files to temp directory (best for remote/network scenarios)
+file_access_mode = "auto"
+
+# Additional directories to mount in container (read-write for output files)
+# Format: "/host/path" or "/host/path:/container/path"
+# Files in these directories can be accessed directly via absolute paths
+data_dirs = [
+    "/path/to/skills",  # Skills directory (for accessing example files)
+    "/path/to/data:/data",               # Custom data directory
+]
+
+# Temporary directory for file copy mode (optional, defaults to system temp)
+# temp_dir = "/tmp/aries"
+
+# Whether to copy output files back to original location after execution (default: true)
+# Only applies when using file copy strategy
+copy_output_back = true
+
+# Image mapping for different script types (extension -> Docker image)
+[skill.execution.docker.images]
+py = "python:3.11-slim"            # Python scripts
+sh = "alpine:latest"               # Shell scripts
+bash = "alpine:latest"             # Bash scripts
+rb = "ruby:3.2-slim"               # Ruby scripts
+# js = "node:20-slim"              # Node.js (if needed, usually handled by Deno)
+
+
+# ============================================================================
+# SECTION 1.6: REFLECTION SYSTEM CONFIGURATION
+# ============================================================================
+# The reflection system provides self-correction capabilities.
+# It evaluates subtask results using LLM-driven analysis and can trigger
+# retries or replanning when issues are detected.
+
+[reflection]
+enabled = true                        # Enable reflection system
+confidence_threshold = 0.7            # Confidence threshold (0.0-1.0) below which issues are flagged
+max_reflection_rounds = 3             # Maximum reflection rounds per subtask
+enable_result_validation = true       # Enable structural/semantic result validation
+enable_path_optimization = false      # Enable path optimization suggestions (experimental)
+
+# ============================================================================
+# SECTION 1.7: DYNAMIC REPLANNING CONFIGURATION
+# ============================================================================
+# The dynamic replanning system automatically adjusts the plan when subtasks
+# fail or external conditions change. It analyzes failure patterns and can
+# insert recovery steps, reorder tasks, or trigger a full replan.
+
+[replan]
+enabled = true                        # Enable dynamic replanning
+max_replan_attempts = 2               # Maximum number of replan attempts
+critical_dependent_threshold = 2      # Threshold for considering a subtask critical (based on dependent count)
+failure_rate_threshold = 0.5          # Failure rate threshold (0.0-1.0) for triggering replanning
+min_time_per_subtask = 30             # Minimum time in seconds required per subtask
+
+
+# ============================================================================
+# SECTION 2: AI SERVICE CONFIGURATION
+# ============================================================================
+# This section contains configuration for AI services including chat and
+# embedding models. These are optional services that can be enabled as needed.
+
+# [chat]
+# url = "https://api.openai.com/v1"  # Base URL for the model API
+# api_key = ""                       # API key for the model service (leave empty to use environment variable: DEFAULT_CHAT_SERVICE_API_KEY)
+
+# [embedding]
+# url = "https://api.openai.com/v1"  # Base URL for the model API
+# api_key = ""                       # API key for the model service (leave empty to use environment variable: DEFAULT_EMBEDDING_SERVICE_API_KEY)
+
+
+# ============================================================================
+# SECTION 3: MCP TOOL SERVER CONFIGURATION
+# ============================================================================
+# This section contains configuration for Model Context Protocol (MCP) tool
+# servers. These provide additional capabilities and integrations.
+#
+# Note: If any MCP tool servers are enabled, ensure the corresponding MCP
+# server is started before starting the Aries server.
+
+# Section 3.1: Third Party MCP Servers
+#
+# The following items are the configuration for the third party MCP tool servers:
+#
+# - name: The name of the MCP tool server.
+# - transport: The transport protocol to use. Possible values: "sse" and "stream-http".
+# - url: The URL of the MCP tool server. ONLY one of `url` and `oauth_url` should be set.
+# - oauth_url: The URL of the MCP tool server for OAuth authentication. ONLY one of `url` and `oauth_url` should be set.
+# - enable: Whether to enable the MCP tool server.
+
+# The following config is for the markitdown mcp server.
+# The details about the server are available at https://github.com/microsoft/markitdown/tree/main/packages/markitdown-mcp
+[[mcp.server.tool]]
+name      = "markitdown"
+transport = "stream-http"
+url       = "http://127.0.0.1:8011/mcp"
+enable    = false
+
+# The following config is for the zapier-mcp server.
+# The details about the server are available at https://mcp.zapier.com/mcp/servers
+[[mcp.server.tool]]
+name      = "zapier-mcp"
+transport = "stream-http"
+oauth_url = "https://mcp.zapier.com/api/mcp/a/23683142/mcp?serverId=67bdebee-2595-4e58-bc11-62359d74a8ef"
+enable    = false
+
+
+# Section 3.2: Cardea MCP Servers
+#
+# The following items are the configuration for the MCP tool servers:
+#
+# - name: The name of the MCP tool server.
+# - transport: The transport protocol to use. Possible values: "sse" and "stream-http".
+# - url: The URL of the MCP tool server.
+# - enable: Whether to enable the MCP tool server.
+# - fallback_message (Optional): The fallback message to use if the MCP tool server returns an empty response.
+
+
+# The following config is for the cardea-agentic-search mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-agentic-search
+[[mcp.server.tool]]
+name             = "cardea-agentic-search"
+transport        = "stream-http"
+url              = "http://127.0.0.1:8009/mcp"
+enable           = false
+fallback_message = "Hmm, I couldn’t find enough info to answer that one just yet. Want to try asking in a different way?"
+
+# The following config is for the cardea-web-search mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-web-search
+[[mcp.server.tool]]
+name      = "cardea-web-search"
+transport = "stream-http"
+url       = "http://127.0.0.1:8010/mcp"
+enable    = false
+
+# The following config is for the cardea-calculator mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-calculator
+[[mcp.server.tool]]
+name      = "cardea-calculator"
+transport = "stream-http"
+url       = "http://127.0.0.1:8001/mcp"
+enable    = false
+
+# The following config is for the cardea-weather mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-weather
+[[mcp.server.tool]]
+name      = "cardea-weather"
+transport = "stream-http"
+url       = "http://127.0.0.1:8002/mcp"
+enable    = false
+
+# The following config is for the cardea-qdrant mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-qdrant
+[[mcp.server.tool]]
+name      = "cardea-qdrant"
+transport = "stream-http"
+url       = "http://127.0.0.1:8003/mcp"
+enable    = false
+
+# Section 3.3: Keyword Search MCP Servers
+#
+# The following items are the keyword search mcp server configurations:
+#
+# - name: The name of the mcp server.
+# - transport: The transport protocol to use. Possible values: "sse" and "stream-http".
+# - url: The URL of the mcp server.
+# - enable: Whether to enable the mcp server.
+#
+# If you want to use keyword search in the retrieval phase, please enable ONLY one of the following
+# three keyword search mcp servers.
+
+# The following config is for the cardea-keyword-search mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-kwsearch
+[[mcp.server.tool]]
+name      = "cardea-keyword-search"
+transport = "stream-http"
+url       = "http://127.0.0.1:8005/mcp"
+enable    = false
+
+# The following config is for the cardea-elastic-search mcp server.
+# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-elastic
+[[mcp.server.tool]]
+name      = "cardea-elastic-search"
+transport = "stream-http"
+url       = "http://127.0.0.1:8006/mcp"
+enable    = false
+
+# The following config is for the cardea-tidb-search mcp server.
+# The details about the server are available at https://github.com/cardea-m
+[[mcp.server.tool]]
+name      = "cardea-tidb-search"
+transport = "stream-http"
+url       = "http://127.0.0.1:8007/mcp"
+enable    = false

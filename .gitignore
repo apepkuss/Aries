@@ -1,0 +1,7 @@
+/target
+
+# Database files
+data/memory.db
+
+/docx
+/.claude
