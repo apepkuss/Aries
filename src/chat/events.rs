@@ -258,6 +258,7 @@ pub struct TextEvent {
 
 impl TextEvent {
     /// Creates a new TextEvent.
+    #[allow(dead_code)]
     pub fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -325,21 +326,25 @@ impl StatusEvent {
     }
 
     /// Creates a planning phase status event.
+    #[allow(dead_code)]
     pub fn planning(message: impl Into<String>) -> Self {
         Self::new(ExecutionPhase::Planning, message)
     }
 
     /// Creates an executing phase status event.
+    #[allow(dead_code)]
     pub fn executing(message: impl Into<String>) -> Self {
         Self::new(ExecutionPhase::Executing, message)
     }
 
     /// Creates a reflecting phase status event.
+    #[allow(dead_code)]
     pub fn reflecting(message: impl Into<String>) -> Self {
         Self::new(ExecutionPhase::Reflecting, message)
     }
 
     /// Creates a completing phase status event.
+    #[allow(dead_code)]
     pub fn completing(message: impl Into<String>) -> Self {
         Self::new(ExecutionPhase::Completing, message)
     }
@@ -394,6 +399,7 @@ pub struct ExecutionSummary {
 
 impl FinishEvent {
     /// Creates a new successful FinishEvent.
+    #[allow(dead_code)]
     pub fn success(usage: TokenUsage) -> Self {
         Self {
             stop_reason: "stop".to_string(),
@@ -404,6 +410,7 @@ impl FinishEvent {
     }
 
     /// Creates a new error FinishEvent.
+    #[allow(dead_code)]
     pub fn error(usage: TokenUsage, error: impl Into<String>) -> Self {
         Self {
             stop_reason: "error".to_string(),
@@ -608,6 +615,7 @@ pub fn format_stream_event(event: &StreamEvent) -> String {
 }
 
 /// Formats the SSE stream termination signal.
+#[allow(dead_code)]
 pub fn format_sse_done() -> &'static str {
     "data: [DONE]\n\n"
 }
@@ -831,5 +839,157 @@ mod tests {
         assert!(config.should_emit_thought());
         assert!(!config.should_emit_tool_events());
         assert!(!config.should_emit_status());
+    }
+
+    #[test]
+    fn test_thought_status_serialization() {
+        assert_eq!(
+            serde_json::to_string(&ThoughtStatus::Start).unwrap(),
+            "\"start\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ThoughtStatus::Streaming).unwrap(),
+            "\"streaming\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ThoughtStatus::Done).unwrap(),
+            "\"done\""
+        );
+    }
+
+    #[test]
+    fn test_text_event_serialization() {
+        let event = TextEvent::new("Hello, world!");
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(json, r#"{"content":"Hello, world!"}"#);
+    }
+
+    #[test]
+    fn test_status_event_all_phases() {
+        let planning = StatusEvent::planning("Starting plan generation");
+        assert!(
+            serde_json::to_string(&planning)
+                .unwrap()
+                .contains("\"phase\":\"planning\"")
+        );
+
+        let executing = StatusEvent::executing("Processing subtask");
+        assert!(
+            serde_json::to_string(&executing)
+                .unwrap()
+                .contains("\"phase\":\"executing\"")
+        );
+
+        let reflecting = StatusEvent::reflecting("Analyzing result");
+        assert!(
+            serde_json::to_string(&reflecting)
+                .unwrap()
+                .contains("\"phase\":\"reflecting\"")
+        );
+
+        let completing = StatusEvent::completing("Generating final response");
+        assert!(
+            serde_json::to_string(&completing)
+                .unwrap()
+                .contains("\"phase\":\"completing\"")
+        );
+    }
+
+    #[test]
+    fn test_finish_event_with_error() {
+        let usage = TokenUsage::new(50, 25);
+        let event = FinishEvent::error(usage, "Tool execution failed");
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"stop_reason\":\"error\""));
+        assert!(json.contains("\"error\":\"Tool execution failed\""));
+    }
+
+    #[test]
+    fn test_all_stream_event_types() {
+        // Verify all 6 event types can be wrapped in StreamEvent
+        let events: Vec<StreamEvent> = vec![
+            StreamEvent::Thought(ThoughtEvent::new("thinking")),
+            StreamEvent::ToolCall(ToolCallEvent::new("id", "tool", serde_json::json!({}))),
+            StreamEvent::ToolResult(ToolResultEvent::success("id", "result")),
+            StreamEvent::Text(TextEvent::new("content")),
+            StreamEvent::Status(StatusEvent::planning("message")),
+            StreamEvent::Finish(FinishEvent::success(TokenUsage::default())),
+        ];
+
+        let expected_types = vec![
+            StreamEventType::Thought,
+            StreamEventType::ToolCall,
+            StreamEventType::ToolResult,
+            StreamEventType::Text,
+            StreamEventType::Status,
+            StreamEventType::Finish,
+        ];
+
+        for (event, expected_type) in events.iter().zip(expected_types.iter()) {
+            assert_eq!(event.event_type(), *expected_type);
+        }
+    }
+
+    #[test]
+    fn test_sse_format_complete_event_sequence() {
+        // Simulate a complete Agent execution event sequence
+        let events = vec![
+            format_stream_event(&StreamEvent::Status(StatusEvent::planning(
+                "Generating plan",
+            ))),
+            format_stream_event(&StreamEvent::Status(
+                StatusEvent::executing("Executing subtask 1").with_subtask_progress(1, 1, 2),
+            )),
+            format_stream_event(&StreamEvent::Thought(
+                ThoughtEvent::new("I need to search for weather data")
+                    .with_subtask_id(1)
+                    .with_iteration(1),
+            )),
+            format_stream_event(&StreamEvent::ToolCall(
+                ToolCallEvent::new(
+                    "call_1",
+                    "get_weather",
+                    serde_json::json!({"city": "Shanghai"}),
+                )
+                .with_server_name("weather-api"),
+            )),
+            format_stream_event(&StreamEvent::ToolResult(
+                ToolResultEvent::success("call_1", r#"{"temp": 25, "condition": "sunny"}"#)
+                    .with_duration_ms(120),
+            )),
+            format_stream_event(&StreamEvent::Status(StatusEvent::completing(
+                "Generating response",
+            ))),
+            format_stream_event(&StreamEvent::Finish(
+                FinishEvent::success(TokenUsage::new(100, 50)).with_summary(ExecutionSummary {
+                    subtask_count: 2,
+                    completed_count: 2,
+                    failed_count: 0,
+                    tool_call_count: 1,
+                    duration_ms: 1500,
+                }),
+            )),
+            format_stream_event(&StreamEvent::Text(TextEvent::new(
+                "The weather in Shanghai is sunny, 25°C.",
+            ))),
+        ];
+
+        // Verify each event has proper SSE format
+        for event in &events {
+            assert!(event.starts_with("event: "));
+            assert!(event.contains("\ndata: "));
+            assert!(event.ends_with("\n\n"));
+        }
+
+        // Verify event type order
+        assert!(events[0].starts_with("event: status\n"));
+        assert!(events[1].starts_with("event: status\n"));
+        assert!(events[2].starts_with("event: thought\n"));
+        assert!(events[3].starts_with("event: tool_call\n"));
+        assert!(events[4].starts_with("event: tool_result\n"));
+        assert!(events[5].starts_with("event: status\n"));
+        assert!(events[6].starts_with("event: finish\n"));
+        assert!(events[7].starts_with("event: text\n"));
     }
 }

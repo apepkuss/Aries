@@ -25,11 +25,12 @@ use endpoints::chat::{
 use futures_util::stream::{self, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use rmcp::model::{CallToolRequestParam, RawContent};
-use tokio::select;
+use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    events::EnhancedStreamConfig,
+    emitter::{EventEmitter, create_emitter},
+    events::{EnhancedStreamConfig, ExecutionPhase, ExecutionSummary, ThoughtStatus},
     shared::TimeBudget,
     trace::{IterationTrace, ToolCallTrace},
     xml_parser::{
@@ -232,11 +233,26 @@ pub(crate) async fn chat(
         );
     }
 
+    // Create event emitter for structured event streaming
+    // Channel capacity of 256 should be enough for most agent executions
+    let (emitter, event_receiver) = create_emitter(&enhanced_stream_config, 256);
+
     // ========================================================================
     // Phase 1: Task Planning
     // ========================================================================
 
     dual_info!("📋 Starting task planning - request_id: {}", request_id);
+
+    // Emit planning status event
+    emitter
+        .emit_status(
+            ExecutionPhase::Planning,
+            "Analyzing user request and generating task plan...",
+            None,
+            None,
+            None,
+        )
+        .await;
 
     let user_request = user_message.clone().unwrap_or_default();
 
@@ -332,6 +348,18 @@ pub(crate) async fn chat(
 
     dual_info!("🚀 Starting task execution - request_id: {}", request_id);
 
+    // Emit executing status event with subtask count
+    let total_subtasks = plan.execution_order.len();
+    emitter
+        .emit_status(
+            ExecutionPhase::Executing,
+            &format!("Executing {} subtasks...", total_subtasks),
+            None,
+            Some(0),
+            Some(total_subtasks),
+        )
+        .await;
+
     let mut completed_subtasks: HashSet<usize> = HashSet::new();
     let mut subtask_results: Vec<(usize, String)> = Vec::new();
 
@@ -395,6 +423,18 @@ pub(crate) async fn chat(
                 subtask.description,
                 request_id
             );
+
+            // Emit status event for subtask start
+            let subtask_current = completed_subtasks.len() + 1;
+            emitter
+                .emit_status(
+                    ExecutionPhase::Executing,
+                    &format!("Executing subtask {}: {}", subtask.id, subtask.description),
+                    Some(subtask.id),
+                    Some(subtask_current),
+                    Some(total_subtasks),
+                )
+                .await;
 
             // Check dependencies
             if !subtask.is_ready(&completed_subtasks) {
@@ -483,6 +523,7 @@ pub(crate) async fn chat(
                     request_id,
                     &mut subtask_trace,
                     &model_name,
+                    emitter.as_ref(),
                 )
                 .await;
 
@@ -490,6 +531,16 @@ pub(crate) async fn chat(
                     Ok(result_text) => {
                         // Perform reflection on the result (if enabled)
                         let should_retry = if let Some(ref engine) = reflection_engine {
+                            // Emit reflecting status event
+                            emitter
+                                .emit_status(
+                                    ExecutionPhase::Reflecting,
+                                    &format!("Reflecting on subtask {} result", subtask.id),
+                                    Some(subtask.id),
+                                    Some(subtask_idx + 1),
+                                    Some(total_subtasks),
+                                )
+                                .await;
                             // Build reflection context
                             let deps_results: Vec<String> = subtask
                                 .dependencies
@@ -876,12 +927,54 @@ pub(crate) async fn chat(
         serde_json::to_string_pretty(&trace).unwrap_or_default()
     );
 
+    // Emit completing status
+    emitter
+        .emit_status(
+            ExecutionPhase::Completing,
+            "Generating final response...",
+            None,
+            None,
+            None,
+        )
+        .await;
+
+    // Calculate execution statistics for finish event
+    let completed_count = trace
+        .subtask_traces
+        .iter()
+        .filter(|t| matches!(t.status, crate::chat::planner::SubTaskStatus::Completed))
+        .count();
+    let failed_count = trace
+        .subtask_traces
+        .iter()
+        .filter(|t| matches!(t.status, crate::chat::planner::SubTaskStatus::Failed(_)))
+        .count();
+    let tool_call_count: usize = trace
+        .subtask_traces
+        .iter()
+        .flat_map(|t| t.react_iterations.iter())
+        .map(|it| it.tool_calls.len())
+        .sum();
+
+    // Emit finish event
+    let execution_summary = ExecutionSummary {
+        subtask_count: trace.subtask_traces.len(),
+        completed_count,
+        failed_count,
+        tool_call_count,
+        duration_ms: trace.total_duration.as_millis() as u64,
+    };
+    emitter
+        .emit_finish(&trace.total_tokens, "stop", None, Some(execution_summary))
+        .await;
+
     // Build response
     build_response(
         final_response,
         &final_content,
         stream,
         &enhanced_stream_config,
+        event_receiver,
         request_id,
     )
 }
@@ -980,6 +1073,7 @@ async fn execute_subtask_with_react(
     request_id: &str,
     subtask_trace: &mut SubtaskTrace,
     model: &str,
+    emitter: &dyn EventEmitter,
 ) -> ServerResult<String> {
     let start_time = Instant::now();
     let tool_call_retry_delay = Duration::from_millis(tool_call_retry_delay_ms);
@@ -1145,7 +1239,17 @@ async fn execute_subtask_with_react(
                 if let Some(content) = content {
                     if let Some(thought) = extract_thought(content) {
                         dual_info!("💭 Subtask {} Thought: {}", subtask.id, thought);
-                        iter_trace.thought = Some(thought);
+                        iter_trace.thought = Some(thought.clone());
+
+                        // Emit thought event
+                        emitter
+                            .emit_thought(
+                                &thought,
+                                ThoughtStatus::Done,
+                                Some(subtask.id),
+                                Some(iteration_count),
+                            )
+                            .await;
                     }
                     if let Some(action) = extract_action(content) {
                         dual_info!("🔧 Subtask {} Action: {}", subtask.id, action);
@@ -1155,6 +1259,23 @@ async fn execute_subtask_with_react(
 
                 // Execute tool calls
                 for tool_call in tool_calls_to_execute {
+                    // Emit tool_call event before execution
+                    let tool_args: serde_json::Value =
+                        serde_json::from_str(&tool_call.function.arguments)
+                            .unwrap_or(serde_json::json!({}));
+                    let (server_name, _tool_name) = parse_mcp_tool_name(&tool_call.function.name)
+                        .unwrap_or(("unknown", &tool_call.function.name));
+                    emitter
+                        .emit_tool_call(
+                            &tool_call.id,
+                            &tool_call.function.name,
+                            &tool_args,
+                            Some(server_name),
+                            Some(subtask.id),
+                        )
+                        .await;
+
+                    let tool_call_start = Instant::now();
                     let tool_result = execute_tool_call(
                         state,
                         tool_call,
@@ -1165,7 +1286,35 @@ async fn execute_subtask_with_react(
                         request_id,
                         &mut iter_trace,
                     )
-                    .await?;
+                    .await;
+
+                    // Emit tool_result event after execution
+                    let tool_duration = tool_call_start.elapsed();
+                    match &tool_result {
+                        Ok(result) => {
+                            emitter
+                                .emit_tool_result(
+                                    &tool_call.id,
+                                    result,
+                                    false,
+                                    Some(tool_duration),
+                                    Some(subtask.id),
+                                )
+                                .await;
+                        }
+                        Err(e) => {
+                            emitter
+                                .emit_tool_result(
+                                    &tool_call.id,
+                                    &e.to_string(),
+                                    true,
+                                    Some(tool_duration),
+                                    Some(subtask.id),
+                                )
+                                .await;
+                        }
+                    }
+                    let tool_result = tool_result?;
 
                     // Format observation
                     let observation = format!("<observation>{}</observation>", tool_result);
@@ -1191,7 +1340,17 @@ async fn execute_subtask_with_react(
                     // Extract thought
                     if let Some(thought) = extract_thought(content) {
                         dual_info!("💭 Subtask {} Thought: {}", subtask.id, thought);
-                        iter_trace.thought = Some(thought);
+                        iter_trace.thought = Some(thought.clone());
+
+                        // Emit thought event
+                        emitter
+                            .emit_thought(
+                                &thought,
+                                ThoughtStatus::Done,
+                                Some(subtask.id),
+                                Some(iteration_count),
+                            )
+                            .await;
                     }
 
                     dual_info!(
@@ -1206,12 +1365,31 @@ async fn execute_subtask_with_react(
                         id: format!("xml_call_{}", gen_chat_id()),
                         ty: "function".to_string(),
                         function: endpoints::chat::Function {
-                            name: xml_tool_call.tool_name,
-                            arguments: xml_tool_call.arguments,
+                            name: xml_tool_call.tool_name.clone(),
+                            arguments: xml_tool_call.arguments.clone(),
                         },
                     };
 
+                    // Parse tool arguments for event emission
+                    let tool_args: serde_json::Value =
+                        serde_json::from_str(&xml_tool_call.arguments)
+                            .unwrap_or(serde_json::json!({}));
+                    let (server_name, _tool_name) = parse_mcp_tool_name(&xml_tool_call.tool_name)
+                        .unwrap_or(("unknown", &xml_tool_call.tool_name));
+
+                    // Emit tool_call event before execution
+                    emitter
+                        .emit_tool_call(
+                            &tool_call.id,
+                            &xml_tool_call.tool_name,
+                            &tool_args,
+                            Some(server_name),
+                            Some(subtask.id),
+                        )
+                        .await;
+
                     // Execute tool call
+                    let tool_call_start = Instant::now();
                     let tool_result = execute_tool_call(
                         state,
                         &tool_call,
@@ -1222,7 +1400,35 @@ async fn execute_subtask_with_react(
                         request_id,
                         &mut iter_trace,
                     )
-                    .await?;
+                    .await;
+
+                    // Emit tool_result event after execution
+                    let tool_duration = tool_call_start.elapsed();
+                    match &tool_result {
+                        Ok(result) => {
+                            emitter
+                                .emit_tool_result(
+                                    &tool_call.id,
+                                    result,
+                                    false,
+                                    Some(tool_duration),
+                                    Some(subtask.id),
+                                )
+                                .await;
+                        }
+                        Err(e) => {
+                            emitter
+                                .emit_tool_result(
+                                    &tool_call.id,
+                                    &e.to_string(),
+                                    true,
+                                    Some(tool_duration),
+                                    Some(subtask.id),
+                                )
+                                .await;
+                        }
+                    }
+                    let tool_result = tool_result?;
 
                     // Format observation
                     let observation = format!("<observation>{}</observation>", tool_result);
@@ -1253,7 +1459,17 @@ async fn execute_subtask_with_react(
                 // Extract thought if present
                 if let Some(thought) = extract_thought(content) {
                     dual_info!("💭 Subtask {} Thought: {}", subtask.id, thought);
-                    iter_trace.thought = Some(thought);
+                    iter_trace.thought = Some(thought.clone());
+
+                    // Emit thought event
+                    emitter
+                        .emit_thought(
+                            &thought,
+                            ThoughtStatus::Done,
+                            Some(subtask.id),
+                            Some(iteration_count),
+                        )
+                        .await;
                 }
 
                 // Check for skill request (Phase 1 -> Phase 2 transition)
@@ -2435,77 +2651,22 @@ async fn generate_final_response(
 /// When `enhanced_stream_config.enabled` is true, the response will use
 /// custom SSE event types (thought, tool_call, tool_result, text, status, finish).
 /// Otherwise, it uses standard OpenAI-compatible streaming format.
-#[allow(unused_variables)] // enhanced_stream_config will be used in Phase 2
 fn build_response(
     mut chat_completion: ChatCompletionObject,
     final_content: &str,
     stream: bool,
     enhanced_stream_config: &EnhancedStreamConfig,
+    event_receiver: Option<mpsc::Receiver<String>>,
     request_id: &str,
 ) -> ServerResult<Response<Body>> {
-    // TODO: Phase 2 will implement enhanced streaming mode here
-    // For now, we use standard OpenAI-compatible streaming
-
     if stream {
-        // Create streaming response
-        let chunks = gen_chunks_with_formatting(final_content, 10);
-        let id = gen_chat_id();
-        let model = chat_completion.model.clone();
-        let usage = chat_completion.usage;
-        let chunks_len = chunks.len();
-
-        let request_id_owned = request_id.to_string();
-        let stream = stream::iter(chunks.into_iter().enumerate().map(move |(i, chunk)| {
-            let created = SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            let mut chat_completion_chunk = ChatCompletionChunk {
-                id: id.clone(),
-                object: "chat.completion.chunk".to_string(),
-                created,
-                model: model.clone(),
-                system_fingerprint: "fp_plan_mode".to_string(),
-                choices: vec![ChatCompletionChunkChoice {
-                    index: i as u32,
-                    delta: ChatCompletionChunkChoiceDelta {
-                        role: ChatCompletionRole::Assistant,
-                        content: Some(chunk),
-                        tool_calls: vec![],
-                    },
-                    logprobs: None,
-                    finish_reason: None,
-                }],
-                usage: None,
-            };
-
-            if i == chunks_len - 1 {
-                chat_completion_chunk.choices[0].finish_reason =
-                    Some(endpoints::common::FinishReason::stop);
-                chat_completion_chunk.usage = Some(usage);
-            }
-
-            let json_str = serde_json::to_string(&chat_completion_chunk).unwrap();
-            format!("data: {json_str}\n\n")
-        }))
-        .chain(stream::once(async { "data: [DONE]\n\n".to_string() }))
-        .map(|s| Ok::<_, std::convert::Infallible>(s.into_bytes()));
-
-        Response::builder()
-            .header(CONTENT_TYPE, "text/event-stream")
-            .header("Cache-Control", "no-cache")
-            .header("Connection", "keep-alive")
-            .status(StatusCode::OK)
-            .body(Body::from_stream(stream))
-            .map_err(|e| {
-                dual_error!(
-                    "Failed to create streaming response: {} - request_id: {}",
-                    e,
-                    request_id_owned
-                );
-                ServerError::Operation(format!("Failed to create streaming response: {}", e))
-            })
+        if enhanced_stream_config.enabled {
+            // Enhanced streaming mode: combine pre-collected events with text chunks
+            build_enhanced_streaming_response(final_content, event_receiver, request_id)
+        } else {
+            // Standard OpenAI-compatible streaming mode
+            build_standard_streaming_response(chat_completion, final_content, request_id)
+        }
     } else {
         // Non-streaming response
         chat_completion.choices[0].message.content = Some(final_content.to_string());
@@ -2525,6 +2686,127 @@ fn build_response(
                 ServerError::Operation(format!("Failed to create response: {}", e))
             })
     }
+}
+
+/// Builds enhanced streaming response with custom SSE event types.
+fn build_enhanced_streaming_response(
+    final_content: &str,
+    event_receiver: Option<mpsc::Receiver<String>>,
+    request_id: &str,
+) -> ServerResult<Response<Body>> {
+    use super::events::{TextEvent, format_sse_event};
+
+    // Collect all pre-emitted events from the receiver
+    let mut pre_events: Vec<String> = Vec::new();
+    if let Some(mut receiver) = event_receiver {
+        // Try to receive all pending events (non-blocking)
+        while let Ok(event) = receiver.try_recv() {
+            pre_events.push(event);
+        }
+    }
+
+    // Generate text chunks for the final content
+    let text_chunks = gen_chunks_with_formatting(final_content, 10);
+    let text_events: Vec<String> = text_chunks
+        .into_iter()
+        .map(|chunk| format_sse_event("text", &TextEvent { content: chunk }))
+        .collect();
+
+    // Combine pre-events, text events, and done marker
+    let all_events: Vec<String> = pre_events
+        .into_iter()
+        .chain(text_events)
+        .chain(std::iter::once("data: [DONE]\n\n".to_string()))
+        .collect();
+
+    let request_id_owned = request_id.to_string();
+    let stream =
+        stream::iter(all_events).map(|s| Ok::<_, std::convert::Infallible>(s.into_bytes()));
+
+    Response::builder()
+        .header(CONTENT_TYPE, "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive")
+        .header("X-Enhanced-Stream", "true")
+        .status(StatusCode::OK)
+        .body(Body::from_stream(stream))
+        .map_err(|e| {
+            dual_error!(
+                "Failed to create enhanced streaming response: {} - request_id: {}",
+                e,
+                request_id_owned
+            );
+            ServerError::Operation(format!(
+                "Failed to create enhanced streaming response: {}",
+                e
+            ))
+        })
+}
+
+/// Builds standard OpenAI-compatible streaming response.
+fn build_standard_streaming_response(
+    chat_completion: ChatCompletionObject,
+    final_content: &str,
+    request_id: &str,
+) -> ServerResult<Response<Body>> {
+    let chunks = gen_chunks_with_formatting(final_content, 10);
+    let id = gen_chat_id();
+    let model = chat_completion.model.clone();
+    let usage = chat_completion.usage;
+    let chunks_len = chunks.len();
+
+    let request_id_owned = request_id.to_string();
+    let stream = stream::iter(chunks.into_iter().enumerate().map(move |(i, chunk)| {
+        let created = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let mut chat_completion_chunk = ChatCompletionChunk {
+            id: id.clone(),
+            object: "chat.completion.chunk".to_string(),
+            created,
+            model: model.clone(),
+            system_fingerprint: "fp_plan_mode".to_string(),
+            choices: vec![ChatCompletionChunkChoice {
+                index: i as u32,
+                delta: ChatCompletionChunkChoiceDelta {
+                    role: ChatCompletionRole::Assistant,
+                    content: Some(chunk),
+                    tool_calls: vec![],
+                },
+                logprobs: None,
+                finish_reason: None,
+            }],
+            usage: None,
+        };
+
+        if i == chunks_len - 1 {
+            chat_completion_chunk.choices[0].finish_reason =
+                Some(endpoints::common::FinishReason::stop);
+            chat_completion_chunk.usage = Some(usage);
+        }
+
+        let json_str = serde_json::to_string(&chat_completion_chunk).unwrap();
+        format!("data: {json_str}\n\n")
+    }))
+    .chain(stream::once(async { "data: [DONE]\n\n".to_string() }))
+    .map(|s| Ok::<_, std::convert::Infallible>(s.into_bytes()));
+
+    Response::builder()
+        .header(CONTENT_TYPE, "text/event-stream")
+        .header("Cache-Control", "no-cache")
+        .header("Connection", "keep-alive")
+        .status(StatusCode::OK)
+        .body(Body::from_stream(stream))
+        .map_err(|e| {
+            dual_error!(
+                "Failed to create streaming response: {} - request_id: {}",
+                e,
+                request_id_owned
+            );
+            ServerError::Operation(format!("Failed to create streaming response: {}", e))
+        })
 }
 
 // ============================================================================

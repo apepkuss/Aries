@@ -88,6 +88,7 @@ pub trait EventEmitter: Send + Sync {
     );
 
     /// Emits a text event (final response text chunk).
+    #[allow(dead_code)]
     async fn emit_text(&self, content: &str);
 
     /// Emits a finish event (task completion signal).
@@ -100,6 +101,7 @@ pub trait EventEmitter: Send + Sync {
     );
 
     /// Returns whether this emitter is active (will actually emit events).
+    #[allow(dead_code)]
     fn is_active(&self) -> bool;
 }
 
@@ -376,6 +378,7 @@ pub fn create_emitter(
 }
 
 /// Default channel capacity for event streaming.
+#[allow(dead_code)]
 pub const DEFAULT_CHANNEL_CAPACITY: usize = 100;
 
 // ============================================================================
