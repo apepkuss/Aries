@@ -1,3 +1,5 @@
+pub mod emitter;
+pub mod events;
 pub mod plan;
 pub mod planner;
 pub mod shared;

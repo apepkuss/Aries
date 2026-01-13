@@ -29,6 +29,7 @@ use tokio::select;
 use tokio_util::sync::CancellationToken;
 
 use super::{
+    events::EnhancedStreamConfig,
     shared::TimeBudget,
     trace::{IterationTrace, ToolCallTrace},
     xml_parser::{
@@ -218,6 +219,18 @@ pub(crate) async fn chat(
     // Store original stream setting
     let stream = request.stream.unwrap_or(false);
     request.stream = Some(false);
+
+    // Parse enhanced stream configuration from headers
+    let enhanced_stream_config = EnhancedStreamConfig::from_headers(&headers);
+    if enhanced_stream_config.enabled {
+        dual_info!(
+            "🔄 Enhanced streaming enabled (thoughts={}, tools={}, status={}) - request_id: {}",
+            enhanced_stream_config.include_thoughts,
+            enhanced_stream_config.include_tool_calls,
+            enhanced_stream_config.include_status,
+            request_id
+        );
+    }
 
     // ========================================================================
     // Phase 1: Task Planning
@@ -864,7 +877,13 @@ pub(crate) async fn chat(
     );
 
     // Build response
-    build_response(final_response, &final_content, stream, request_id)
+    build_response(
+        final_response,
+        &final_content,
+        stream,
+        &enhanced_stream_config,
+        request_id,
+    )
 }
 
 // ============================================================================
@@ -2412,12 +2431,21 @@ async fn generate_final_response(
 }
 
 /// Builds the final HTTP response.
+///
+/// When `enhanced_stream_config.enabled` is true, the response will use
+/// custom SSE event types (thought, tool_call, tool_result, text, status, finish).
+/// Otherwise, it uses standard OpenAI-compatible streaming format.
+#[allow(unused_variables)] // enhanced_stream_config will be used in Phase 2
 fn build_response(
     mut chat_completion: ChatCompletionObject,
     final_content: &str,
     stream: bool,
+    enhanced_stream_config: &EnhancedStreamConfig,
     request_id: &str,
 ) -> ServerResult<Response<Body>> {
+    // TODO: Phase 2 will implement enhanced streaming mode here
+    // For now, we use standard OpenAI-compatible streaming
+
     if stream {
         // Create streaming response
         let chunks = gen_chunks_with_formatting(final_content, 10);
