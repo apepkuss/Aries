@@ -57,6 +57,30 @@ pub struct SkillMetadata {
     /// Not part of the standard, for compatibility
     #[serde(default)]
     pub model: Option<String>,
+
+    /// Input parameters JSON Schema (optional)
+    ///
+    /// Defines the expected input parameters for this skill using JSON Schema format.
+    /// This allows frontends to dynamically generate input forms and validate user input.
+    ///
+    /// # Example YAML configuration:
+    /// ```yaml
+    /// parameters:
+    ///   type: object
+    ///   properties:
+    ///     file_path:
+    ///       type: string
+    ///       description: Path to the file to review
+    ///     focus_areas:
+    ///       type: array
+    ///       items:
+    ///         type: string
+    ///       description: "Areas to focus on: security, performance, style"
+    ///   required:
+    ///     - file_path
+    /// ```
+    #[serde(default)]
+    pub parameters: Option<serde_json::Value>,
 }
 
 impl SkillMetadata {
@@ -682,6 +706,13 @@ pub struct SkillSummary {
     /// Tools covered by this skill (should be hidden in Phase 1)
     #[serde(default)]
     pub allowed_tools: Vec<String>,
+
+    /// Input parameters JSON Schema (optional)
+    ///
+    /// Defines the expected input parameters for this skill.
+    /// Allows frontends to dynamically generate input forms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
 }
 
 impl From<&LoadedSkill> for SkillSummary {
@@ -690,6 +721,7 @@ impl From<&LoadedSkill> for SkillSummary {
             name: skill.metadata.name.clone(),
             description: skill.metadata.description.clone(),
             allowed_tools: skill.metadata.get_allowed_tools(),
+            parameters: skill.metadata.parameters.clone(),
         }
     }
 }
@@ -700,6 +732,7 @@ impl From<&SkillMetadata> for SkillSummary {
             name: metadata.name.clone(),
             description: metadata.description.clone(),
             allowed_tools: metadata.get_allowed_tools(),
+            parameters: metadata.parameters.clone(),
         }
     }
 }
@@ -835,6 +868,7 @@ mod tests {
             metadata: None,
             allowed_tools: None,
             model: None,
+            parameters: None,
         }
     }
 
@@ -856,6 +890,7 @@ mod tests {
             },
             allowed_tools: None,
             model: None,
+            parameters: None,
         }
     }
 
@@ -886,6 +921,7 @@ mod tests {
             },
             allowed_tools: None,
             model: None,
+            parameters: None,
         }
     }
 
@@ -999,6 +1035,7 @@ mod tests {
             name: "git-commit".to_string(),
             description: "Create git commits".to_string(),
             allowed_tools: vec!["Bash".to_string(), "Read".to_string()],
+            parameters: None,
         };
 
         let json = serde_json::to_string(&summary).unwrap();

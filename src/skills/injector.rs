@@ -407,6 +407,7 @@ mod tests {
             name: name.to_string(),
             description: description.to_string(),
             allowed_tools: vec![],
+            parameters: None,
         }
     }
 
@@ -420,6 +421,7 @@ mod tests {
                 metadata: None,
                 allowed_tools: None,
                 model: None,
+                parameters: None,
             },
             content: content.to_string(),
             raw_content: String::new(),

@@ -598,6 +598,7 @@ mod tests {
                 },
                 allowed_tools: None,
                 model: None,
+                parameters: None,
             },
             content: format!("Content for {}", name),
             raw_content: String::new(),

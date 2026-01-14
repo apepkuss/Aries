@@ -285,9 +285,10 @@ async fn test_ttp_001_with_skills_empty_summaries() {
 #[tokio::test]
 async fn test_ttp_001_with_skills_chain_methods() {
     let summaries = vec![SkillSummary {
-        allowed_tools: vec![],
         name: "test-skill".to_string(),
         description: "Test skill description".to_string(),
+        allowed_tools: vec![],
+        parameters: None,
     }];
 
     // Test method chaining
@@ -309,14 +310,16 @@ async fn test_ttp_001_with_skills_chain_methods() {
 async fn test_ttp_002_system_prompt_contains_skills_table() {
     let summaries = vec![
         SkillSummary {
-            allowed_tools: vec![],
             name: "weather-query".to_string(),
             description: "Query weather information".to_string(),
+            allowed_tools: vec![],
+            parameters: None,
         },
         SkillSummary {
-            allowed_tools: vec![],
             name: "code-review".to_string(),
             description: "Review code changes".to_string(),
+            allowed_tools: vec![],
+            parameters: None,
         },
     ];
 
@@ -349,9 +352,10 @@ async fn test_ttp_002_system_prompt_contains_skills_table() {
 #[tokio::test]
 async fn test_ttp_002_system_prompt_recommended_skill_tag() {
     let summaries = vec![SkillSummary {
-        allowed_tools: vec![],
         name: "test-skill".to_string(),
         description: "Test".to_string(),
+        allowed_tools: vec![],
+        parameters: None,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -373,9 +377,10 @@ async fn test_ttp_002_system_prompt_recommended_skill_tag() {
 #[tokio::test]
 async fn test_ttp_002_system_prompt_skill_recommendation_rule() {
     let summaries = vec![SkillSummary {
-        allowed_tools: vec![],
         name: "test-skill".to_string(),
         description: "Test".to_string(),
+        allowed_tools: vec![],
+        parameters: None,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -393,9 +398,10 @@ async fn test_ttp_002_system_prompt_skill_recommendation_rule() {
 #[tokio::test]
 async fn test_ttp_002_system_prompt_tools_section_preserved() {
     let summaries = vec![SkillSummary {
-        allowed_tools: vec![],
         name: "test-skill".to_string(),
         description: "Test".to_string(),
+        allowed_tools: vec![],
+        parameters: None,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -680,11 +686,13 @@ async fn test_integration_skills_table_format_matches_injector() {
     let summaries = vec![
         SkillSummary {
             allowed_tools: vec![],
+            parameters: None,
             name: "skill-a".to_string(),
             description: "Description A".to_string(),
         },
         SkillSummary {
             allowed_tools: vec![],
+            parameters: None,
             name: "skill-b".to_string(),
             description: "Description B".to_string(),
         },
@@ -767,6 +775,7 @@ async fn test_many_skills_in_prompt() {
     for i in 0..20 {
         summaries.push(SkillSummary {
             allowed_tools: vec![],
+            parameters: None,
             name: format!("skill-{:02}", i),
             description: format!("Description for skill {}", i),
         });
@@ -791,6 +800,7 @@ async fn test_many_skills_in_prompt() {
 async fn test_skill_name_with_special_characters() {
     let summaries = vec![SkillSummary {
         allowed_tools: vec![],
+        parameters: None,
         name: "my-awesome_skill.v2".to_string(),
         description: "A skill with special chars in name".to_string(),
     }];
@@ -808,6 +818,7 @@ async fn test_skill_description_with_pipe_character() {
     // Pipe character could break markdown table
     let summaries = vec![SkillSummary {
         allowed_tools: vec![],
+        parameters: None,
         name: "test-skill".to_string(),
         description: "Query | Filter | Transform data".to_string(),
     }];
@@ -825,6 +836,7 @@ async fn test_skill_description_with_pipe_character() {
 async fn test_concurrent_planning_with_skills() {
     let summaries = vec![SkillSummary {
         allowed_tools: vec![],
+        parameters: None,
         name: "shared-skill".to_string(),
         description: "A shared skill".to_string(),
     }];

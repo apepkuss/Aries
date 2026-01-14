@@ -3039,6 +3039,7 @@ mod tests {
             name: "weather-query".to_string(),
             description: "Query weather for a city".to_string(),
             allowed_tools: vec![],
+            parameters: None,
         }];
 
         let messages = build_context_for_react_sync(
@@ -3084,6 +3085,7 @@ mod tests {
                 metadata: None,
                 allowed_tools: None,
                 model: None,
+                parameters: None,
             },
             content: "Use the weather tool to query weather.".to_string(),
             raw_content: "".to_string(),
@@ -3512,11 +3514,13 @@ mod tests {
                 name: "web-search".to_string(),
                 description: "Perform web searches with advanced filtering".to_string(),
                 allowed_tools: vec![],
+                parameters: None,
             },
             SkillSummary {
                 name: "git-workflow".to_string(),
                 description: "Help with git operations and workflows".to_string(),
                 allowed_tools: vec![],
+                parameters: None,
             },
         ];
 
@@ -3601,6 +3605,7 @@ mod tests {
             name: "git-workflow".to_string(),
             description: "Git workflow assistance".to_string(),
             allowed_tools: vec![],
+            parameters: None,
         }];
 
         // Phase 1: no active skill
@@ -3652,6 +3657,7 @@ mod tests {
                 metadata: None,
                 allowed_tools: Some("Bash(git:*) Read".to_string()),
                 model: None,
+                parameters: None,
             },
             content: r#"# Git Workflow
 
@@ -3741,6 +3747,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("Bash(git:*) Read".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Git skill content".to_string(),
             raw_content: String::new(),
@@ -3951,6 +3958,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("Bash(git:*) Read".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Git workflow instructions".to_string(),
             raw_content: String::new(),
@@ -4061,6 +4069,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("tool-a".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Skill A content".to_string(),
             raw_content: String::new(),
@@ -4080,6 +4089,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("tool-b".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Skill B content".to_string(),
             raw_content: String::new(),
@@ -4145,6 +4155,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("tool-a tool-shared".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Content A".to_string(),
             raw_content: String::new(),
@@ -4165,6 +4176,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("tool-b tool-shared".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Content B".to_string(),
             raw_content: String::new(),
@@ -4242,6 +4254,7 @@ git commit -m "feat: add new feature"
             name: "calculator".to_string(),
             description: "Calculator operations".to_string(),
             allowed_tools: vec!["mcp__calc__sum".to_string(), "mcp__calc__sub".to_string()],
+            parameters: None,
         }];
 
         // Phase 1: no active skill, with skill summaries
@@ -4279,11 +4292,13 @@ git commit -m "feat: add new feature"
                 name: "calculator".to_string(),
                 description: "Calculator".to_string(),
                 allowed_tools: vec!["mcp__calc__sum".to_string()],
+                parameters: None,
             },
             SkillSummary {
                 name: "search".to_string(),
                 description: "Search".to_string(),
                 allowed_tools: vec!["mcp__search__query".to_string()],
+                parameters: None,
             },
         ];
 
@@ -4339,6 +4354,7 @@ git commit -m "feat: add new feature"
             name: "generic-skill".to_string(),
             description: "A skill without tool restrictions".to_string(),
             allowed_tools: vec![],
+            parameters: None,
         }];
 
         let filtered = filter_tools_by_skills(&tools, Some(&skills), &[]);
@@ -4376,6 +4392,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("mcp__calc__sum, mcp__calc__sub".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Calculator instructions".to_string(),
             raw_content: String::new(),
@@ -4424,6 +4441,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: None, // No restrictions
                 model: None,
+                parameters: None,
             },
             content: "Skill content".to_string(),
             raw_content: String::new(),
@@ -4462,6 +4480,7 @@ git commit -m "feat: add new feature"
             name: "calculator".to_string(),
             description: "Calculator".to_string(),
             allowed_tools: vec!["mcp__calc__sum".to_string()],
+            parameters: None,
         }];
 
         // ...when active skill is present, Phase 2 logic applies
@@ -4474,6 +4493,7 @@ git commit -m "feat: add new feature"
                 metadata: None,
                 allowed_tools: Some("mcp__calc__sum".to_string()),
                 model: None,
+                parameters: None,
             },
             content: "Calculator".to_string(),
             raw_content: String::new(),
@@ -4501,6 +4521,7 @@ git commit -m "feat: add new feature"
             name: "skill".to_string(),
             description: "A skill".to_string(),
             allowed_tools: vec!["some_tool".to_string()],
+            parameters: None,
         }];
 
         let filtered = filter_tools_by_skills(&tools, Some(&skills), &[]);

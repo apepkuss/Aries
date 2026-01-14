@@ -48,6 +48,9 @@ pub struct SkillDetailResponse {
     pub scripts: Vec<String>,
     /// Skill content (markdown)
     pub content: String,
+    /// Input parameters JSON Schema (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// Request for enabling/disabling a skill
@@ -193,6 +196,7 @@ pub async fn get_skill_handler(
         allowed_scripts: skill.metadata.get_allowed_scripts(),
         scripts: skill.scripts.iter().map(|s| s.name.clone()).collect(),
         content: skill.content.clone(),
+        parameters: skill.metadata.parameters.clone(),
     };
 
     let json_body = serde_json::to_string(&response).map_err(|e| {
@@ -440,6 +444,7 @@ mod tests {
                 name: "test-skill".to_string(),
                 description: "A test skill".to_string(),
                 allowed_tools: vec!["Bash".to_string()],
+                parameters: None,
             }],
             total: 1,
         };
@@ -460,6 +465,7 @@ mod tests {
             allowed_scripts: Some(vec!["*.js".to_string()]),
             scripts: vec!["process.js".to_string()],
             content: "# My Skill".to_string(),
+            parameters: None,
         };
 
         let json = serde_json::to_string(&response).unwrap();
@@ -479,6 +485,7 @@ mod tests {
             allowed_scripts: None,
             scripts: vec![],
             content: "".to_string(),
+            parameters: None,
         };
 
         let json = serde_json::to_string(&response).unwrap();

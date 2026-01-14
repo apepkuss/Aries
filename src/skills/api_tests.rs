@@ -34,11 +34,13 @@ fn test_tap_001_skill_list_response_structure() {
                 name: "weather-query".to_string(),
                 description: "Query weather information".to_string(),
                 allowed_tools: vec!["WebFetch".to_string()],
+                parameters: None,
             },
             SkillSummary {
                 name: "code-review".to_string(),
                 description: "Review code changes".to_string(),
                 allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
+                parameters: None,
             },
         ],
         total: 2,
@@ -81,6 +83,7 @@ fn test_tap_002_pagination_structure() {
             name: "skill-1".to_string(),
             description: "First skill".to_string(),
             allowed_tools: vec![],
+            parameters: None,
         }],
         total: 10, // Total is more than items in this page
     };
@@ -105,6 +108,7 @@ fn test_tap_003_skill_detail_response_structure() {
         allowed_scripts: Some(vec!["*.sh".to_string()]),
         scripts: vec!["fetch-weather.sh".to_string()],
         content: "# Weather Query Skill\n\nThis skill helps with weather queries.".to_string(),
+        parameters: None,
     };
 
     let json = serde_json::to_string(&response).unwrap();
@@ -130,6 +134,7 @@ fn test_tap_003_skill_detail_minimal() {
         allowed_scripts: None,
         scripts: vec![],
         content: "# Minimal".to_string(),
+        parameters: None,
     };
 
     let json = serde_json::to_string(&response).unwrap();
@@ -317,6 +322,7 @@ fn test_skill_summary_serialization() {
         name: "test-skill".to_string(),
         description: "Test description".to_string(),
         allowed_tools: vec!["Bash".to_string(), "Read".to_string()],
+        parameters: None,
     };
 
     let json = serde_json::to_string(&summary).unwrap();
@@ -332,6 +338,7 @@ fn test_skill_summary_empty_tools() {
         name: "no-tools".to_string(),
         description: "No tools allowed".to_string(),
         allowed_tools: vec![],
+        parameters: None,
     };
 
     let json = serde_json::to_string(&summary).unwrap();

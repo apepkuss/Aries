@@ -1,3 +1,4 @@
+mod capabilities;
 mod chat;
 mod cli;
 mod config;
@@ -6,6 +7,7 @@ mod executor;
 mod handlers;
 mod info;
 mod mcp;
+mod mcp_handlers;
 mod memory;
 mod reflection;
 mod responses;
@@ -274,6 +276,13 @@ async fn main() -> ServerResult<()> {
         .route(
             "/admin/servers",
             get(handlers::admin::list_downstream_servers_handler),
+        )
+        // MCP tools endpoint
+        .route("/api/mcp/tools", get(mcp_handlers::list_mcp_tools_handler))
+        // Capabilities introspection endpoint
+        .route(
+            "/v1/capabilities",
+            get(capabilities::get_capabilities_handler),
         );
 
     // Add memory endpoints only if memory is enabled
