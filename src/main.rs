@@ -1,3 +1,4 @@
+mod artifacts;
 mod capabilities;
 mod chat;
 mod cli;
@@ -218,6 +219,9 @@ async fn main() -> ServerResult<()> {
     // Save skill API config before moving config into AppState
     let skill_api_config = config.skill.as_ref().and_then(|s| s.api.clone());
 
+    // Save artifacts config before moving config into AppState
+    let artifacts_config = config.artifacts.clone();
+
     // Initialize application state
     let mut state = AppState::new(config, ServerInfo::default());
 
@@ -364,12 +368,83 @@ async fn main() -> ServerResult<()> {
         .route("/health", get(responses::health_handler))
         .with_state(responses_state);
 
+    // Create artifacts router if enabled
+    let artifacts_router: Option<Router> = if let Some(ref art_config) = artifacts_config {
+        if art_config.enabled {
+            dual_info!("Artifacts system is enabled");
+
+            // Ensure data directory exists
+            if let Some(parent) = std::path::Path::new(&art_config.database_path).parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    let err_msg = format!("Failed to create artifacts data directory: {e}");
+                    dual_error!("{err_msg}");
+                    ServerError::Operation(err_msg)
+                })?;
+            }
+
+            let artifacts_state = Arc::new(artifacts::ArtifactsState::new(
+                art_config.database_path.clone(),
+                artifacts::ArtifactConfig {
+                    max_content_size: art_config.max_content_size,
+                    max_versions: art_config.max_versions,
+                    storage_path: art_config.storage_path.clone(),
+                },
+            ));
+
+            let router = Router::new()
+                .route(
+                    "/v1/artifacts",
+                    axum::routing::post(artifacts::create_artifact_handler),
+                )
+                .route(
+                    "/v1/artifacts/{id}",
+                    axum::routing::get(artifacts::get_artifact_handler)
+                        .put(artifacts::update_artifact_handler)
+                        .delete(artifacts::delete_artifact_handler),
+                )
+                .route(
+                    "/v1/artifacts/{id}/download",
+                    axum::routing::get(artifacts::download_artifact_handler),
+                )
+                .route(
+                    "/v1/artifacts/{id}/versions",
+                    axum::routing::get(artifacts::list_versions_handler),
+                )
+                .route(
+                    "/v1/artifacts/{id}/versions/{version}",
+                    axum::routing::get(artifacts::get_version_content_handler),
+                )
+                .route(
+                    "/v1/artifacts/{id}/versions/{version}/restore",
+                    axum::routing::post(artifacts::restore_version_handler),
+                )
+                .route(
+                    "/v1/conversations/{conv_id}/artifacts",
+                    axum::routing::get(artifacts::list_artifacts_by_conversation_handler),
+                )
+                .with_state(artifacts_state);
+
+            Some(router)
+        } else {
+            dual_info!("Artifacts system is disabled");
+            None
+        }
+    } else {
+        dual_info!("Artifacts system is not configured");
+        None
+    };
+
     // Build final app router
     let mut app = Router::new().merge(main_router).merge(responses_router);
 
     // Merge skills router if available
     if let Some(skills_router) = skills_router {
         app = app.merge(skills_router);
+    }
+
+    // Merge artifacts router if available
+    if let Some(artifacts_router) = artifacts_router {
+        app = app.merge(artifacts_router);
     }
 
     let app =

@@ -62,6 +62,9 @@ pub struct Config {
     /// Dynamic replanning configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replan: Option<crate::reflection::ReplanConfig>,
+    /// Artifacts management configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<ArtifactsConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -120,6 +123,7 @@ impl Default for Config {
             skill: None,
             reflection: None,
             replan: None,
+            artifacts: None,
         }
     }
 }
@@ -1042,6 +1046,61 @@ async fn callback_handler(
     }
     // Return success page
     Html(CALLBACK_HTML.to_string())
+}
+
+/// Artifacts management configuration
+///
+/// Controls the behavior of the Artifacts storage and management system.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ArtifactsConfig {
+    /// Enable or disable Artifacts functionality
+    #[serde(default = "default_artifacts_enabled")]
+    pub enabled: bool,
+
+    /// Path to SQLite database file for storing artifact metadata
+    #[serde(default = "default_artifacts_database_path")]
+    pub database_path: String,
+
+    /// Path to storage directory for artifact content
+    /// If not specified, uses system default data directory
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_path: Option<String>,
+
+    /// Maximum content size in bytes (default: 1MB)
+    #[serde(default = "default_artifacts_max_size")]
+    pub max_content_size: u64,
+
+    /// Maximum versions to keep per artifact (default: 10)
+    #[serde(default = "default_artifacts_max_versions")]
+    pub max_versions: i32,
+}
+
+fn default_artifacts_enabled() -> bool {
+    false
+}
+
+fn default_artifacts_database_path() -> String {
+    "data/artifacts.db".to_string()
+}
+
+fn default_artifacts_max_size() -> u64 {
+    1024 * 1024 // 1MB
+}
+
+fn default_artifacts_max_versions() -> i32 {
+    10
+}
+
+impl Default for ArtifactsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_artifacts_enabled(),
+            database_path: default_artifacts_database_path(),
+            storage_path: None,
+            max_content_size: default_artifacts_max_size(),
+            max_versions: default_artifacts_max_versions(),
+        }
+    }
 }
 
 /// Skills configuration

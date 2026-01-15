@@ -31,9 +31,9 @@ use tokio::sync::mpsc;
 
 use super::{
     events::{
-        EnhancedStreamConfig, ExecutionPhase, ExecutionSummary, FinishEvent, StatusEvent,
-        StreamEvent, TextEvent, ThoughtEvent, ThoughtStatus, ToolCallEvent, ToolResultEvent,
-        format_stream_event,
+        ArtifactCreatedEvent, ArtifactDeletedEvent, ArtifactUpdatedEvent, EnhancedStreamConfig,
+        ExecutionPhase, ExecutionSummary, FinishEvent, StatusEvent, StreamEvent, TextEvent,
+        ThoughtEvent, ThoughtStatus, ToolCallEvent, ToolResultEvent, format_stream_event,
     },
     trace::TokenUsage,
 };
@@ -99,6 +99,34 @@ pub trait EventEmitter: Send + Sync {
         error: Option<&str>,
         summary: Option<ExecutionSummary>,
     );
+
+    /// Emits an artifact created event.
+    #[allow(dead_code, clippy::too_many_arguments)]
+    async fn emit_artifact_created(
+        &self,
+        artifact_id: &str,
+        title: &str,
+        artifact_type: &serde_json::Value,
+        content: &str,
+        size: u64,
+        url: &str,
+        subtask_id: Option<usize>,
+    );
+
+    /// Emits an artifact updated event.
+    #[allow(dead_code)]
+    async fn emit_artifact_updated(
+        &self,
+        artifact_id: &str,
+        version: i32,
+        content: &str,
+        change_description: Option<&str>,
+        subtask_id: Option<usize>,
+    );
+
+    /// Emits an artifact deleted event.
+    #[allow(dead_code)]
+    async fn emit_artifact_deleted(&self, artifact_id: &str, subtask_id: Option<usize>);
 
     /// Returns whether this emitter is active (will actually emit events).
     #[allow(dead_code)]
@@ -268,6 +296,71 @@ impl EventEmitter for SseEventEmitter {
         self.send_event(StreamEvent::Finish(event)).await;
     }
 
+    async fn emit_artifact_created(
+        &self,
+        artifact_id: &str,
+        title: &str,
+        artifact_type: &serde_json::Value,
+        content: &str,
+        size: u64,
+        url: &str,
+        subtask_id: Option<usize>,
+    ) {
+        if !self.config.should_emit_artifacts() {
+            return;
+        }
+
+        let mut event = ArtifactCreatedEvent::new(
+            artifact_id,
+            title,
+            artifact_type.clone(),
+            content,
+            size,
+            url,
+        );
+        if let Some(id) = subtask_id {
+            event = event.with_subtask_id(id);
+        }
+
+        self.send_event(StreamEvent::ArtifactCreated(event)).await;
+    }
+
+    async fn emit_artifact_updated(
+        &self,
+        artifact_id: &str,
+        version: i32,
+        content: &str,
+        change_description: Option<&str>,
+        subtask_id: Option<usize>,
+    ) {
+        if !self.config.should_emit_artifacts() {
+            return;
+        }
+
+        let mut event = ArtifactUpdatedEvent::new(artifact_id, version, content);
+        if let Some(desc) = change_description {
+            event = event.with_change_description(desc);
+        }
+        if let Some(id) = subtask_id {
+            event = event.with_subtask_id(id);
+        }
+
+        self.send_event(StreamEvent::ArtifactUpdated(event)).await;
+    }
+
+    async fn emit_artifact_deleted(&self, artifact_id: &str, subtask_id: Option<usize>) {
+        if !self.config.should_emit_artifacts() {
+            return;
+        }
+
+        let mut event = ArtifactDeletedEvent::new(artifact_id);
+        if let Some(id) = subtask_id {
+            event = event.with_subtask_id(id);
+        }
+
+        self.send_event(StreamEvent::ArtifactDeleted(event)).await;
+    }
+
     fn is_active(&self) -> bool {
         true
     }
@@ -347,6 +440,34 @@ impl EventEmitter for NoopEventEmitter {
         _error: Option<&str>,
         _summary: Option<ExecutionSummary>,
     ) {
+        // No-op
+    }
+
+    async fn emit_artifact_created(
+        &self,
+        _artifact_id: &str,
+        _title: &str,
+        _artifact_type: &serde_json::Value,
+        _content: &str,
+        _size: u64,
+        _url: &str,
+        _subtask_id: Option<usize>,
+    ) {
+        // No-op
+    }
+
+    async fn emit_artifact_updated(
+        &self,
+        _artifact_id: &str,
+        _version: i32,
+        _content: &str,
+        _change_description: Option<&str>,
+        _subtask_id: Option<usize>,
+    ) {
+        // No-op
+    }
+
+    async fn emit_artifact_deleted(&self, _artifact_id: &str, _subtask_id: Option<usize>) {
         // No-op
     }
 
@@ -606,5 +727,126 @@ mod tests {
         emitter
             .emit_thought("test", ThoughtStatus::Done, None, None)
             .await;
+    }
+
+    // ========================================================================
+    // Artifact Event Emitter Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_sse_emitter_sends_artifact_created() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let emitter = SseEventEmitter::new(tx, EnhancedStreamConfig::all_enabled());
+
+        emitter
+            .emit_artifact_created(
+                "art_123",
+                "main.rs",
+                &serde_json::json!({"code": {"language": "rust"}}),
+                "fn main() {}",
+                12,
+                "/v1/artifacts/art_123/download",
+                Some(1),
+            )
+            .await;
+
+        let message = rx.recv().await.unwrap();
+        assert!(message.starts_with("event: artifact_created\n"));
+        assert!(message.contains("\"artifact_id\":\"art_123\""));
+        assert!(message.contains("\"title\":\"main.rs\""));
+        assert!(message.contains("\"size\":12"));
+        assert!(message.contains("\"subtask_id\":1"));
+    }
+
+    #[tokio::test]
+    async fn test_sse_emitter_sends_artifact_updated() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let emitter = SseEventEmitter::new(tx, EnhancedStreamConfig::all_enabled());
+
+        emitter
+            .emit_artifact_updated(
+                "art_123",
+                2,
+                "fn main() { println!(\"Hi\"); }",
+                Some("Added print statement"),
+                Some(1),
+            )
+            .await;
+
+        let message = rx.recv().await.unwrap();
+        assert!(message.starts_with("event: artifact_updated\n"));
+        assert!(message.contains("\"artifact_id\":\"art_123\""));
+        assert!(message.contains("\"version\":2"));
+        assert!(message.contains("\"change_description\":\"Added print statement\""));
+    }
+
+    #[tokio::test]
+    async fn test_sse_emitter_sends_artifact_deleted() {
+        let (tx, mut rx) = mpsc::channel(10);
+        let emitter = SseEventEmitter::new(tx, EnhancedStreamConfig::all_enabled());
+
+        emitter.emit_artifact_deleted("art_123", Some(2)).await;
+
+        let message = rx.recv().await.unwrap();
+        assert!(message.starts_with("event: artifact_deleted\n"));
+        assert!(message.contains("\"artifact_id\":\"art_123\""));
+        assert!(message.contains("\"subtask_id\":2"));
+    }
+
+    #[tokio::test]
+    async fn test_sse_emitter_respects_artifacts_config() {
+        let (tx, mut rx) = mpsc::channel(10);
+
+        // Create config with only artifacts enabled
+        let config = EnhancedStreamConfig::parse("artifacts");
+        let emitter = SseEventEmitter::new(tx, config);
+
+        // Emit artifact_created - should be sent
+        emitter
+            .emit_artifact_created(
+                "art_1",
+                "test.txt",
+                &serde_json::json!("text"),
+                "content",
+                7,
+                "/download",
+                None,
+            )
+            .await;
+        assert!(rx.try_recv().is_ok());
+
+        // Emit thought - should NOT be sent
+        emitter
+            .emit_thought("test", ThoughtStatus::Done, None, None)
+            .await;
+        assert!(rx.try_recv().is_err());
+
+        // Emit tool_call - should NOT be sent
+        emitter
+            .emit_tool_call("id", "tool", &serde_json::json!({}), None, None)
+            .await;
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_noop_emitter_ignores_artifact_events() {
+        let emitter = NoopEventEmitter::new();
+
+        // These should all complete without error
+        emitter
+            .emit_artifact_created(
+                "art_1",
+                "test.txt",
+                &serde_json::json!("text"),
+                "content",
+                7,
+                "/download",
+                None,
+            )
+            .await;
+        emitter
+            .emit_artifact_updated("art_1", 2, "new content", None, None)
+            .await;
+        emitter.emit_artifact_deleted("art_1", None).await;
     }
 }

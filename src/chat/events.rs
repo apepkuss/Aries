@@ -60,6 +60,12 @@ pub enum StreamEventType {
     Status,
     /// Task completion signal.
     Finish,
+    /// Artifact created event.
+    ArtifactCreated,
+    /// Artifact updated event.
+    ArtifactUpdated,
+    /// Artifact deleted event.
+    ArtifactDeleted,
 }
 
 impl fmt::Display for StreamEventType {
@@ -71,6 +77,9 @@ impl fmt::Display for StreamEventType {
             StreamEventType::Text => write!(f, "text"),
             StreamEventType::Status => write!(f, "status"),
             StreamEventType::Finish => write!(f, "finish"),
+            StreamEventType::ArtifactCreated => write!(f, "artifact_created"),
+            StreamEventType::ArtifactUpdated => write!(f, "artifact_updated"),
+            StreamEventType::ArtifactDeleted => write!(f, "artifact_deleted"),
         }
     }
 }
@@ -438,6 +447,141 @@ impl FinishEvent {
 }
 
 // ============================================================================
+// Artifact Events
+// ============================================================================
+
+/// Event payload when a new artifact is created.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactCreatedEvent {
+    /// Artifact ID.
+    pub artifact_id: String,
+    /// Artifact title (filename).
+    pub title: String,
+    /// Artifact type (code, markdown, etc.).
+    pub artifact_type: serde_json::Value,
+    /// Content preview (first 200 chars).
+    pub preview: String,
+    /// Content size in bytes.
+    pub size: u64,
+    /// Download URL.
+    pub url: String,
+    /// Optional subtask ID this artifact belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
+}
+
+#[allow(dead_code)]
+impl ArtifactCreatedEvent {
+    /// Creates a new ArtifactCreatedEvent.
+    pub fn new(
+        artifact_id: impl Into<String>,
+        title: impl Into<String>,
+        artifact_type: serde_json::Value,
+        content: &str,
+        size: u64,
+        url: impl Into<String>,
+    ) -> Self {
+        let preview = if content.len() > 200 {
+            format!("{}...", &content[..200])
+        } else {
+            content.to_string()
+        };
+
+        Self {
+            artifact_id: artifact_id.into(),
+            title: title.into(),
+            artifact_type,
+            preview,
+            size,
+            url: url.into(),
+            subtask_id: None,
+        }
+    }
+
+    /// Sets the subtask ID.
+    pub fn with_subtask_id(mut self, subtask_id: usize) -> Self {
+        self.subtask_id = Some(subtask_id);
+        self
+    }
+}
+
+/// Event payload when an artifact is updated.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactUpdatedEvent {
+    /// Artifact ID.
+    pub artifact_id: String,
+    /// New version number.
+    pub version: i32,
+    /// Content preview (first 200 chars of new content).
+    pub preview: String,
+    /// Optional change description.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub change_description: Option<String>,
+    /// Optional subtask ID this update belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
+}
+
+#[allow(dead_code)]
+impl ArtifactUpdatedEvent {
+    /// Creates a new ArtifactUpdatedEvent.
+    pub fn new(artifact_id: impl Into<String>, version: i32, content: &str) -> Self {
+        let preview = if content.len() > 200 {
+            format!("{}...", &content[..200])
+        } else {
+            content.to_string()
+        };
+
+        Self {
+            artifact_id: artifact_id.into(),
+            version,
+            preview,
+            change_description: None,
+            subtask_id: None,
+        }
+    }
+
+    /// Sets the change description.
+    pub fn with_change_description(mut self, description: impl Into<String>) -> Self {
+        self.change_description = Some(description.into());
+        self
+    }
+
+    /// Sets the subtask ID.
+    pub fn with_subtask_id(mut self, subtask_id: usize) -> Self {
+        self.subtask_id = Some(subtask_id);
+        self
+    }
+}
+
+/// Event payload when an artifact is deleted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactDeletedEvent {
+    /// Artifact ID.
+    pub artifact_id: String,
+    /// Optional subtask ID this deletion belongs to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
+}
+
+#[allow(dead_code)]
+impl ArtifactDeletedEvent {
+    /// Creates a new ArtifactDeletedEvent.
+    pub fn new(artifact_id: impl Into<String>) -> Self {
+        Self {
+            artifact_id: artifact_id.into(),
+            subtask_id: None,
+        }
+    }
+
+    /// Sets the subtask ID.
+    pub fn with_subtask_id(mut self, subtask_id: usize) -> Self {
+        self.subtask_id = Some(subtask_id);
+        self
+    }
+}
+
+// ============================================================================
 // Unified Stream Event
 // ============================================================================
 
@@ -457,6 +601,12 @@ pub enum StreamEvent {
     Status(StatusEvent),
     /// Finish event.
     Finish(FinishEvent),
+    /// Artifact created event.
+    ArtifactCreated(ArtifactCreatedEvent),
+    /// Artifact updated event.
+    ArtifactUpdated(ArtifactUpdatedEvent),
+    /// Artifact deleted event.
+    ArtifactDeleted(ArtifactDeletedEvent),
 }
 
 impl StreamEvent {
@@ -469,6 +619,9 @@ impl StreamEvent {
             StreamEvent::Text(_) => StreamEventType::Text,
             StreamEvent::Status(_) => StreamEventType::Status,
             StreamEvent::Finish(_) => StreamEventType::Finish,
+            StreamEvent::ArtifactCreated(_) => StreamEventType::ArtifactCreated,
+            StreamEvent::ArtifactUpdated(_) => StreamEventType::ArtifactUpdated,
+            StreamEvent::ArtifactDeleted(_) => StreamEventType::ArtifactDeleted,
         }
     }
 }
@@ -491,6 +644,8 @@ pub struct EnhancedStreamConfig {
     pub include_tool_calls: bool,
     /// Whether to include status events.
     pub include_status: bool,
+    /// Whether to include artifact events.
+    pub include_artifacts: bool,
 }
 
 impl EnhancedStreamConfig {
@@ -501,6 +656,7 @@ impl EnhancedStreamConfig {
             include_thoughts: true,
             include_tool_calls: true,
             include_status: true,
+            include_artifacts: true,
         }
     }
 
@@ -514,7 +670,7 @@ impl EnhancedStreamConfig {
     /// Supports the following header formats:
     /// - `X-Enhanced-Stream: true` - Enable all enhanced events
     /// - `X-Enhanced-Stream: false` - Disable (use standard mode)
-    /// - `X-Enhanced-Stream: thoughts,tool_calls` - Enable specific events
+    /// - `X-Enhanced-Stream: thoughts,tool_calls,artifacts` - Enable specific events
     pub fn from_headers(headers: &axum::http::HeaderMap) -> Self {
         let header_value = headers
             .get(ENHANCED_STREAM_HEADER)
@@ -542,6 +698,7 @@ impl EnhancedStreamConfig {
             include_thoughts: false,
             include_tool_calls: false,
             include_status: false,
+            include_artifacts: false,
         };
 
         for part in value.split(',') {
@@ -549,17 +706,23 @@ impl EnhancedStreamConfig {
                 "thoughts" | "thought" => config.include_thoughts = true,
                 "tool_calls" | "tools" => config.include_tool_calls = true,
                 "status" => config.include_status = true,
+                "artifacts" | "artifact" => config.include_artifacts = true,
                 "all" => {
                     config.include_thoughts = true;
                     config.include_tool_calls = true;
                     config.include_status = true;
+                    config.include_artifacts = true;
                 }
                 _ => {}
             }
         }
 
         // If no specific events are enabled, enable all
-        if !config.include_thoughts && !config.include_tool_calls && !config.include_status {
+        if !config.include_thoughts
+            && !config.include_tool_calls
+            && !config.include_status
+            && !config.include_artifacts
+        {
             config = Self::all_enabled();
         }
 
@@ -579,6 +742,12 @@ impl EnhancedStreamConfig {
     /// Returns true if status events should be emitted.
     pub fn should_emit_status(&self) -> bool {
         self.enabled && self.include_status
+    }
+
+    /// Returns true if artifact events should be emitted.
+    #[allow(dead_code)]
+    pub fn should_emit_artifacts(&self) -> bool {
+        self.enabled && self.include_artifacts
     }
 }
 
@@ -611,6 +780,9 @@ pub fn format_stream_event(event: &StreamEvent) -> String {
         StreamEvent::Text(e) => format_sse_event(&event_type, e),
         StreamEvent::Status(e) => format_sse_event(&event_type, e),
         StreamEvent::Finish(e) => format_sse_event(&event_type, e),
+        StreamEvent::ArtifactCreated(e) => format_sse_event(&event_type, e),
+        StreamEvent::ArtifactUpdated(e) => format_sse_event(&event_type, e),
+        StreamEvent::ArtifactDeleted(e) => format_sse_event(&event_type, e),
     }
 }
 
@@ -991,5 +1163,186 @@ mod tests {
         assert!(events[5].starts_with("event: status\n"));
         assert!(events[6].starts_with("event: finish\n"));
         assert!(events[7].starts_with("event: text\n"));
+    }
+
+    // ========================================================================
+    // Artifact Event Tests
+    // ========================================================================
+
+    #[test]
+    fn test_artifact_event_type_display() {
+        assert_eq!(
+            StreamEventType::ArtifactCreated.to_string(),
+            "artifact_created"
+        );
+        assert_eq!(
+            StreamEventType::ArtifactUpdated.to_string(),
+            "artifact_updated"
+        );
+        assert_eq!(
+            StreamEventType::ArtifactDeleted.to_string(),
+            "artifact_deleted"
+        );
+    }
+
+    #[test]
+    fn test_artifact_created_event_serialization() {
+        let event = ArtifactCreatedEvent::new(
+            "art_123",
+            "main.rs",
+            serde_json::json!({"code": {"language": "rust"}}),
+            "fn main() {\n    println!(\"Hello, world!\");\n}",
+            42,
+            "/v1/artifacts/art_123/download",
+        )
+        .with_subtask_id(1);
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"artifact_id\":\"art_123\""));
+        assert!(json.contains("\"title\":\"main.rs\""));
+        assert!(json.contains("\"size\":42"));
+        assert!(json.contains("\"subtask_id\":1"));
+        assert!(json.contains("\"url\":\"/v1/artifacts/art_123/download\""));
+    }
+
+    #[test]
+    fn test_artifact_created_event_preview_truncation() {
+        let long_content = "x".repeat(300);
+        let event = ArtifactCreatedEvent::new(
+            "art_456",
+            "large.txt",
+            serde_json::json!("text"),
+            &long_content,
+            300,
+            "/v1/artifacts/art_456/download",
+        );
+
+        // Preview should be truncated to 200 chars + "..."
+        assert_eq!(event.preview.len(), 203);
+        assert!(event.preview.ends_with("..."));
+    }
+
+    #[test]
+    fn test_artifact_updated_event_serialization() {
+        let event = ArtifactUpdatedEvent::new("art_123", 2, "updated content here")
+            .with_change_description("Fixed bug in main function")
+            .with_subtask_id(1);
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"artifact_id\":\"art_123\""));
+        assert!(json.contains("\"version\":2"));
+        assert!(json.contains("\"preview\":\"updated content here\""));
+        assert!(json.contains("\"change_description\":\"Fixed bug in main function\""));
+        assert!(json.contains("\"subtask_id\":1"));
+    }
+
+    #[test]
+    fn test_artifact_deleted_event_serialization() {
+        let event = ArtifactDeletedEvent::new("art_789").with_subtask_id(2);
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"artifact_id\":\"art_789\""));
+        assert!(json.contains("\"subtask_id\":2"));
+    }
+
+    #[test]
+    fn test_stream_event_artifact_types() {
+        let created = StreamEvent::ArtifactCreated(ArtifactCreatedEvent::new(
+            "art_1",
+            "file.txt",
+            serde_json::json!("text"),
+            "content",
+            7,
+            "/download",
+        ));
+        assert_eq!(created.event_type(), StreamEventType::ArtifactCreated);
+
+        let updated =
+            StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new("art_1", 2, "new content"));
+        assert_eq!(updated.event_type(), StreamEventType::ArtifactUpdated);
+
+        let deleted = StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new("art_1"));
+        assert_eq!(deleted.event_type(), StreamEventType::ArtifactDeleted);
+    }
+
+    #[test]
+    fn test_format_artifact_events() {
+        let created_event = StreamEvent::ArtifactCreated(ArtifactCreatedEvent::new(
+            "art_001",
+            "script.py",
+            serde_json::json!({"code": {"language": "python"}}),
+            "print('hello')",
+            14,
+            "/v1/artifacts/art_001/download",
+        ));
+        let sse = format_stream_event(&created_event);
+        assert!(sse.starts_with("event: artifact_created\n"));
+        assert!(sse.contains("\"artifact_id\":\"art_001\""));
+
+        let updated_event = StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new(
+            "art_001",
+            2,
+            "print('hello world')",
+        ));
+        let sse = format_stream_event(&updated_event);
+        assert!(sse.starts_with("event: artifact_updated\n"));
+        assert!(sse.contains("\"version\":2"));
+
+        let deleted_event = StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new("art_001"));
+        let sse = format_stream_event(&deleted_event);
+        assert!(sse.starts_with("event: artifact_deleted\n"));
+        assert!(sse.contains("\"artifact_id\":\"art_001\""));
+    }
+
+    #[test]
+    fn test_enhanced_stream_config_with_artifacts() {
+        let config = EnhancedStreamConfig::parse("artifacts");
+        assert!(config.enabled);
+        assert!(config.include_artifacts);
+        assert!(!config.include_thoughts);
+        assert!(!config.include_tool_calls);
+        assert!(!config.include_status);
+
+        let config = EnhancedStreamConfig::parse("thoughts,artifacts");
+        assert!(config.enabled);
+        assert!(config.include_thoughts);
+        assert!(config.include_artifacts);
+        assert!(!config.include_tool_calls);
+
+        let config = EnhancedStreamConfig::all_enabled();
+        assert!(config.should_emit_artifacts());
+
+        let config = EnhancedStreamConfig::disabled();
+        assert!(!config.should_emit_artifacts());
+    }
+
+    #[test]
+    fn test_artifact_event_sequence() {
+        // Simulate artifact lifecycle events
+        let events = vec![
+            format_stream_event(&StreamEvent::ArtifactCreated(ArtifactCreatedEvent::new(
+                "art_001",
+                "main.rs",
+                serde_json::json!({"code": {"language": "rust"}}),
+                "fn main() {}",
+                12,
+                "/v1/artifacts/art_001/download",
+            ))),
+            format_stream_event(&StreamEvent::ArtifactUpdated(
+                ArtifactUpdatedEvent::new("art_001", 2, "fn main() { println!(\"Hi\"); }")
+                    .with_change_description("Added print statement"),
+            )),
+            format_stream_event(&StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new(
+                "art_001",
+            ))),
+        ];
+
+        assert!(events[0].starts_with("event: artifact_created\n"));
+        assert!(events[1].starts_with("event: artifact_updated\n"));
+        assert!(events[2].starts_with("event: artifact_deleted\n"));
+
+        for event in &events {
+            assert!(event.ends_with("\n\n"));
+        }
     }
 }
