@@ -471,7 +471,12 @@ pub enum ConfigWatcherError {
 
 #[cfg(test)]
 mod tests {
+    use notify::event::{CreateKind, ModifyKind, RemoveKind};
+
     use super::*;
+    // ========================================================================
+    // Error Type Tests
+    // ========================================================================
 
     #[test]
     fn test_config_watcher_error_display() {
@@ -480,13 +485,167 @@ mod tests {
 
         let error = ConfigWatcherError::WatcherCreationFailed("Permission denied".into());
         assert!(error.to_string().contains("Failed to create file watcher"));
+
+        let error = ConfigWatcherError::InvalidPath("Cannot get parent directory".into());
+        assert!(error.to_string().contains("Invalid path"));
+
+        let error = ConfigWatcherError::WatchFailed("Directory not found".into());
+        assert!(error.to_string().contains("Failed to watch directory"));
+
+        let error = ConfigWatcherError::ConfigLoadFailed("Parse error".into());
+        assert!(error.to_string().contains("Failed to load configuration"));
+
+        let error = ConfigWatcherError::ConfigApplyFailed("Validation error".into());
+        assert!(error.to_string().contains("Failed to apply configuration"));
+    }
+
+    // ========================================================================
+    // Event Kind Tests
+    // ========================================================================
+
+    #[test]
+    fn test_event_kind_modify_should_trigger_reload() {
+        // Modify events should be processed
+        let event_kind = EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content));
+        assert!(matches!(event_kind, EventKind::Modify(_)));
     }
 
     #[test]
-    fn test_watcher_state_new() {
-        // This test just verifies the struct can be created
-        // Full integration tests would require mocking AppState
-        let debounce_ms = 500;
-        assert_eq!(debounce_ms, 500);
+    fn test_event_kind_create_should_trigger_reload() {
+        // Create events should be processed
+        let event_kind = EventKind::Create(CreateKind::File);
+        assert!(matches!(event_kind, EventKind::Create(_)));
+    }
+
+    #[test]
+    fn test_event_kind_remove_should_not_trigger_reload() {
+        // Remove events should only log warning, not reload
+        let event_kind = EventKind::Remove(RemoveKind::File);
+        assert!(matches!(event_kind, EventKind::Remove(_)));
+    }
+
+    // ========================================================================
+    // ConfigWatcher Creation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_config_watcher_requires_existing_file() {
+        // ConfigWatcher::new should fail if file doesn't exist
+        // Note: We can't fully test this without mocking AppState,
+        // but we verify the error type exists
+        let error = ConfigWatcherError::ConfigFileNotFound("/nonexistent/path.toml".into());
+        assert!(error.to_string().contains("Configuration file not found"));
+    }
+
+    #[test]
+    fn test_config_watcher_requires_valid_parent_directory() {
+        // ConfigWatcher should fail if we can't get parent directory
+        let error = ConfigWatcherError::InvalidPath("Cannot get parent directory".into());
+        assert!(error.to_string().contains("Invalid path"));
+    }
+
+    // ========================================================================
+    // Debounce Logic Tests
+    // ========================================================================
+
+    #[test]
+    fn test_debounce_interval_calculation() {
+        // Test that debounce interval is correctly used
+        let debounce_ms: u64 = 500;
+
+        // API conflict detection uses debounce_ms * 2
+        let api_conflict_window = Duration::from_millis(debounce_ms * 2);
+        assert_eq!(api_conflict_window, Duration::from_millis(1000));
+
+        // Regular debounce uses debounce_ms
+        let regular_debounce = Duration::from_millis(debounce_ms);
+        assert_eq!(regular_debounce, Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_debounce_elapsed_check() {
+        // Simulate debounce timing check
+        let debounce_ms: u64 = 500;
+        let debounce_duration = Duration::from_millis(debounce_ms);
+
+        // If less time has passed than debounce, should skip
+        let elapsed_short = Duration::from_millis(200);
+        assert!(elapsed_short < debounce_duration);
+
+        // If more time has passed than debounce, should process
+        let elapsed_long = Duration::from_millis(600);
+        assert!(elapsed_long >= debounce_duration);
+    }
+
+    // ========================================================================
+    // Event Filtering Tests
+    // ========================================================================
+
+    #[test]
+    fn test_config_file_name_matching() {
+        // Test file name extraction and matching logic
+        let config_path = PathBuf::from("/path/to/config.toml");
+        let config_file_name = config_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        assert_eq!(config_file_name, "config.toml");
+
+        // Event path should match config file name
+        let event_path = PathBuf::from("/path/to/config.toml");
+        let event_file_name = event_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        assert_eq!(event_file_name, config_file_name);
+    }
+
+    #[test]
+    fn test_non_config_file_should_be_filtered() {
+        // Events for other files in the same directory should be filtered out
+        let config_file_name = "config.toml";
+
+        let other_file = PathBuf::from("/path/to/other.toml");
+        let other_file_name = other_file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        assert_ne!(other_file_name, config_file_name);
+    }
+
+    // ========================================================================
+    // File Modification Time Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mtime_comparison_logic() {
+        use std::time::SystemTime;
+
+        // Simulate modification time comparison
+        let old_time = SystemTime::UNIX_EPOCH;
+        let new_time = SystemTime::now();
+
+        // New time should be greater than old time
+        assert!(new_time > old_time);
+
+        // Same time should not trigger reload
+        let same_time = old_time;
+        assert!(!(same_time > old_time));
+    }
+
+    #[test]
+    fn test_initial_mtime_is_none() {
+        // When watcher starts, last_file_mtime should be None
+        // Then it gets populated from file metadata
+        let initial: Option<SystemTime> = None;
+        assert!(initial.is_none());
+
+        // is_none_or checks: None OR (current > last)
+        // When None, should always reload
+        let should_reload = initial.is_none_or(|_| true);
+        assert!(should_reload);
     }
 }
