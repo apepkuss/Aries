@@ -382,14 +382,42 @@ async fn main() -> ServerResult<()> {
                 })?;
             }
 
+            let artifact_config = artifacts::ArtifactConfig {
+                max_content_size: art_config.max_content_size,
+                max_versions: art_config.max_versions,
+                storage_path: art_config.storage_path.clone(),
+                retention_days: art_config.retention_days,
+                cleanup_interval_secs: art_config.cleanup_interval_secs,
+                soft_delete_retention_days: art_config.soft_delete_retention_days,
+                enable_cleanup: art_config.enable_cleanup,
+            };
+
             let artifacts_state = Arc::new(artifacts::ArtifactsState::new(
                 art_config.database_path.clone(),
-                artifacts::ArtifactConfig {
-                    max_content_size: art_config.max_content_size,
-                    max_versions: art_config.max_versions,
-                    storage_path: art_config.storage_path.clone(),
-                },
+                artifact_config.clone(),
             ));
+
+            // Start artifact cleaner if enabled
+            if art_config.enable_cleanup {
+                let cleaner_state = Arc::clone(&artifacts_state);
+                tokio::spawn(async move {
+                    // Wait for store initialization before starting cleaner
+                    match cleaner_state.get_store().await {
+                        Ok(store) => {
+                            let cleaner = artifacts::ArtifactCleaner::new(
+                                store,
+                                cleaner_state.config().clone(),
+                            );
+                            // Start returns a JoinHandle for the background task
+                            let _handle = cleaner.start();
+                            dual_info!("Artifact cleaner started");
+                        }
+                        Err(e) => {
+                            dual_error!("Failed to initialize artifact cleaner: {}", e);
+                        }
+                    }
+                });
+            }
 
             let router = Router::new()
                 .route(

@@ -75,6 +75,11 @@ impl ArtifactsState {
 
         Ok(self.store.get().map(Arc::clone).unwrap_or(store))
     }
+
+    /// Get the configuration
+    pub fn config(&self) -> &ArtifactConfig {
+        &self.config
+    }
 }
 
 // ============================================================================

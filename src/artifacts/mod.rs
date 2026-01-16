@@ -25,12 +25,15 @@
 //! }, None).await?;
 //! ```
 
+mod cleaner;
 mod handlers;
 mod service;
 mod storage;
 mod store;
 mod types;
 
+#[allow(unused_imports)]
+pub use cleaner::{ArtifactCleaner, CleanupStats};
 pub use handlers::{
     ArtifactsState, create_artifact_handler, delete_artifact_handler, download_artifact_handler,
     get_artifact_handler, get_version_content_handler, list_artifacts_by_conversation_handler,

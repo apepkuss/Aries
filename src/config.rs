@@ -1073,6 +1073,23 @@ pub struct ArtifactsConfig {
     /// Maximum versions to keep per artifact (default: 10)
     #[serde(default = "default_artifacts_max_versions")]
     pub max_versions: i32,
+
+    // ========== Lifecycle Configuration ==========
+    /// Artifact retention days (0 = never expire, default: 30)
+    #[serde(default = "default_artifacts_retention_days")]
+    pub retention_days: u32,
+
+    /// Cleanup interval in seconds (default: 3600 = 1 hour)
+    #[serde(default = "default_artifacts_cleanup_interval")]
+    pub cleanup_interval_secs: u64,
+
+    /// Days to keep soft-deleted artifacts before physical deletion (default: 7)
+    #[serde(default = "default_artifacts_soft_delete_retention")]
+    pub soft_delete_retention_days: u32,
+
+    /// Enable automatic cleanup (default: true)
+    #[serde(default = "default_artifacts_enable_cleanup")]
+    pub enable_cleanup: bool,
 }
 
 fn default_artifacts_enabled() -> bool {
@@ -1091,6 +1108,22 @@ fn default_artifacts_max_versions() -> i32 {
     10
 }
 
+fn default_artifacts_retention_days() -> u32 {
+    30
+}
+
+fn default_artifacts_cleanup_interval() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_artifacts_soft_delete_retention() -> u32 {
+    7
+}
+
+fn default_artifacts_enable_cleanup() -> bool {
+    true
+}
+
 impl Default for ArtifactsConfig {
     fn default() -> Self {
         Self {
@@ -1099,6 +1132,10 @@ impl Default for ArtifactsConfig {
             storage_path: None,
             max_content_size: default_artifacts_max_size(),
             max_versions: default_artifacts_max_versions(),
+            retention_days: default_artifacts_retention_days(),
+            cleanup_interval_secs: default_artifacts_cleanup_interval(),
+            soft_delete_retention_days: default_artifacts_soft_delete_retention(),
+            enable_cleanup: default_artifacts_enable_cleanup(),
         }
     }
 }

@@ -60,6 +60,17 @@ pub struct ArtifactConfig {
     pub max_versions: i32,
     /// Storage path for file system backend
     pub storage_path: Option<String>,
+
+    // ========== Lifecycle Configuration ==========
+    /// Artifact retention days (0 = never expire, default: 30)
+    pub retention_days: u32,
+    /// Cleanup interval in seconds (default: 3600 = 1 hour)
+    pub cleanup_interval_secs: u64,
+    /// Days to keep soft-deleted artifacts before physical deletion (default: 7)
+    pub soft_delete_retention_days: u32,
+    /// Enable automatic cleanup (default: true)
+    #[allow(dead_code)]
+    pub enable_cleanup: bool,
 }
 
 impl Default for ArtifactConfig {
@@ -68,6 +79,10 @@ impl Default for ArtifactConfig {
             max_content_size: 1024 * 1024, // 1MB
             max_versions: 10,
             storage_path: None,
+            retention_days: 30,
+            cleanup_interval_secs: 3600, // 1 hour
+            soft_delete_retention_days: 7,
+            enable_cleanup: true,
         }
     }
 }
@@ -690,6 +705,26 @@ impl ArtifactStore {
 
         Ok(())
     }
+
+    // ========================================================================
+    // Accessors for internal components (used by cleaner)
+    // ========================================================================
+
+    /// Returns a reference to the database pool
+    pub fn pool(&self) -> &SqlitePool {
+        &self.pool
+    }
+
+    /// Returns a reference to the storage backend
+    pub fn storage(&self) -> &Arc<dyn ArtifactStorage> {
+        &self.storage
+    }
+
+    /// Returns the configuration
+    #[allow(dead_code)]
+    pub fn config(&self) -> &ArtifactConfig {
+        &self.config
+    }
 }
 
 // ============================================================================
@@ -1190,6 +1225,7 @@ mod tests {
             max_content_size: 1024 * 1024,
             max_versions: 3,
             storage_path: None,
+            ..Default::default()
         };
         let store = ArtifactStore::new(pool, config).await.unwrap();
 
