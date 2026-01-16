@@ -4,15 +4,23 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
 
 use super::{
     sanitize::Sanitize,
     types::{
-        ConfigSchemaResponse, ConfigSchemaSection, FieldSchema, SanitizedConfig, UPDATABLE_FIELDS,
+        ConfigSchemaResponse, ConfigSchemaSection, ConfigUpdateRequest, ConfigUpdateResponse,
+        FieldSchema, SanitizedConfig,
     },
+    update::apply_config_update,
+    validate::validate_config_update,
 };
-use crate::{AppState, dual_info};
+use crate::{AppState, dual_info, dual_warn};
 
 // ============================================================================
 // GET /v1/config - Get current configuration
@@ -121,6 +129,110 @@ pub async fn get_config_schema_handler(headers: HeaderMap) -> Json<ConfigSchemaR
     );
 
     Json(schema)
+}
+
+// ============================================================================
+// POST /v1/config - Update configuration
+// ============================================================================
+
+/// POST /v1/config - Update configuration fields
+///
+/// Updates specified configuration fields at runtime. Only fields listed in
+/// `updatable_fields` can be modified. Some fields may trigger side effects
+/// like service reloading.
+///
+/// # Request Body
+///
+/// A `ConfigUpdateRequest` JSON object containing the fields to update.
+/// Only include the fields you want to modify.
+///
+/// # Response
+///
+/// Returns a `ConfigUpdateResponse` JSON object containing:
+/// - `success`: Whether all requested updates succeeded
+/// - `updated_fields`: List of fields that were successfully updated
+/// - `failed_fields`: Map of fields that failed with error messages
+/// - `requires_action`: Side effects triggered by the updates
+///
+/// # Example Request
+///
+/// ```json
+/// {
+///   "server": {
+///     "max_tools_per_iteration": 10
+///   },
+///   "memory": {
+///     "auto_summarize": false
+///   }
+/// }
+/// ```
+///
+/// # Example Response
+///
+/// ```json
+/// {
+///   "success": true,
+///   "updated_fields": ["server.max_tools_per_iteration", "memory.auto_summarize"],
+///   "message": "Configuration updated successfully: 2 field(s)"
+/// }
+/// ```
+pub async fn update_config_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<ConfigUpdateRequest>,
+) -> impl IntoResponse {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!("Updating configuration - request_id: {}", request_id);
+
+    // Step 1: Validate the update request
+    let validation_result = validate_config_update(&request);
+
+    if !validation_result.errors.is_empty() {
+        dual_warn!(
+            "Configuration update validation failed - request_id: {} - errors: {:?}",
+            request_id,
+            validation_result.errors
+        );
+
+        let mut failed_fields = HashMap::new();
+        for error in validation_result.errors {
+            failed_fields.insert(error.field, error.message);
+        }
+
+        let response = ConfigUpdateResponse::partial(Vec::new(), failed_fields);
+        return (StatusCode::BAD_REQUEST, Json(response));
+    }
+
+    // Step 2: Apply the updates
+    let mut config = state.config.write().await;
+    let update_result = apply_config_update(&mut config, &request, &validation_result.valid_fields);
+
+    // Step 3: Build response
+    let response = update_result.into_response();
+
+    let status = if response.success {
+        dual_info!(
+            "Configuration updated successfully - request_id: {} - fields: {:?}",
+            request_id,
+            response.updated_fields
+        );
+        StatusCode::OK
+    } else {
+        dual_warn!(
+            "Configuration update partially failed - request_id: {} - updated: {:?}, failed: {:?}",
+            request_id,
+            response.updated_fields,
+            response.failed_fields
+        );
+        StatusCode::PARTIAL_CONTENT
+    };
+
+    (status, Json(response))
 }
 
 /// Build the configuration schema with all field definitions
@@ -376,22 +488,13 @@ fn build_config_schema() -> ConfigSchemaResponse {
 }
 
 // ============================================================================
-// Helper functions
-// ============================================================================
-
-/// Check if a field path is in the updatable list
-#[allow(dead_code)]
-pub fn is_field_updatable(field_path: &str) -> bool {
-    UPDATABLE_FIELDS.contains(&field_path)
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_api::validate::is_field_updatable;
 
     #[test]
     fn test_is_field_updatable() {

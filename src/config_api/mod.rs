@@ -39,5 +39,7 @@
 mod handlers;
 mod sanitize;
 mod types;
+mod update;
+mod validate;
 
-pub use handlers::{get_config_handler, get_config_schema_handler};
+pub use handlers::{get_config_handler, get_config_schema_handler, update_config_handler};

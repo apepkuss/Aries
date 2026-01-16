@@ -290,7 +290,10 @@ async fn main() -> ServerResult<()> {
             get(capabilities::get_capabilities_handler),
         )
         // Configuration management endpoints
-        .route("/v1/config", get(config_api::get_config_handler))
+        .route(
+            "/v1/config",
+            get(config_api::get_config_handler).post(config_api::update_config_handler),
+        )
         .route(
             "/v1/config/schema",
             get(config_api::get_config_schema_handler),
