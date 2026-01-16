@@ -196,6 +196,38 @@ impl ArtifactStore {
         .execute(&self.pool)
         .await?;
 
+        // Index for cleanup operations: find expired artifacts
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_artifacts_cleanup
+            ON artifacts(is_deleted, updated_at)
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Index for title search within conversations
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_artifacts_title
+            ON artifacts(title, conversation_id)
+            WHERE is_deleted = 0
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Index for artifact type queries
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_artifacts_type
+            ON artifacts(artifact_type, conversation_id)
+            WHERE is_deleted = 0
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -1302,6 +1334,277 @@ mod tests {
         assert_eq!(
             versions[1].change_description.as_deref(),
             Some("Initial version")
+        );
+    }
+
+    // ========================================================================
+    // Performance Tests (P5.4)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_perf_batch_create() {
+        let store = setup_test_store().await;
+        let count = 100;
+
+        let start = std::time::Instant::now();
+
+        for i in 0..count {
+            let request = CreateArtifactRequest {
+                conversation_id: format!("conv_{}", i % 10),
+                title: format!("artifact_{}.txt", i),
+                description: Some(format!("Test artifact {}", i)),
+                artifact_type: ArtifactType::Text,
+                content: format!("Content for artifact {}", i),
+            };
+            store.create(request, None).await.unwrap();
+        }
+
+        let elapsed = start.elapsed();
+        let avg_ms = elapsed.as_millis() as f64 / count as f64;
+
+        println!(
+            "Created {} artifacts in {:?} (avg: {:.2}ms per artifact)",
+            count, elapsed, avg_ms
+        );
+
+        // Performance assertion: should average less than 50ms per artifact
+        assert!(
+            avg_ms < 50.0,
+            "Average create time {:.2}ms exceeds 50ms threshold",
+            avg_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn test_perf_batch_read() {
+        let store = setup_test_store().await;
+        let count = 100;
+
+        // Create artifacts first
+        let mut ids = Vec::new();
+        for i in 0..count {
+            let request = CreateArtifactRequest {
+                conversation_id: "conv_perf".to_string(),
+                title: format!("read_test_{}.txt", i),
+                description: None,
+                artifact_type: ArtifactType::Text,
+                content: format!("Content {}", i),
+            };
+            let artifact = store.create(request, None).await.unwrap();
+            ids.push(artifact.id);
+        }
+
+        // Benchmark reads
+        let start = std::time::Instant::now();
+
+        for id in &ids {
+            store.get_with_content(id).await.unwrap();
+        }
+
+        let elapsed = start.elapsed();
+        let avg_ms = elapsed.as_millis() as f64 / count as f64;
+
+        println!(
+            "Read {} artifacts in {:?} (avg: {:.2}ms per read)",
+            count, elapsed, avg_ms
+        );
+
+        // Performance assertion: should average less than 20ms per read
+        assert!(
+            avg_ms < 20.0,
+            "Average read time {:.2}ms exceeds 20ms threshold",
+            avg_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn test_perf_list_by_conversation() {
+        let store = setup_test_store().await;
+        let artifacts_per_conv = 50;
+        let conversations = 5;
+
+        // Create artifacts across multiple conversations
+        for conv_idx in 0..conversations {
+            for art_idx in 0..artifacts_per_conv {
+                let request = CreateArtifactRequest {
+                    conversation_id: format!("conv_{}", conv_idx),
+                    title: format!("art_{}_{}.txt", conv_idx, art_idx),
+                    description: None,
+                    artifact_type: ArtifactType::Text,
+                    content: format!("Content {} {}", conv_idx, art_idx),
+                };
+                store.create(request, None).await.unwrap();
+            }
+        }
+
+        // Benchmark list operations
+        let iterations = 20;
+        let start = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            for conv_idx in 0..conversations {
+                let (artifacts, total) = store
+                    .list_by_conversation(&format!("conv_{}", conv_idx), 100, 0)
+                    .await
+                    .unwrap();
+                assert_eq!(artifacts.len(), artifacts_per_conv);
+                assert_eq!(total, artifacts_per_conv as i64);
+            }
+        }
+
+        let elapsed = start.elapsed();
+        let total_queries = iterations * conversations;
+        let avg_ms = elapsed.as_millis() as f64 / total_queries as f64;
+
+        println!(
+            "Listed {} queries in {:?} (avg: {:.2}ms per list)",
+            total_queries, elapsed, avg_ms
+        );
+
+        // Performance assertion: should average less than 10ms per list
+        assert!(
+            avg_ms < 10.0,
+            "Average list time {:.2}ms exceeds 10ms threshold",
+            avg_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn test_perf_version_operations() {
+        let store = setup_test_store().await;
+        let version_count = 20;
+
+        // Create artifact with multiple versions
+        let request = CreateArtifactRequest {
+            conversation_id: "conv_version_perf".to_string(),
+            title: "versioned.txt".to_string(),
+            description: None,
+            artifact_type: ArtifactType::Text,
+            content: "Version 1".to_string(),
+        };
+        let artifact = store.create(request, None).await.unwrap();
+
+        // Create multiple versions
+        for i in 2..=version_count {
+            store
+                .update(
+                    &artifact.id,
+                    UpdateArtifactRequest {
+                        title: None,
+                        description: None,
+                        content: Some(format!("Version {} with more content here", i)),
+                        change_description: Some(format!("Update to version {}", i)),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        // Benchmark get_versions
+        let iterations = 50;
+        let start = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            let versions = store.get_versions(&artifact.id).await.unwrap();
+            assert!(!versions.is_empty());
+        }
+
+        let elapsed = start.elapsed();
+        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+
+        println!(
+            "get_versions {} iterations in {:?} (avg: {:.2}ms)",
+            iterations, elapsed, avg_ms
+        );
+
+        // Performance assertion: should average less than 5ms
+        assert!(
+            avg_ms < 5.0,
+            "Average get_versions time {:.2}ms exceeds 5ms threshold",
+            avg_ms
+        );
+
+        // Benchmark get_version_content
+        let start = std::time::Instant::now();
+
+        for _ in 0..iterations {
+            // Read random version
+            let version = (iterations % version_count) as i32 + 1;
+            store
+                .get_version_content(&artifact.id, version)
+                .await
+                .unwrap();
+        }
+
+        let elapsed = start.elapsed();
+        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
+
+        println!(
+            "get_version_content {} iterations in {:?} (avg: {:.2}ms)",
+            iterations, elapsed, avg_ms
+        );
+
+        // Performance assertion: should average less than 10ms
+        assert!(
+            avg_ms < 10.0,
+            "Average get_version_content time {:.2}ms exceeds 10ms threshold",
+            avg_ms
+        );
+    }
+
+    #[tokio::test]
+    async fn test_perf_concurrent_access() {
+        use std::sync::Arc;
+
+        let store = Arc::new(setup_test_store().await);
+
+        // Create some artifacts first
+        for i in 0..10 {
+            let request = CreateArtifactRequest {
+                conversation_id: "conv_concurrent".to_string(),
+                title: format!("concurrent_{}.txt", i),
+                description: None,
+                artifact_type: ArtifactType::Text,
+                content: format!("Content {}", i),
+            };
+            store.create(request, None).await.unwrap();
+        }
+
+        // Simulate concurrent reads
+        let start = std::time::Instant::now();
+        let tasks: Vec<_> = (0..50)
+            .map(|_| {
+                let store_clone = Arc::clone(&store);
+                tokio::spawn(async move {
+                    store_clone
+                        .list_by_conversation("conv_concurrent", 100, 0)
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect();
+
+        let mut total_artifacts = 0;
+        for task in tasks {
+            let (artifacts, _) = task.await.unwrap();
+            total_artifacts += artifacts.len();
+        }
+
+        let elapsed = start.elapsed();
+
+        println!(
+            "50 concurrent list operations completed in {:?}, total artifacts: {}",
+            elapsed, total_artifacts
+        );
+
+        // All should return 10 artifacts
+        assert_eq!(total_artifacts, 50 * 10);
+
+        // Should complete within reasonable time (500ms for 50 concurrent ops)
+        assert!(
+            elapsed.as_millis() < 500,
+            "Concurrent operations took too long: {:?}",
+            elapsed
         );
     }
 }

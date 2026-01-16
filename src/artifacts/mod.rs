@@ -25,6 +25,7 @@
 //! }, None).await?;
 //! ```
 
+mod cache;
 mod cleaner;
 mod handlers;
 mod service;
@@ -32,6 +33,8 @@ mod storage;
 mod store;
 mod types;
 
+#[allow(unused_imports)]
+pub use cache::{ArtifactCache, CacheStats};
 #[allow(unused_imports)]
 pub use cleaner::{ArtifactCleaner, CleanupStats};
 pub use handlers::{
