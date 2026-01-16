@@ -12,12 +12,14 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
 };
+use tokio_util::io::ReaderStream;
 
-use super::{ArtifactStorage, StorageStats};
+use super::{ArtifactStorage, ByteStream, StorageStats};
 use crate::artifacts::{ArtifactError, ArtifactResult};
 
 /// Default buffer size for I/O operations (64KB)
@@ -294,6 +296,78 @@ impl ArtifactStorage for FileSystemStorage {
     fn backend_name(&self) -> &'static str {
         "filesystem"
     }
+
+    async fn read_range(
+        &self,
+        artifact_id: &str,
+        version: i32,
+        offset: u64,
+        length: Option<u64>,
+    ) -> ArtifactResult<Vec<u8>> {
+        // Delegate to the inherent method
+        FileSystemStorage::read_range(self, artifact_id, version, offset, length).await
+    }
+
+    async fn file_size(&self, artifact_id: &str, version: i32) -> ArtifactResult<u64> {
+        // Delegate to the inherent method
+        FileSystemStorage::file_size(self, artifact_id, version).await
+    }
+
+    async fn store_stream(
+        &self,
+        artifact_id: &str,
+        version: i32,
+        mut stream: ByteStream,
+    ) -> ArtifactResult<u64> {
+        let path = self.file_path(artifact_id, version);
+
+        // Ensure directory exists
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        // Write to temporary file first for atomicity
+        let temp_path = path.with_extension("tmp");
+        let file = fs::File::create(&temp_path).await?;
+        let mut writer = BufWriter::with_capacity(DEFAULT_BUFFER_SIZE, file);
+        let mut total_bytes = 0u64;
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            writer.write_all(&chunk).await?;
+            total_bytes += chunk.len() as u64;
+        }
+
+        writer.flush().await?;
+        drop(writer);
+
+        // Atomic rename
+        fs::rename(&temp_path, &path).await?;
+
+        Ok(total_bytes)
+    }
+
+    async fn read_stream(
+        &self,
+        artifact_id: &str,
+        version: i32,
+        chunk_size: usize,
+    ) -> ArtifactResult<ByteStream> {
+        let path = self.file_path(artifact_id, version);
+
+        if !path.exists() {
+            return Err(ArtifactError::VersionNotFound(
+                artifact_id.to_string(),
+                version,
+            ));
+        }
+
+        let file = fs::File::open(&path).await?;
+        let reader = BufReader::with_capacity(chunk_size, file);
+        let stream = ReaderStream::with_capacity(reader, chunk_size);
+
+        Ok(Box::pin(stream))
+    }
 }
 
 // ============================================================================
@@ -302,6 +376,7 @@ impl ArtifactStorage for FileSystemStorage {
 
 #[cfg(test)]
 mod tests {
+    use futures_util::StreamExt;
     use tempfile::TempDir;
 
     use super::*;
@@ -525,5 +600,151 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(middle.len(), 1024);
+    }
+
+    // ========================================================================
+    // Streaming Tests (Phase 6)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_store_stream() {
+        use bytes::Bytes;
+
+        let (storage, _temp) = create_test_storage().await;
+
+        // Create a stream of chunks
+        let chunks = vec![
+            Ok(Bytes::from("Hello, ")),
+            Ok(Bytes::from("World!")),
+            Ok(Bytes::from(" This is streaming.")),
+        ];
+        let stream: super::ByteStream = Box::pin(futures_util::stream::iter(chunks.into_iter()));
+
+        // Store from stream
+        let bytes_written = storage
+            .store_stream("stream_test", 1, stream)
+            .await
+            .unwrap();
+        // "Hello, " (7) + "World!" (6) + " This is streaming." (19) = 32 bytes
+        assert_eq!(bytes_written, 32);
+
+        // Verify content
+        let content = storage.read("stream_test", 1).await.unwrap();
+        assert_eq!(content, b"Hello, World! This is streaming.");
+    }
+
+    #[tokio::test]
+    async fn test_read_stream() {
+        let (storage, _temp) = create_test_storage().await;
+
+        // Store some content
+        let original = b"This is test content for streaming read.";
+        storage
+            .store("read_stream_test", 1, original)
+            .await
+            .unwrap();
+
+        // Read as stream
+        let mut stream = storage
+            .read_stream("read_stream_test", 1, 10)
+            .await
+            .unwrap();
+
+        // Collect all chunks
+        let mut collected = Vec::new();
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.unwrap();
+            collected.extend_from_slice(&chunk);
+        }
+
+        assert_eq!(collected, original);
+    }
+
+    #[tokio::test]
+    async fn test_read_stream_large_file() {
+        let (storage, _temp) = create_test_storage().await;
+
+        // Create a 100KB file
+        let content: Vec<u8> = (0..100 * 1024).map(|i| (i % 256) as u8).collect();
+        storage.store("large_stream", 1, &content).await.unwrap();
+
+        // Read with 16KB chunks
+        let mut stream = storage
+            .read_stream("large_stream", 1, 16 * 1024)
+            .await
+            .unwrap();
+
+        let mut collected = Vec::new();
+        let mut chunk_count = 0;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.unwrap();
+            collected.extend_from_slice(&chunk);
+            chunk_count += 1;
+        }
+
+        assert_eq!(collected.len(), content.len());
+        assert_eq!(collected, content);
+        // Should have multiple chunks (100KB / 16KB = ~7 chunks)
+        assert!(chunk_count > 1);
+    }
+
+    #[tokio::test]
+    async fn test_read_stream_nonexistent() {
+        let (storage, _temp) = create_test_storage().await;
+
+        let result = storage.read_stream("nonexistent", 1, 1024).await;
+        assert!(matches!(result, Err(ArtifactError::VersionNotFound(_, _))));
+    }
+
+    #[tokio::test]
+    async fn test_store_stream_empty() {
+        let (storage, _temp) = create_test_storage().await;
+
+        // Empty stream
+        let stream: super::ByteStream = Box::pin(futures_util::stream::empty());
+
+        let bytes_written = storage
+            .store_stream("empty_stream", 1, stream)
+            .await
+            .unwrap();
+        assert_eq!(bytes_written, 0);
+
+        // Verify empty file exists
+        assert!(storage.exists("empty_stream", 1).await.unwrap());
+        let content = storage.read("empty_stream", 1).await.unwrap();
+        assert!(content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_trait_read_range() {
+        // Test read_range through the trait interface
+        let (storage, _temp) = create_test_storage().await;
+        let storage: &dyn ArtifactStorage = &storage;
+
+        storage
+            .store("trait_range", 1, b"0123456789")
+            .await
+            .unwrap();
+
+        let result = storage
+            .read_range("trait_range", 1, 3, Some(4))
+            .await
+            .unwrap();
+        assert_eq!(result, b"3456");
+    }
+
+    #[tokio::test]
+    async fn test_trait_file_size() {
+        // Test file_size through the trait interface
+        let (storage, _temp) = create_test_storage().await;
+        let storage: &dyn ArtifactStorage = &storage;
+
+        storage
+            .store("trait_size", 1, b"Hello, World!")
+            .await
+            .unwrap();
+
+        let size = storage.file_size("trait_size", 1).await.unwrap();
+        assert_eq!(size, 13);
     }
 }

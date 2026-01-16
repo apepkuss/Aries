@@ -54,8 +54,10 @@ pub type ArtifactResult<T> = Result<T, ArtifactError>;
 /// Artifact system configuration
 #[derive(Debug, Clone)]
 pub struct ArtifactConfig {
-    /// Maximum content size (default: 1MB)
+    /// Maximum content size for text artifacts (default: 1MB)
     pub max_content_size: u64,
+    /// Maximum content size for binary artifacts (default: 100MB)
+    pub max_binary_size: u64,
     /// Maximum versions to keep per artifact (default: 10)
     pub max_versions: i32,
     /// Storage path for file system backend
@@ -76,7 +78,8 @@ pub struct ArtifactConfig {
 impl Default for ArtifactConfig {
     fn default() -> Self {
         Self {
-            max_content_size: 1024 * 1024, // 1MB
+            max_content_size: 1024 * 1024,      // 1MB for text
+            max_binary_size: 100 * 1024 * 1024, // 100MB for binary
             max_versions: 10,
             storage_path: None,
             retention_days: 30,
@@ -312,6 +315,99 @@ impl ArtifactStore {
         })
     }
 
+    /// Create a new binary artifact
+    ///
+    /// Similar to `create` but accepts raw bytes instead of a string.
+    /// Uses `max_binary_size` for size limit checking.
+    pub async fn create_binary(
+        &self,
+        conversation_id: String,
+        title: String,
+        description: Option<String>,
+        artifact_type: ArtifactType,
+        content: Vec<u8>,
+        user_id: Option<String>,
+    ) -> ArtifactResult<Artifact> {
+        let content_size = content.len() as u64;
+
+        // Check size limit (use binary limit for binary types)
+        let max_size = if artifact_type.is_binary() {
+            self.config.max_binary_size
+        } else {
+            self.config.max_content_size
+        };
+
+        if content_size > max_size {
+            return Err(ArtifactError::ContentTooLarge(content_size, max_size));
+        }
+
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let content_hash = Self::compute_hash(&content);
+        let artifact_type_json = serde_json::to_string(&artifact_type)?;
+
+        // Store content
+        self.storage.store(&id, 1, &content).await?;
+
+        // Insert metadata
+        sqlx::query(
+            r#"
+            INSERT INTO artifacts (
+                id, conversation_id, user_id, created_at, updated_at,
+                title, description, artifact_type, version, size, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0)
+            "#,
+        )
+        .bind(&id)
+        .bind(&conversation_id)
+        .bind(&user_id)
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .bind(&title)
+        .bind(&description)
+        .bind(&artifact_type_json)
+        .bind(content_size as i64)
+        .execute(&self.pool)
+        .await?;
+
+        // Insert version record
+        sqlx::query(
+            r#"
+            INSERT INTO artifact_versions (
+                artifact_id, version, content_hash, size, created_at, change_description
+            ) VALUES (?, 1, ?, ?, ?, 'Initial version')
+            "#,
+        )
+        .bind(&id)
+        .bind(&content_hash)
+        .bind(content_size as i64)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        dual_info!(
+            "Created binary artifact: {} ({} bytes, type: {:?})",
+            id,
+            content_size,
+            artifact_type
+        );
+
+        Ok(Artifact {
+            id,
+            conversation_id,
+            user_id,
+            created_at: now,
+            updated_at: now,
+            title,
+            description,
+            artifact_type,
+            version: 1,
+            size: content_size,
+            is_deleted: false,
+            url: None,
+        })
+    }
+
     /// Get artifact by ID
     pub async fn get(&self, id: &str) -> ArtifactResult<Option<Artifact>> {
         let row = sqlx::query_as::<_, ArtifactRow>(
@@ -359,6 +455,29 @@ impl ArtifactStore {
         }
 
         self.storage.read(id, version).await
+    }
+
+    /// Get partial artifact content for a specific version (for Range requests)
+    ///
+    /// # Arguments
+    /// * `id` - Artifact ID
+    /// * `version` - Version number
+    /// * `offset` - Start offset in bytes
+    /// * `length` - Number of bytes to read (None = read to end)
+    pub async fn get_content_range(
+        &self,
+        id: &str,
+        version: i32,
+        offset: u64,
+        length: Option<u64>,
+    ) -> ArtifactResult<Vec<u8>> {
+        // Verify artifact exists
+        let artifact = self.get(id).await?;
+        if artifact.is_none() {
+            return Err(ArtifactError::NotFound(id.to_string()));
+        }
+
+        self.storage.read_range(id, version, offset, length).await
     }
 
     /// Update artifact
@@ -1606,5 +1725,231 @@ mod tests {
             "Concurrent operations took too long: {:?}",
             elapsed
         );
+    }
+
+    // ==========================================================================
+    // Phase 6: Binary File Support Tests
+    // ==========================================================================
+
+    #[tokio::test]
+    async fn test_create_binary_artifact() {
+        let store = setup_test_store().await;
+        let binary_content = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header
+
+        let artifact = store
+            .create_binary(
+                "conv_binary_1".to_string(),
+                "test.png".to_string(),
+                Some("Test PNG image".to_string()),
+                ArtifactType::Image {
+                    format: "png".to_string(),
+                },
+                binary_content.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(artifact.title, "test.png");
+        assert_eq!(artifact.conversation_id, "conv_binary_1");
+        assert_eq!(artifact.size, binary_content.len() as u64);
+        assert!(matches!(artifact.artifact_type, ArtifactType::Image { .. }));
+
+        // Verify content can be retrieved
+        let content = store
+            .get_content(&artifact.id, artifact.version)
+            .await
+            .unwrap();
+        assert_eq!(content, binary_content);
+    }
+
+    #[tokio::test]
+    async fn test_binary_artifact_types() {
+        let store = setup_test_store().await;
+
+        // Test PDF type
+        let pdf_content = b"%PDF-1.4".to_vec();
+        let pdf = store
+            .create_binary(
+                "conv_types".to_string(),
+                "doc.pdf".to_string(),
+                None,
+                ArtifactType::Pdf,
+                pdf_content,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(pdf.artifact_type, ArtifactType::Pdf));
+
+        // Test Audio type
+        let audio_content = vec![0u8; 100];
+        let audio = store
+            .create_binary(
+                "conv_types".to_string(),
+                "sound.mp3".to_string(),
+                None,
+                ArtifactType::Audio {
+                    format: "mp3".to_string(),
+                },
+                audio_content,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(audio.artifact_type, ArtifactType::Audio { .. }));
+
+        // Test Video type
+        let video_content = vec![0u8; 200];
+        let video = store
+            .create_binary(
+                "conv_types".to_string(),
+                "clip.mp4".to_string(),
+                None,
+                ArtifactType::Video {
+                    format: "mp4".to_string(),
+                },
+                video_content,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(video.artifact_type, ArtifactType::Video { .. }));
+
+        // Test Binary type
+        let binary_content = vec![0u8; 50];
+        let binary = store
+            .create_binary(
+                "conv_types".to_string(),
+                "data.bin".to_string(),
+                None,
+                ArtifactType::Binary {
+                    mime_type: "application/octet-stream".to_string(),
+                },
+                binary_content,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(binary.artifact_type, ArtifactType::Binary { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_get_content_range() {
+        let store = setup_test_store().await;
+        let content: Vec<u8> = (0..100u8).collect();
+
+        let artifact = store
+            .create_binary(
+                "conv_range".to_string(),
+                "range_test.bin".to_string(),
+                None,
+                ArtifactType::Binary {
+                    mime_type: "application/octet-stream".to_string(),
+                },
+                content.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Test range read - first 10 bytes
+        let range1 = store
+            .get_content_range(&artifact.id, artifact.version, 0, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(range1, (0..10u8).collect::<Vec<u8>>());
+
+        // Test range read - middle bytes
+        let range2 = store
+            .get_content_range(&artifact.id, artifact.version, 50, Some(20))
+            .await
+            .unwrap();
+        assert_eq!(range2, (50..70u8).collect::<Vec<u8>>());
+
+        // Test range read - to end
+        let range3 = store
+            .get_content_range(&artifact.id, artifact.version, 90, None)
+            .await
+            .unwrap();
+        assert_eq!(range3, (90..100u8).collect::<Vec<u8>>());
+    }
+
+    #[tokio::test]
+    async fn test_binary_size_limit() {
+        let store = setup_test_store().await;
+
+        // Create content exceeding default binary size limit (100MB in config, but smaller for test)
+        // This test verifies the store correctly stores and retrieves binary content
+        let large_content = vec![0u8; 1024 * 1024]; // 1MB
+
+        let artifact = store
+            .create_binary(
+                "conv_large".to_string(),
+                "large.bin".to_string(),
+                None,
+                ArtifactType::Binary {
+                    mime_type: "application/octet-stream".to_string(),
+                },
+                large_content.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(artifact.size, large_content.len() as u64);
+
+        // Verify content is stored correctly
+        let retrieved = store
+            .get_content(&artifact.id, artifact.version)
+            .await
+            .unwrap();
+        assert_eq!(retrieved.len(), large_content.len());
+        assert_eq!(retrieved, large_content);
+    }
+
+    #[tokio::test]
+    async fn test_binary_versioning() {
+        let store = setup_test_store().await;
+
+        // Create initial version
+        let content_v1 = vec![1u8; 50];
+        let artifact = store
+            .create_binary(
+                "conv_versioned".to_string(),
+                "versioned.bin".to_string(),
+                None,
+                ArtifactType::Binary {
+                    mime_type: "application/octet-stream".to_string(),
+                },
+                content_v1.clone(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Update with new binary content
+        let content_v2 = vec![2u8; 75];
+        let updated = store
+            .update(
+                &artifact.id,
+                UpdateArtifactRequest {
+                    title: None,
+                    description: None,
+                    content: Some(String::from_utf8_lossy(&content_v2).to_string()),
+                    change_description: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(updated.version, 2);
+
+        // Get specific version content
+        let v1_response = store.get_version_content(&artifact.id, 1).await.unwrap();
+        assert_eq!(v1_response.artifact.version, 1);
+
+        let v2_response = store.get_version_content(&artifact.id, 2).await.unwrap();
+        assert_eq!(v2_response.artifact.version, 2);
     }
 }

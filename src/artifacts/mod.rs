@@ -41,6 +41,7 @@ pub use handlers::{
     ArtifactsState, create_artifact_handler, delete_artifact_handler, download_artifact_handler,
     get_artifact_handler, get_version_content_handler, list_artifacts_by_conversation_handler,
     list_versions_handler, restore_version_handler, update_artifact_handler,
+    upload_binary_artifact_handler,
 };
 #[allow(unused_imports)]
 pub use service::ArtifactService;

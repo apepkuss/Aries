@@ -3,6 +3,7 @@ mod capabilities;
 mod chat;
 mod cli;
 mod config;
+mod config_api;
 mod error;
 mod executor;
 mod handlers;
@@ -287,6 +288,12 @@ async fn main() -> ServerResult<()> {
         .route(
             "/v1/capabilities",
             get(capabilities::get_capabilities_handler),
+        )
+        // Configuration management endpoints
+        .route("/v1/config", get(config_api::get_config_handler))
+        .route(
+            "/v1/config/schema",
+            get(config_api::get_config_schema_handler),
         );
 
     // Add memory endpoints only if memory is enabled
@@ -384,6 +391,7 @@ async fn main() -> ServerResult<()> {
 
             let artifact_config = artifacts::ArtifactConfig {
                 max_content_size: art_config.max_content_size,
+                max_binary_size: art_config.max_binary_size,
                 max_versions: art_config.max_versions,
                 storage_path: art_config.storage_path.clone(),
                 retention_days: art_config.retention_days,
@@ -449,6 +457,10 @@ async fn main() -> ServerResult<()> {
                 .route(
                     "/v1/conversations/{conv_id}/artifacts",
                     axum::routing::get(artifacts::list_artifacts_by_conversation_handler),
+                )
+                .route(
+                    "/v1/artifacts/upload",
+                    axum::routing::post(artifacts::upload_binary_artifact_handler),
                 )
                 .with_state(artifacts_state);
 

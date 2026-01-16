@@ -1066,9 +1066,13 @@ pub struct ArtifactsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_path: Option<String>,
 
-    /// Maximum content size in bytes (default: 1MB)
+    /// Maximum content size for text artifacts in bytes (default: 1MB)
     #[serde(default = "default_artifacts_max_size")]
     pub max_content_size: u64,
+
+    /// Maximum content size for binary artifacts in bytes (default: 100MB)
+    #[serde(default = "default_artifacts_max_binary_size")]
+    pub max_binary_size: u64,
 
     /// Maximum versions to keep per artifact (default: 10)
     #[serde(default = "default_artifacts_max_versions")]
@@ -1104,6 +1108,10 @@ fn default_artifacts_max_size() -> u64 {
     1024 * 1024 // 1MB
 }
 
+fn default_artifacts_max_binary_size() -> u64 {
+    100 * 1024 * 1024 // 100MB
+}
+
 fn default_artifacts_max_versions() -> i32 {
     10
 }
@@ -1131,6 +1139,7 @@ impl Default for ArtifactsConfig {
             database_path: default_artifacts_database_path(),
             storage_path: None,
             max_content_size: default_artifacts_max_size(),
+            max_binary_size: default_artifacts_max_binary_size(),
             max_versions: default_artifacts_max_versions(),
             retention_days: default_artifacts_retention_days(),
             cleanup_interval_secs: default_artifacts_cleanup_interval(),
