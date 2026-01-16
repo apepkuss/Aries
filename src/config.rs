@@ -65,6 +65,9 @@ pub struct Config {
     /// Artifacts management configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<ArtifactsConfig>,
+    /// Configuration API settings (hot reload, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_api: Option<ConfigApiSettings>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -124,6 +127,7 @@ impl Default for Config {
             reflection: None,
             replan: None,
             artifacts: None,
+            config_api: None,
         }
     }
 }
@@ -1391,6 +1395,63 @@ impl Default for ExecutionConfig {
             limits: ResourceLimits::default(),
             deno: None,
             docker: None,
+        }
+    }
+}
+
+// ============================================================================
+// Config API Settings (Hot Reload)
+// ============================================================================
+
+/// Configuration API settings
+///
+/// Controls hot-reload behavior and other Config API features.
+///
+/// # Example Configuration
+///
+/// ```toml
+/// [config_api]
+/// hot_reload_enabled = true
+/// hot_reload_debounce_ms = 500
+/// hot_reload_keep_on_invalid = true
+/// hot_reload_audit = false
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConfigApiSettings {
+    /// Enable configuration hot-reload file watching
+    #[serde(default)]
+    pub hot_reload_enabled: bool,
+
+    /// Debounce delay in milliseconds for file change events
+    /// Prevents multiple triggers when file is being saved
+    #[serde(default = "default_hot_reload_debounce_ms")]
+    pub hot_reload_debounce_ms: u64,
+
+    /// Keep current configuration when new config is invalid
+    /// If true, invalid configurations are logged but not applied
+    #[serde(default = "default_hot_reload_keep_on_invalid")]
+    pub hot_reload_keep_on_invalid: bool,
+
+    /// Log hot-reload changes to audit log
+    #[serde(default)]
+    pub hot_reload_audit: bool,
+}
+
+fn default_hot_reload_debounce_ms() -> u64 {
+    500 // 500ms debounce delay
+}
+
+fn default_hot_reload_keep_on_invalid() -> bool {
+    true // Keep current config on invalid
+}
+
+impl Default for ConfigApiSettings {
+    fn default() -> Self {
+        Self {
+            hot_reload_enabled: false,
+            hot_reload_debounce_ms: default_hot_reload_debounce_ms(),
+            hot_reload_keep_on_invalid: default_hot_reload_keep_on_invalid(),
+            hot_reload_audit: false,
         }
     }
 }
