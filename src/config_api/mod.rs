@@ -37,6 +37,7 @@
 //! }
 //! ```
 
+pub mod diff;
 mod handlers;
 mod persist;
 mod reload;
