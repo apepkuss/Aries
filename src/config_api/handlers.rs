@@ -12,6 +12,8 @@ use axum::{
 };
 
 use super::{
+    persist::persist_config,
+    reload::{determine_services_to_reload, reload_chat_service, reload_embedding_service},
     sanitize::Sanitize,
     types::{
         ConfigSchemaResponse, ConfigSchemaSection, ConfigUpdateRequest, ConfigUpdateResponse,
@@ -212,8 +214,93 @@ pub async fn update_config_handler(
     let mut config = state.config.write().await;
     let update_result = apply_config_update(&mut config, &request, &validation_result.valid_fields);
 
+    // Get the side effect fields before converting to response
+    let side_effect_fields = update_result.side_effect_fields.clone();
+    let updated_fields_count = update_result.updated_fields.len();
+
     // Step 3: Build response
-    let response = update_result.into_response();
+    let mut response = update_result.into_response();
+
+    // Step 4: Persist config to file if any fields were updated
+    if updated_fields_count > 0
+        && let Some(config_path) = state.get_config_path()
+    {
+        let persist_result = persist_config(&config, config_path).await;
+        if persist_result.success {
+            dual_info!(
+                "Configuration persisted to file - request_id: {}",
+                request_id
+            );
+            response = response.with_action("config_file", "persisted");
+        } else {
+            dual_warn!(
+                "Configuration persistence failed - request_id: {} - error: {:?}",
+                request_id,
+                persist_result.error
+            );
+            response = response.with_action(
+                "config_file",
+                &format!(
+                    "persistence_failed: {}",
+                    persist_result.error.unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    // Drop the config write lock before reloading services
+    drop(config);
+
+    // Step 5: Reload services if needed
+    let (reload_chat, reload_embedding) = determine_services_to_reload(&side_effect_fields);
+
+    if reload_chat {
+        dual_info!(
+            "Triggering chat service reload - request_id: {}",
+            request_id
+        );
+        let reload_result = reload_chat_service(&state).await;
+        if reload_result.success {
+            response = response.with_action("chat", "service_reloaded");
+        } else {
+            dual_warn!(
+                "Chat service reload failed - request_id: {} - error: {:?}",
+                request_id,
+                reload_result.error
+            );
+            response = response.with_action(
+                "chat",
+                &format!(
+                    "service_reload_failed: {}",
+                    reload_result.error.unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    if reload_embedding {
+        dual_info!(
+            "Triggering embedding service reload - request_id: {}",
+            request_id
+        );
+        let reload_result = reload_embedding_service(&state).await;
+        if reload_result.success {
+            response = response.with_action("embedding", "service_reloaded");
+        } else {
+            dual_warn!(
+                "Embedding service reload failed - request_id: {} - error: {:?}",
+                request_id,
+                reload_result.error
+            );
+            response = response.with_action(
+                "embedding",
+                &format!(
+                    "service_reload_failed: {}",
+                    reload_result.error.unwrap_or_default()
+                ),
+            );
+        }
+    }
 
     let status = if response.success {
         dual_info!(

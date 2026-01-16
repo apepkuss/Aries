@@ -14,6 +14,7 @@
 //! - **Hot update support**: Some fields can be updated without restart
 //! - **Validation**: Field values are validated before applying
 //! - **Side effects**: Service reloading is handled automatically when needed
+//! - **Persistence**: Configuration changes can be persisted to disk
 //!
 //! # Example
 //!
@@ -37,6 +38,8 @@
 //! ```
 
 mod handlers;
+mod persist;
+mod reload;
 mod sanitize;
 mod types;
 mod update;

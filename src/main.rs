@@ -224,7 +224,8 @@ async fn main() -> ServerResult<()> {
     let artifacts_config = config.artifacts.clone();
 
     // Initialize application state
-    let mut state = AppState::new(config, ServerInfo::default());
+    let mut state =
+        AppState::new(config, ServerInfo::default()).with_config_path(cli.config.clone());
 
     // Attach memory system to state
     if let Some(memory_system) = memory {
@@ -693,6 +694,8 @@ fn get_log_level_from_env() -> Level {
 pub(crate) struct AppState {
     server_group: Arc<RwLock<HashMap<ServerKind, ServerGroup>>>,
     config: Arc<RwLock<Config>>,
+    /// Path to the configuration file (for persistence)
+    config_path: Option<std::path::PathBuf>,
     server_info: Arc<RwLock<ServerInfo>>,
     models: Arc<RwLock<HashMap<ServerId, Vec<endpoints::models::Model>>>>,
     memory: Option<Arc<crate::memory::CompleteChatMemory>>,
@@ -702,15 +705,26 @@ impl AppState {
         Self {
             server_group: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(config)),
+            config_path: None,
             server_info: Arc::new(RwLock::new(server_info)),
             models: Arc::new(RwLock::new(HashMap::new())),
             memory: None,
         }
     }
 
+    pub(crate) fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
+        self.config_path = Some(path);
+        self
+    }
+
     pub(crate) fn with_memory(mut self, memory: Arc<crate::memory::CompleteChatMemory>) -> Self {
         self.memory = Some(memory);
         self
+    }
+
+    /// Get the configuration file path if set
+    pub(crate) fn get_config_path(&self) -> Option<&std::path::Path> {
+        self.config_path.as_deref()
     }
 
     pub(crate) async fn register_downstream_server(&self, server: Server) -> ServerResult<()> {
