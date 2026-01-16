@@ -45,5 +45,9 @@ mod sanitize;
 mod types;
 mod update;
 mod validate;
+pub mod watcher;
 
 pub use handlers::{get_config_handler, get_config_schema_handler, update_config_handler};
+// Allow unused imports until P4 phase integrates ConfigWatcher into main.rs
+#[allow(unused_imports)]
+pub use watcher::{ConfigWatcher, ConfigWatcherError};
