@@ -221,7 +221,12 @@ pub async fn update_config_handler(
     // Step 3: Build response
     let mut response = update_result.into_response();
 
-    // Step 4: Persist config to file if any fields were updated
+    // Step 4: Record config update time for conflict detection with file watcher
+    if updated_fields_count > 0 {
+        state.record_config_update_time().await;
+    }
+
+    // Step 5: Persist config to file if any fields were updated
     if updated_fields_count > 0
         && let Some(config_path) = state.get_config_path()
     {
@@ -251,7 +256,7 @@ pub async fn update_config_handler(
     // Drop the config write lock before reloading services
     drop(config);
 
-    // Step 5: Reload services if needed
+    // Step 6: Reload services if needed
     let (reload_chat, reload_embedding) = determine_services_to_reload(&side_effect_fields);
 
     if reload_chat {

@@ -23,6 +23,7 @@ use std::{
     path::PathBuf,
     str::FromStr,
     sync::Arc,
+    time::Instant,
 };
 
 use axum::{
@@ -223,6 +224,9 @@ async fn main() -> ServerResult<()> {
     // Save artifacts config before moving config into AppState
     let artifacts_config = config.artifacts.clone();
 
+    // Save config API settings before moving config into AppState
+    let config_api_settings = config.config_api.clone();
+
     // Initialize application state
     let mut state =
         AppState::new(config, ServerInfo::default()).with_config_path(cli.config.clone());
@@ -233,6 +237,41 @@ async fn main() -> ServerResult<()> {
     }
 
     let state = Arc::new(state);
+
+    // Initialize configuration hot-reload watcher if enabled
+    // The watcher must be kept alive for the duration of the server
+    let _config_watcher = if let Some(ref config_api) = config_api_settings
+        && config_api.hot_reload_enabled
+    {
+        match config_api::ConfigWatcher::new(
+            cli.config.clone(),
+            Arc::clone(&state),
+            config_api.hot_reload_debounce_ms,
+        ) {
+            Ok(watcher) => {
+                dual_info!(
+                    "Configuration hot-reload enabled (debounce: {}ms)",
+                    config_api.hot_reload_debounce_ms
+                );
+                Some(watcher)
+            }
+            Err(e) => {
+                dual_warn!(
+                    "Failed to start configuration hot-reload watcher: {}. Hot-reload will be disabled.",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        if config_api_settings
+            .as_ref()
+            .is_some_and(|s| !s.hot_reload_enabled)
+        {
+            dual_info!("Configuration hot-reload is disabled in config");
+        }
+        None
+    };
 
     // Initialize responses state with lazy database initialization
     let db_path =
@@ -699,6 +738,8 @@ pub(crate) struct AppState {
     server_info: Arc<RwLock<ServerInfo>>,
     models: Arc<RwLock<HashMap<ServerId, Vec<endpoints::models::Model>>>>,
     memory: Option<Arc<crate::memory::CompleteChatMemory>>,
+    /// Timestamp of the last API-based config update (for conflict detection with file watcher)
+    last_config_update_time: RwLock<Option<Instant>>,
 }
 impl AppState {
     pub(crate) fn new(config: Config, server_info: ServerInfo) -> Self {
@@ -709,7 +750,19 @@ impl AppState {
             server_info: Arc::new(RwLock::new(server_info)),
             models: Arc::new(RwLock::new(HashMap::new())),
             memory: None,
+            last_config_update_time: RwLock::new(None),
         }
+    }
+
+    /// Record a config update timestamp (used for conflict detection with file watcher)
+    pub(crate) async fn record_config_update_time(&self) {
+        let mut last_update = self.last_config_update_time.write().await;
+        *last_update = Some(Instant::now());
+    }
+
+    /// Get the last config update timestamp
+    pub(crate) async fn get_last_config_update_time(&self) -> Option<Instant> {
+        *self.last_config_update_time.read().await
     }
 
     pub(crate) fn with_config_path(mut self, path: std::path::PathBuf) -> Self {

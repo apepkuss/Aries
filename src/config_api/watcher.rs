@@ -61,7 +61,7 @@ pub struct ConfigWatcher {
 
 /// Shared state for the watcher's event handler
 struct WatcherState {
-    /// Application state
+    /// Application state (contains last_config_update_time for conflict detection)
     app_state: Arc<AppState>,
     /// Path to the configuration file
     config_path: PathBuf,
@@ -71,8 +71,6 @@ struct WatcherState {
     last_event_time: RwLock<Option<Instant>>,
     /// Last modification time of the config file (for conflict detection)
     last_file_mtime: RwLock<Option<SystemTime>>,
-    /// Last time config was updated via API (for conflict detection)
-    last_api_update_time: RwLock<Option<Instant>>,
 }
 
 impl WatcherState {
@@ -83,7 +81,6 @@ impl WatcherState {
             debounce_ms,
             last_event_time: RwLock::new(None),
             last_file_mtime: RwLock::new(None),
-            last_api_update_time: RwLock::new(None),
         }
     }
 }
@@ -235,16 +232,13 @@ async fn handle_modify_event(state: &Arc<WatcherState>) {
         *last_event = Some(now);
     }
 
-    // Check for API update conflict
-    {
-        let last_api_update = state.last_api_update_time.read().await;
-        if let Some(api_time) = *last_api_update {
-            // If an API update happened within the debounce window, skip this file event
-            // (it's likely the file write from persisting the API change)
-            if api_time.elapsed() < Duration::from_millis(state.debounce_ms * 2) {
-                dual_debug!("Skipping config reload - recent API update detected");
-                return;
-            }
+    // Check for API update conflict using AppState's last_config_update_time
+    if let Some(api_time) = state.app_state.get_last_config_update_time().await {
+        // If an API update happened within the debounce window, skip this file event
+        // (it's likely the file write from persisting the API change)
+        if api_time.elapsed() < Duration::from_millis(state.debounce_ms * 2) {
+            dual_debug!("Skipping config reload - recent API update detected");
+            return;
         }
     }
 
