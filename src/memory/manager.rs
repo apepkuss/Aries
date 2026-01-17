@@ -1043,13 +1043,53 @@ impl CompleteChatMemory {
     ///
     /// Note: This operation is irreversible, please use with caution. Due to foreign key constraint cascade deletion,
     /// deleting a conversation will automatically delete all messages under that conversation.
-    #[allow(dead_code)]
     pub async fn delete_conversation(&self, conv_id: &str) -> MemoryResult<()> {
         // Remove from cache
         self.context_cache.lock().await.remove(conv_id);
 
         // Delete from database
         self.store.delete_conversation(conv_id).await
+    }
+
+    /// 检查指定对话是否存在
+    ///
+    /// # 参数
+    /// * `conv_id` - 对话的唯一标识符
+    ///
+    /// # 返回值
+    /// * `MemoryResult<bool>` - 成功时返回 true（存在）或 false（不存在），失败时返回 MemoryError
+    ///
+    /// # 说明
+    /// 此方法用于在执行删除或更新操作前检查对话是否存在。
+    #[allow(dead_code)]
+    pub async fn conversation_exists(&self, conv_id: &str) -> MemoryResult<bool> {
+        self.store.conversation_exists(conv_id).await
+    }
+
+    /// 更新对话标题
+    ///
+    /// # 参数
+    /// * `conv_id` - 对话的唯一标识符
+    /// * `title` - 新的对话标题
+    ///
+    /// # 返回值
+    /// * `MemoryResult<StoredConversation>` - 成功时返回更新后的对话信息，失败时返回 MemoryError
+    ///
+    /// # 说明
+    /// 更新指定对话的标题。此方法会：
+    /// 1. 更新数据库中的对话标题
+    /// 2. 同时更新 `updated_at` 时间戳
+    ///
+    /// 注意：当前 ContextMemory 缓存不存储标题信息，所以不需要同步缓存。
+    ///
+    /// # 错误
+    /// * `MemoryError::ConversationNotFound` - 当指定的对话不存在时
+    pub async fn update_conversation_title(
+        &self,
+        conv_id: &str,
+        title: &str,
+    ) -> MemoryResult<StoredConversation> {
+        self.store.update_conversation_title(conv_id, title).await
     }
 
     /// Get all historical messages for full history summarization
@@ -1122,5 +1162,177 @@ impl CompleteChatMemory {
     #[allow(dead_code)]
     pub async fn get_stats(&self) -> MemoryResult<MemoryStats> {
         self.store.get_stats().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper function to create a test CompleteChatMemory with in-memory SQLite
+    async fn create_test_memory() -> CompleteChatMemory {
+        let config = MemoryConfig {
+            enable: true,
+            database_path: "sqlite::memory:".to_string(),
+            context_window: 4096,
+            summarize_threshold: 10,
+            max_stored_messages: 100,
+            auto_summarize: false,
+            summarization_strategy: crate::config::SummarizationStrategy::Incremental,
+            summary_service_base_url: "".to_string(),
+            summary_service_api_key: "".to_string(),
+        };
+        CompleteChatMemory::new(config).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_conversation_exists_returns_true_for_existing() {
+        let memory = create_test_memory().await;
+
+        // Create a conversation
+        let conv_id = memory
+            .create_conversation("gpt-4", Some("test-user".to_string()), None)
+            .await
+            .unwrap();
+
+        // Check it exists
+        let exists = memory.conversation_exists(&conv_id).await.unwrap();
+        assert!(exists, "Conversation should exist after creation");
+    }
+
+    #[tokio::test]
+    async fn test_conversation_exists_returns_false_for_nonexistent() {
+        let memory = create_test_memory().await;
+
+        // Check for non-existent conversation
+        let exists = memory
+            .conversation_exists("non-existent-conv")
+            .await
+            .unwrap();
+        assert!(!exists, "Non-existent conversation should return false");
+    }
+
+    #[tokio::test]
+    async fn test_conversation_exists_after_delete() {
+        let memory = create_test_memory().await;
+
+        // Create a conversation
+        let conv_id = memory
+            .create_conversation("gpt-4", Some("test-user".to_string()), None)
+            .await
+            .unwrap();
+        assert!(memory.conversation_exists(&conv_id).await.unwrap());
+
+        // Delete the conversation
+        memory.delete_conversation(&conv_id).await.unwrap();
+
+        // Should no longer exist
+        let exists = memory.conversation_exists(&conv_id).await.unwrap();
+        assert!(!exists, "Deleted conversation should not exist");
+    }
+
+    #[tokio::test]
+    async fn test_update_conversation_title_success() {
+        let memory = create_test_memory().await;
+
+        // Create a conversation
+        let conv_id = memory
+            .create_conversation(
+                "gpt-4",
+                Some("test-user".to_string()),
+                Some("Original Title".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Update the title
+        let new_title = "Updated Title";
+        let updated_conv = memory
+            .update_conversation_title(&conv_id, new_title)
+            .await
+            .unwrap();
+
+        // Verify the title was updated
+        assert_eq!(updated_conv.title, Some(new_title.to_string()));
+        assert_eq!(updated_conv.id, conv_id);
+    }
+
+    #[tokio::test]
+    async fn test_update_conversation_title_not_found() {
+        let memory = create_test_memory().await;
+
+        // Try to update non-existent conversation
+        let result = memory
+            .update_conversation_title("non-existent", "New Title")
+            .await;
+
+        assert!(
+            result.is_err(),
+            "Should return error for non-existent conversation"
+        );
+        match result.unwrap_err() {
+            MemoryError::ConversationNotFound(id) => {
+                assert_eq!(id, "non-existent");
+            }
+            other => panic!("Expected ConversationNotFound error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_conversation_title_unicode() {
+        let memory = create_test_memory().await;
+
+        // Create a conversation
+        let conv_id = memory
+            .create_conversation("gpt-4", Some("test-user".to_string()), None)
+            .await
+            .unwrap();
+
+        // Update with unicode title
+        let unicode_title = "测试对话标题 🚀";
+        let updated_conv = memory
+            .update_conversation_title(&conv_id, unicode_title)
+            .await
+            .unwrap();
+
+        assert_eq!(updated_conv.title, Some(unicode_title.to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_delete_conversation_clears_cache() {
+        let memory = create_test_memory().await;
+
+        // Create a conversation
+        let conv_id = memory
+            .create_conversation("gpt-4", Some("test-user".to_string()), None)
+            .await
+            .unwrap();
+
+        // Add a message to populate the cache
+        memory
+            .add_user_message(&conv_id, "Hello".to_string())
+            .await
+            .unwrap();
+
+        // Verify cache has the conversation
+        {
+            let cache = memory.context_cache.lock().await;
+            assert!(
+                cache.contains_key(&conv_id),
+                "Cache should contain the conversation"
+            );
+        }
+
+        // Delete the conversation
+        memory.delete_conversation(&conv_id).await.unwrap();
+
+        // Verify cache is cleared
+        {
+            let cache = memory.context_cache.lock().await;
+            assert!(
+                !cache.contains_key(&conv_id),
+                "Cache should not contain the deleted conversation"
+            );
+        }
     }
 }

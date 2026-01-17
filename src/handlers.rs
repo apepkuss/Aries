@@ -12,6 +12,7 @@ use endpoints::{
     models::{ListModelsResponse, Model},
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use serde::{Deserialize, Serialize};
 use tokio::select;
 use tokio_util::sync::CancellationToken;
 
@@ -22,8 +23,57 @@ use crate::{
     error::{ServerError, ServerResult},
     info::ApiServer,
     mcp::format_mcp_tool_name,
+    memory::types::MemoryError,
     server::{RoutingPolicy, Server, ServerIdToRemove, ServerKind},
 };
+
+// ============================================================================
+// Conversation Management Request/Response Types
+// ============================================================================
+
+/// Request body for updating a conversation (PATCH /v1/memory/conversations/{conv_id})
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateConversationRequest {
+    /// New title for the conversation
+    pub title: String,
+}
+
+/// Response for successful conversation deletion
+#[derive(Debug, Clone, Serialize)]
+pub struct DeleteConversationResponse {
+    /// Whether the deletion was successful
+    pub success: bool,
+    /// The ID of the deleted conversation
+    pub conversation_id: String,
+    /// Human-readable message
+    pub message: String,
+}
+
+/// Response for successful conversation update
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateConversationResponse {
+    /// Whether the update was successful
+    pub success: bool,
+    /// The updated conversation details
+    pub conversation: ConversationInfo,
+    /// Human-readable message
+    pub message: String,
+}
+
+/// Conversation information returned in responses
+#[derive(Debug, Clone, Serialize)]
+pub struct ConversationInfo {
+    /// Unique conversation identifier
+    pub id: String,
+    /// User who owns the conversation
+    pub user_id: String,
+    /// Conversation title
+    pub title: String,
+    /// Creation timestamp (ISO 8601)
+    pub created_at: String,
+    /// Last update timestamp (ISO 8601)
+    pub updated_at: String,
+}
 
 pub(crate) async fn chat_handler(
     State(state): State<Arc<AppState>>,
@@ -1184,6 +1234,252 @@ pub(crate) async fn list_user_conversations_handler(
     }
 }
 
+/// Handler to delete a conversation by ID
+/// DELETE /v1/memory/conversations/{conv_id}
+pub(crate) async fn delete_conversation_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(conv_id): axum::extract::Path<String>,
+) -> ServerResult<axum::response::Response> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!(
+        "Deleting conversation: {} - request_id: {}",
+        conv_id,
+        request_id
+    );
+
+    if let Some(memory) = &state.memory {
+        match memory.delete_conversation(&conv_id).await {
+            Ok(()) => {
+                dual_info!(
+                    "Successfully deleted conversation {} - request_id: {}",
+                    conv_id,
+                    request_id
+                );
+
+                let response = DeleteConversationResponse {
+                    success: true,
+                    conversation_id: conv_id,
+                    message: "Conversation deleted successfully".to_string(),
+                };
+
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_string(&response).unwrap()))
+                    .map_err(|e| {
+                        let err_msg = format!("Failed to create response: {e}");
+                        dual_error!("{err_msg} - request_id: {request_id}");
+                        ServerError::Operation(err_msg)
+                    })
+            }
+            Err(e) => {
+                let (status, error_msg) = match &e {
+                    MemoryError::ConversationNotFound(id) => {
+                        dual_warn!(
+                            "Conversation not found: {} - request_id: {}",
+                            id,
+                            request_id
+                        );
+                        (
+                            StatusCode::NOT_FOUND,
+                            format!("Conversation not found: {}", id),
+                        )
+                    }
+                    _ => {
+                        dual_error!(
+                            "Failed to delete conversation {}: {} - request_id: {}",
+                            conv_id,
+                            e,
+                            request_id
+                        );
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Failed to delete conversation: {}", e),
+                        )
+                    }
+                };
+
+                Response::builder()
+                    .status(status)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "error": error_msg
+                        })
+                        .to_string(),
+                    ))
+                    .map_err(|e| {
+                        let err_msg = format!("Failed to create error response: {e}");
+                        dual_error!("{err_msg} - request_id: {request_id}");
+                        ServerError::Operation(err_msg)
+                    })
+            }
+        }
+    } else {
+        dual_warn!("Memory system is not enabled - request_id: {}", request_id);
+        Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "error": "Memory system is not enabled"
+                })
+                .to_string(),
+            ))
+            .map_err(|e| {
+                let err_msg = format!("Failed to create error response: {e}");
+                dual_error!("{err_msg} - request_id: {request_id}");
+                ServerError::Operation(err_msg)
+            })
+    }
+}
+
+/// Handler to update a conversation (rename)
+/// PATCH /v1/memory/conversations/{conv_id}
+pub(crate) async fn update_conversation_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(conv_id): axum::extract::Path<String>,
+    Json(request): Json<UpdateConversationRequest>,
+) -> ServerResult<axum::response::Response> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!(
+        "Updating conversation: {} with title: '{}' - request_id: {}",
+        conv_id,
+        request.title,
+        request_id
+    );
+
+    // Validate title is not empty
+    if request.title.trim().is_empty() {
+        dual_warn!(
+            "Empty title provided for conversation {} - request_id: {}",
+            conv_id,
+            request_id
+        );
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "error": "Title cannot be empty"
+                })
+                .to_string(),
+            ))
+            .map_err(|e| {
+                let err_msg = format!("Failed to create error response: {e}");
+                dual_error!("{err_msg} - request_id: {request_id}");
+                ServerError::Operation(err_msg)
+            });
+    }
+
+    if let Some(memory) = &state.memory {
+        match memory
+            .update_conversation_title(&conv_id, &request.title)
+            .await
+        {
+            Ok(updated_conv) => {
+                dual_info!(
+                    "Successfully updated conversation {} - request_id: {}",
+                    conv_id,
+                    request_id
+                );
+
+                let response = UpdateConversationResponse {
+                    success: true,
+                    conversation: ConversationInfo {
+                        id: updated_conv.id,
+                        user_id: updated_conv.user_id.unwrap_or_default(),
+                        title: updated_conv.title.unwrap_or_default(),
+                        created_at: updated_conv.created_at.to_rfc3339(),
+                        updated_at: updated_conv.updated_at.to_rfc3339(),
+                    },
+                    message: "Conversation updated successfully".to_string(),
+                };
+
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_string(&response).unwrap()))
+                    .map_err(|e| {
+                        let err_msg = format!("Failed to create response: {e}");
+                        dual_error!("{err_msg} - request_id: {request_id}");
+                        ServerError::Operation(err_msg)
+                    })
+            }
+            Err(e) => {
+                let (status, error_msg) = match &e {
+                    MemoryError::ConversationNotFound(id) => {
+                        dual_warn!(
+                            "Conversation not found: {} - request_id: {}",
+                            id,
+                            request_id
+                        );
+                        (
+                            StatusCode::NOT_FOUND,
+                            format!("Conversation not found: {}", id),
+                        )
+                    }
+                    _ => {
+                        dual_error!(
+                            "Failed to update conversation {}: {} - request_id: {}",
+                            conv_id,
+                            e,
+                            request_id
+                        );
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Failed to update conversation: {}", e),
+                        )
+                    }
+                };
+
+                Response::builder()
+                    .status(status)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "error": error_msg
+                        })
+                        .to_string(),
+                    ))
+                    .map_err(|e| {
+                        let err_msg = format!("Failed to create error response: {e}");
+                        dual_error!("{err_msg} - request_id: {request_id}");
+                        ServerError::Operation(err_msg)
+                    })
+            }
+        }
+    } else {
+        dual_warn!("Memory system is not enabled - request_id: {}", request_id);
+        Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "error": "Memory system is not enabled"
+                })
+                .to_string(),
+            ))
+            .map_err(|e| {
+                let err_msg = format!("Failed to create error response: {e}");
+                dual_error!("{err_msg} - request_id: {request_id}");
+                ServerError::Operation(err_msg)
+            })
+    }
+}
+
 // update the model list
 pub(crate) fn build_api_url(base: &str, endpoint: &str) -> String {
     let trimmed = base.trim_end_matches('/');
@@ -1583,5 +1879,218 @@ pub(crate) mod admin {
             })?;
 
         Ok(response)
+    }
+}
+
+// ============================================================================
+// Conversation Management Unit Tests
+// ============================================================================
+
+#[cfg(test)]
+mod conversation_management_tests {
+    use super::*;
+
+    /// Test DeleteConversationResponse serialization
+    #[test]
+    fn test_delete_conversation_response_serialization() {
+        let response = DeleteConversationResponse {
+            success: true,
+            conversation_id: "conv-123".to_string(),
+            message: "Conversation deleted successfully".to_string(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"conversation_id\":\"conv-123\""));
+        assert!(json.contains("\"message\":\"Conversation deleted successfully\""));
+
+        // Verify it can be parsed back
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["conversation_id"], "conv-123");
+    }
+
+    /// Test DeleteConversationResponse with different values
+    #[test]
+    fn test_delete_conversation_response_failure_case() {
+        let response = DeleteConversationResponse {
+            success: false,
+            conversation_id: "non-existent".to_string(),
+            message: "Conversation not found".to_string(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":false"));
+        assert!(json.contains("\"conversation_id\":\"non-existent\""));
+    }
+
+    /// Test UpdateConversationRequest deserialization
+    #[test]
+    fn test_update_conversation_request_deserialization() {
+        let json = r#"{"title": "New Title"}"#;
+        let request: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.title, "New Title");
+    }
+
+    /// Test UpdateConversationRequest with unicode title
+    #[test]
+    fn test_update_conversation_request_unicode() {
+        let json = r#"{"title": "测试标题 🚀"}"#;
+        let request: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.title, "测试标题 🚀");
+    }
+
+    /// Test UpdateConversationRequest with empty title
+    #[test]
+    fn test_update_conversation_request_empty_title() {
+        let json = r#"{"title": ""}"#;
+        let request: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.title, "");
+    }
+
+    /// Test UpdateConversationRequest with whitespace-only title
+    #[test]
+    fn test_update_conversation_request_whitespace_title() {
+        let json = r#"{"title": "   "}"#;
+        let request: UpdateConversationRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.title, "   ");
+        // Note: The handler validates trim().is_empty(), so this would be rejected
+        assert!(request.title.trim().is_empty());
+    }
+
+    /// Test UpdateConversationRequest missing title field fails
+    #[test]
+    fn test_update_conversation_request_missing_title() {
+        let json = r#"{}"#;
+        let result: Result<UpdateConversationRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Should fail when title is missing");
+    }
+
+    /// Test UpdateConversationResponse serialization
+    #[test]
+    fn test_update_conversation_response_serialization() {
+        let response = UpdateConversationResponse {
+            success: true,
+            conversation: ConversationInfo {
+                id: "conv-456".to_string(),
+                user_id: "user-789".to_string(),
+                title: "Updated Title".to_string(),
+                created_at: "2026-01-17T10:00:00+00:00".to_string(),
+                updated_at: "2026-01-17T12:00:00+00:00".to_string(),
+            },
+            message: "Conversation updated successfully".to_string(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"id\":\"conv-456\""));
+        assert!(json.contains("\"user_id\":\"user-789\""));
+        assert!(json.contains("\"title\":\"Updated Title\""));
+        assert!(json.contains("\"created_at\":\"2026-01-17T10:00:00+00:00\""));
+        assert!(json.contains("\"updated_at\":\"2026-01-17T12:00:00+00:00\""));
+        assert!(json.contains("\"message\":\"Conversation updated successfully\""));
+    }
+
+    /// Test ConversationInfo serialization
+    #[test]
+    fn test_conversation_info_serialization() {
+        let info = ConversationInfo {
+            id: "conv-test".to_string(),
+            user_id: "user-test".to_string(),
+            title: "Test Conversation".to_string(),
+            created_at: "2026-01-17T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-17T01:00:00+00:00".to_string(),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["id"], "conv-test");
+        assert_eq!(parsed["user_id"], "user-test");
+        assert_eq!(parsed["title"], "Test Conversation");
+        assert_eq!(parsed["created_at"], "2026-01-17T00:00:00+00:00");
+        assert_eq!(parsed["updated_at"], "2026-01-17T01:00:00+00:00");
+    }
+
+    /// Test ConversationInfo with empty user_id and title
+    #[test]
+    fn test_conversation_info_empty_fields() {
+        let info = ConversationInfo {
+            id: "conv-empty".to_string(),
+            user_id: "".to_string(),
+            title: "".to_string(),
+            created_at: "2026-01-17T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-17T00:00:00+00:00".to_string(),
+        };
+
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("\"user_id\":\"\""));
+        assert!(json.contains("\"title\":\"\""));
+    }
+
+    /// Test all structs implement Clone
+    #[test]
+    fn test_structs_are_cloneable() {
+        let delete_response = DeleteConversationResponse {
+            success: true,
+            conversation_id: "conv-1".to_string(),
+            message: "Deleted".to_string(),
+        };
+        let _ = delete_response.clone();
+
+        let update_request = UpdateConversationRequest {
+            title: "Title".to_string(),
+        };
+        let _ = update_request.clone();
+
+        let update_response = UpdateConversationResponse {
+            success: true,
+            conversation: ConversationInfo {
+                id: "conv-1".to_string(),
+                user_id: "user-1".to_string(),
+                title: "Title".to_string(),
+                created_at: "2026-01-17T00:00:00+00:00".to_string(),
+                updated_at: "2026-01-17T00:00:00+00:00".to_string(),
+            },
+            message: "Updated".to_string(),
+        };
+        let _ = update_response.clone();
+
+        let info = ConversationInfo {
+            id: "conv-1".to_string(),
+            user_id: "user-1".to_string(),
+            title: "Title".to_string(),
+            created_at: "2026-01-17T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-17T00:00:00+00:00".to_string(),
+        };
+        let _ = info.clone();
+    }
+
+    /// Test all structs implement Debug
+    #[test]
+    fn test_structs_are_debuggable() {
+        let delete_response = DeleteConversationResponse {
+            success: true,
+            conversation_id: "conv-1".to_string(),
+            message: "Deleted".to_string(),
+        };
+        let debug_str = format!("{:?}", delete_response);
+        assert!(debug_str.contains("DeleteConversationResponse"));
+
+        let update_request = UpdateConversationRequest {
+            title: "Title".to_string(),
+        };
+        let debug_str = format!("{:?}", update_request);
+        assert!(debug_str.contains("UpdateConversationRequest"));
+
+        let info = ConversationInfo {
+            id: "conv-1".to_string(),
+            user_id: "user-1".to_string(),
+            title: "Title".to_string(),
+            created_at: "2026-01-17T00:00:00+00:00".to_string(),
+            updated_at: "2026-01-17T00:00:00+00:00".to_string(),
+        };
+        let debug_str = format!("{:?}", info);
+        assert!(debug_str.contains("ConversationInfo"));
     }
 }

@@ -29,7 +29,7 @@ use std::{
 use axum::{
     body::Body,
     http::{self, HeaderValue, Request},
-    routing::{Router, get, post},
+    routing::{Router, delete, get, post},
 };
 use clap::Parser;
 use config::Config;
@@ -346,6 +346,11 @@ async fn main() -> ServerResult<()> {
             .route(
                 "/v1/memory/conversations/{conv_id}/history",
                 get(handlers::get_conversation_history_handler),
+            )
+            .route(
+                "/v1/memory/conversations/{conv_id}",
+                delete(handlers::delete_conversation_handler)
+                    .patch(handlers::update_conversation_handler),
             )
             .route(
                 "/v1/memory/users/{user_id}/history",
