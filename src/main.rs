@@ -1,42 +1,26 @@
-mod artifacts;
-mod capabilities;
-mod chat;
-mod cli;
-mod config;
-mod config_api;
-mod error;
-mod executor;
-mod handlers;
-mod info;
-mod mcp;
-mod mcp_handlers;
-mod memory;
-mod reflection;
-mod responses;
-mod server;
-mod skills;
-mod utils;
-
 use std::{
-    collections::{HashMap, HashSet},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
-    time::Instant,
 };
 
+use aries::{
+    AppState, HEALTH_CHECK_INTERVAL, artifacts, capabilities, cli, config, config_api, error,
+    executor, handlers, info, mcp_handlers, memory, responses, skills, utils,
+};
 use axum::{
     body::Body,
     http::{self, HeaderValue, Request},
     routing::{Router, delete, get, post},
 };
 use clap::Parser;
+use cli::{Cli, Command};
 use config::Config;
 use error::{ServerError, ServerResult};
-use futures_util::stream::{self, StreamExt};
-use once_cell::sync::OnceCell;
-use tokio::{signal, sync::RwLock};
+use executor::ScriptExecutorManager;
+use info::ServerInfo;
+use skills::SkillRegistry;
+use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -45,18 +29,6 @@ use tower_http::{
 };
 use tracing::Level;
 use uuid::Uuid;
-
-use crate::{
-    executor::ScriptExecutorManager,
-    info::ServerInfo,
-    server::{Server, ServerGroup, ServerId, ServerKind},
-    skills::SkillRegistry,
-};
-
-// Global health check interval for downstream servers in seconds
-pub(crate) static HEALTH_CHECK_INTERVAL: OnceCell<u64> = OnceCell::new();
-
-use cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() -> ServerResult<()> {
@@ -90,7 +62,7 @@ async fn main() -> ServerResult<()> {
     init_logging(&cli.log_destination, cli.log_file.as_deref())?;
 
     // log the version of the server
-    dual_info!("Version: {}", env!("CARGO_PKG_VERSION"));
+    aries::dual_info!("Version: {}", env!("CARGO_PKG_VERSION"));
 
     // Load the config based on the command
     let config = Config::load(&cli.config).await?;
@@ -100,7 +72,7 @@ async fn main() -> ServerResult<()> {
         .set(cli.check_health_interval)
         .map_err(|e| {
             let err_msg = format!("Failed to set health check interval: {e}");
-            dual_error!("{err_msg}");
+            aries::dual_error!("{err_msg}");
             ServerError::Operation(err_msg)
         })?;
 
@@ -113,35 +85,35 @@ async fn main() -> ServerResult<()> {
     // Initialize memory system if enabled
     let memory = if let Some(memory_config) = &config.memory {
         if memory_config.enable {
-            dual_info!("Memory system is enabled");
+            aries::dual_info!("Memory system is enabled");
 
             // Ensure data directory exists
             if let Some(parent) = std::path::Path::new(&memory_config.database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     let err_msg = format!("Failed to create memory data directory: {e}");
-                    dual_error!("{err_msg}");
+                    aries::dual_error!("{err_msg}");
                     ServerError::Operation(err_msg)
                 })?;
             }
 
-            match crate::memory::CompleteChatMemory::new(memory_config.clone()).await {
+            match memory::CompleteChatMemory::new(memory_config.clone()).await {
                 Ok(memory_system) => {
-                    dual_info!("Memory system initialized successfully");
+                    aries::dual_info!("Memory system initialized successfully");
                     Some(Arc::new(memory_system))
                 }
                 Err(e) => {
-                    dual_error!("Failed to initialize memory system: {}", e);
+                    aries::dual_error!("Failed to initialize memory system: {}", e);
                     return Err(ServerError::Operation(format!(
                         "Memory initialization failed: {e}"
                     )));
                 }
             }
         } else {
-            dual_info!("Memory system is disabled");
+            aries::dual_info!("Memory system is disabled");
             None
         }
     } else {
-        dual_info!("Memory system is not configured");
+        aries::dual_info!("Memory system is not configured");
         None
     };
 
@@ -150,7 +122,7 @@ async fn main() -> ServerResult<()> {
     let skill_config = config.skill.clone().unwrap_or_default();
 
     if skill_config.enabled {
-        dual_info!("Skills system is enabled");
+        aries::dual_info!("Skills system is enabled");
 
         // Find the first valid skills directory
         let mut skills_dir = None;
@@ -169,26 +141,29 @@ async fn main() -> ServerResult<()> {
                     // Load all skills from the directory
                     match registry.load_all().await {
                         Ok(count) => {
-                            dual_info!(
+                            aries::dual_info!(
                                 "Skills system initialized: loaded {} skills from {}",
                                 count,
                                 dir
                             );
                         }
                         Err(e) => {
-                            dual_warn!("Failed to load skills: {}. Continuing without skills.", e);
+                            aries::dual_warn!(
+                                "Failed to load skills: {}. Continuing without skills.",
+                                e
+                            );
                         }
                     }
                 }
                 Err(e) => {
-                    dual_warn!(
+                    aries::dual_warn!(
                         "Failed to initialize skills registry: {}. Continuing without skills.",
                         e
                     );
                 }
             }
         } else {
-            dual_info!(
+            aries::dual_info!(
                 "No skills directories found. Searched: {:?}",
                 skill_config.directories
             );
@@ -198,24 +173,24 @@ async fn main() -> ServerResult<()> {
             if execution_config.enabled {
                 match ScriptExecutorManager::init_global(execution_config).await {
                     Ok(manager) => {
-                        dual_info!(
+                        aries::dual_info!(
                             "Script executor manager initialized: {} executors registered",
                             manager.executor_count()
                         );
                     }
                     Err(e) => {
-                        dual_warn!(
+                        aries::dual_warn!(
                             "Failed to initialize script executor manager: {}. Scripts will not be executable.",
                             e
                         );
                     }
                 }
             } else {
-                dual_info!("Script execution is disabled in config");
+                aries::dual_info!("Script execution is disabled in config");
             }
         }
     } else {
-        dual_info!("Skills system is disabled in config");
+        aries::dual_info!("Skills system is disabled in config");
     }
 
     // Save skill API config before moving config into AppState
@@ -249,14 +224,14 @@ async fn main() -> ServerResult<()> {
             config_api.hot_reload_debounce_ms,
         ) {
             Ok(watcher) => {
-                dual_info!(
+                aries::dual_info!(
                     "Configuration hot-reload enabled (debounce: {}ms)",
                     config_api.hot_reload_debounce_ms
                 );
                 Some(watcher)
             }
             Err(e) => {
-                dual_warn!(
+                aries::dual_warn!(
                     "Failed to start configuration hot-reload watcher: {}. Hot-reload will be disabled.",
                     e
                 );
@@ -268,7 +243,7 @@ async fn main() -> ServerResult<()> {
             .as_ref()
             .is_some_and(|s| !s.hot_reload_enabled)
         {
-            dual_info!("Configuration hot-reload is disabled in config");
+            aries::dual_info!("Configuration hot-reload is disabled in config");
         }
         None
     };
@@ -283,7 +258,7 @@ async fn main() -> ServerResult<()> {
 
     // Start the health check task if enabled
     if cli.check_health {
-        dual_info!("Health check is enabled");
+        aries::dual_info!("Health check is enabled");
         Arc::clone(&state).start_health_check_task().await;
     }
 
@@ -340,8 +315,8 @@ async fn main() -> ServerResult<()> {
         );
 
     // Add memory endpoints only if memory is enabled
-    if state.memory.is_some() {
-        dual_info!("Memory endpoints are enabled");
+    if state.has_memory() {
+        aries::dual_info!("Memory endpoints are enabled");
         main_router = main_router
             .route(
                 "/v1/memory/conversations/{conv_id}/history",
@@ -361,12 +336,12 @@ async fn main() -> ServerResult<()> {
                 get(handlers::list_user_conversations_handler),
             );
     } else {
-        dual_info!("Memory endpoints are disabled");
+        aries::dual_info!("Memory endpoints are disabled");
     }
 
     // Add skills API endpoints if skills system is initialized
     let skills_router: Option<Router> = if SkillRegistry::global().is_ok() {
-        dual_info!("Skills API endpoints are enabled");
+        aries::dual_info!("Skills API endpoints are enabled");
 
         // Initialize rate limiter if configured
         if let Some(ref cfg) = skill_api_config {
@@ -378,10 +353,10 @@ async fn main() -> ServerResult<()> {
             skills::middleware::SkillsApiState::from_config(skill_api_config.as_ref());
 
         if skills_api_state.api_key.is_some() {
-            dual_info!("Skills API authentication is enabled");
+            aries::dual_info!("Skills API authentication is enabled");
         }
         if skills_api_state.rate_limiting_enabled {
-            dual_info!("Skills API rate limiting is enabled");
+            aries::dual_info!("Skills API rate limiting is enabled");
         }
 
         // Create skills router with middleware
@@ -410,7 +385,7 @@ async fn main() -> ServerResult<()> {
 
         Some(router)
     } else {
-        dual_info!("Skills API endpoints are disabled (skills system not initialized)");
+        aries::dual_info!("Skills API endpoints are disabled (skills system not initialized)");
         None
     };
 
@@ -426,13 +401,13 @@ async fn main() -> ServerResult<()> {
     // Create artifacts router if enabled
     let artifacts_router: Option<Router> = if let Some(ref art_config) = artifacts_config {
         if art_config.enabled {
-            dual_info!("Artifacts system is enabled");
+            aries::dual_info!("Artifacts system is enabled");
 
             // Ensure data directory exists
             if let Some(parent) = std::path::Path::new(&art_config.database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     let err_msg = format!("Failed to create artifacts data directory: {e}");
-                    dual_error!("{err_msg}");
+                    aries::dual_error!("{err_msg}");
                     ServerError::Operation(err_msg)
                 })?;
             }
@@ -466,10 +441,10 @@ async fn main() -> ServerResult<()> {
                             );
                             // Start returns a JoinHandle for the background task
                             let _handle = cleaner.start();
-                            dual_info!("Artifact cleaner started");
+                            aries::dual_info!("Artifact cleaner started");
                         }
                         Err(e) => {
-                            dual_error!("Failed to initialize artifact cleaner: {}", e);
+                            aries::dual_error!("Failed to initialize artifact cleaner: {}", e);
                         }
                     }
                 });
@@ -514,11 +489,11 @@ async fn main() -> ServerResult<()> {
 
             Some(router)
         } else {
-            dual_info!("Artifacts system is disabled");
+            aries::dual_info!("Artifacts system is disabled");
             None
         }
     } else {
-        dual_info!("Artifacts system is not configured");
+        aries::dual_info!("Artifacts system is not configured");
         None
     };
 
@@ -552,12 +527,12 @@ async fn main() -> ServerResult<()> {
                     req.extensions_mut().insert(cancel_token);
 
                     // Log request start
-                    dual_info!("Request started - ID: {}", request_id);
+                    aries::dual_info!("Request started - ID: {}", request_id);
 
                     let response = next.run(req).await;
 
                     // Log request completion
-                    dual_info!("Request completed - ID: {}", request_id);
+                    aries::dual_info!("Request completed - ID: {}", request_id);
 
                     response
                 },
@@ -570,11 +545,11 @@ async fn main() -> ServerResult<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
         let err_msg = format!("Failed to bind to address: {e}");
 
-        dual_error!("{err_msg}");
+        aries::dual_error!("{err_msg}");
 
         ServerError::Operation(err_msg)
     })?;
-    dual_info!("Listening on {}", addr);
+    aries::dual_info!("Listening on {}", addr);
 
     // Set up graceful shutdown
     let server =
@@ -583,12 +558,12 @@ async fn main() -> ServerResult<()> {
     // Start the server
     match server.await {
         Ok(_) => {
-            dual_info!("Server shutdown completed");
+            aries::dual_info!("Server shutdown completed");
             Ok(())
         }
         Err(e) => {
             let err_msg = format!("Server failed: {e}");
-            dual_error!("{err_msg}");
+            aries::dual_error!("{err_msg}");
             Err(ServerError::Operation(err_msg))
         }
     }
@@ -614,10 +589,10 @@ async fn shutdown_signal() {
 
     tokio::select! {
         _ = ctrl_c => {
-            dual_info!("Received Ctrl+C, starting graceful shutdown");
+            aries::dual_info!("Received Ctrl+C, starting graceful shutdown");
         },
         _ = terminate => {
-            dual_info!("Received SIGTERM, starting graceful shutdown");
+            aries::dual_info!("Received SIGTERM, starting graceful shutdown");
         },
     }
 }
@@ -731,371 +706,5 @@ fn get_log_level_from_env() -> Level {
         Some("warn") => Level::WARN,
         Some("error") => Level::ERROR,
         _ => Level::INFO,
-    }
-}
-
-/// Application state
-pub(crate) struct AppState {
-    server_group: Arc<RwLock<HashMap<ServerKind, ServerGroup>>>,
-    config: Arc<RwLock<Config>>,
-    /// Path to the configuration file (for persistence)
-    config_path: Option<std::path::PathBuf>,
-    server_info: Arc<RwLock<ServerInfo>>,
-    models: Arc<RwLock<HashMap<ServerId, Vec<endpoints::models::Model>>>>,
-    memory: Option<Arc<crate::memory::CompleteChatMemory>>,
-    /// Timestamp of the last API-based config update (for conflict detection with file watcher)
-    last_config_update_time: RwLock<Option<Instant>>,
-}
-impl AppState {
-    pub(crate) fn new(config: Config, server_info: ServerInfo) -> Self {
-        Self {
-            server_group: Arc::new(RwLock::new(HashMap::new())),
-            config: Arc::new(RwLock::new(config)),
-            config_path: None,
-            server_info: Arc::new(RwLock::new(server_info)),
-            models: Arc::new(RwLock::new(HashMap::new())),
-            memory: None,
-            last_config_update_time: RwLock::new(None),
-        }
-    }
-
-    /// Record a config update timestamp (used for conflict detection with file watcher)
-    pub(crate) async fn record_config_update_time(&self) {
-        let mut last_update = self.last_config_update_time.write().await;
-        *last_update = Some(Instant::now());
-    }
-
-    /// Get the last config update timestamp
-    pub(crate) async fn get_last_config_update_time(&self) -> Option<Instant> {
-        *self.last_config_update_time.read().await
-    }
-
-    pub(crate) fn with_config_path(mut self, path: std::path::PathBuf) -> Self {
-        self.config_path = Some(path);
-        self
-    }
-
-    pub(crate) fn with_memory(mut self, memory: Arc<crate::memory::CompleteChatMemory>) -> Self {
-        self.memory = Some(memory);
-        self
-    }
-
-    /// Get the configuration file path if set
-    pub(crate) fn get_config_path(&self) -> Option<&std::path::Path> {
-        self.config_path.as_deref()
-    }
-
-    pub(crate) async fn register_downstream_server(&self, server: Server) -> ServerResult<()> {
-        if server.kind.contains(ServerKind::chat) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::chat)
-                .or_insert(ServerGroup::new(ServerKind::chat))
-                .register(server.clone())
-                .await?;
-        }
-        if server.kind.contains(ServerKind::embeddings) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::embeddings)
-                .or_insert(ServerGroup::new(ServerKind::embeddings))
-                .register(server.clone())
-                .await?;
-        }
-        if server.kind.contains(ServerKind::image) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::image)
-                .or_insert(ServerGroup::new(ServerKind::image))
-                .register(server.clone())
-                .await?;
-        }
-        if server.kind.contains(ServerKind::tts) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::tts)
-                .or_insert(ServerGroup::new(ServerKind::tts))
-                .register(server.clone())
-                .await?;
-        }
-        if server.kind.contains(ServerKind::translate) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::translate)
-                .or_insert(ServerGroup::new(ServerKind::translate))
-                .register(server.clone())
-                .await?;
-        }
-        if server.kind.contains(ServerKind::transcribe) {
-            self.server_group
-                .write()
-                .await
-                .entry(ServerKind::transcribe)
-                .or_insert(ServerGroup::new(ServerKind::transcribe))
-                .register(server.clone())
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn unregister_downstream_server(
-        &self,
-        server_id: impl AsRef<str>,
-    ) -> ServerResult<()> {
-        let mut found = false;
-
-        // unregister the server from the servers
-        {
-            // parse server kind from server id
-            let kinds = server_id
-                .as_ref()
-                .split("-server-")
-                .next()
-                .unwrap()
-                .split("-")
-                .collect::<Vec<&str>>();
-
-            let group_map = self.server_group.read().await;
-
-            for kind in kinds {
-                let kind = ServerKind::from_str(kind).unwrap();
-                if let Some(group) = group_map.get(&kind) {
-                    group.unregister(server_id.as_ref()).await?;
-                    dual_info!("Unregistered {} server: {}", &kind, server_id.as_ref());
-
-                    if !found {
-                        found = true;
-                    }
-                }
-            }
-        }
-
-        if found {
-            // remove the server info from the server_info
-            let mut server_info = self.server_info.write().await;
-            server_info.servers.remove(server_id.as_ref());
-
-            // remove the server from the models
-            let mut models = self.models.write().await;
-            models.remove(server_id.as_ref());
-        }
-
-        if !found {
-            return Err(ServerError::Operation(format!(
-                "Server {} not found",
-                server_id.as_ref()
-            )));
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn list_downstream_servers(
-        &self,
-    ) -> ServerResult<HashMap<ServerKind, Vec<Server>>> {
-        let servers = self.server_group.read().await;
-
-        let mut server_groups = HashMap::new();
-        for (kind, group) in servers.iter() {
-            if !group.is_empty().await {
-                let servers = group.servers.read().await;
-
-                // Create a new Vec with cloned Server instances using async stream
-                let server_vec = stream::iter(servers.iter())
-                    .then(|server_lock| async move {
-                        let server = server_lock.read().await;
-                        server.clone()
-                    })
-                    .collect::<Vec<_>>()
-                    .await;
-
-                server_groups.insert(*kind, server_vec);
-            }
-        }
-
-        Ok(server_groups)
-    }
-
-    pub(crate) async fn check_server_health(&self) -> ServerResult<()> {
-        if !self.server_group.read().await.is_empty() {
-            let mut unhealthy_servers = Vec::new();
-
-            // Check health status of downstream servers
-            // 1. Get all registered downstream servers
-            // 2. Check health status of downstream servers
-            //   2.1 If a downstream server has multiple types, only perform one health check
-            //   2.2 If there are multiple downstream servers of the same type, health checks are needed for all
-            //   2.3 If two or more downstream servers have different types but the same URL, only perform one health check
-            // 3. Remove unhealthy downstream servers
-            {
-                let group_map = self.server_group.read().await;
-
-                // check health of unique servers
-                let mut unique_server_ids = HashSet::new();
-                for (kind, group) in group_map.iter() {
-                    if !group.is_empty().await {
-                        let servers = group.servers.read().await;
-                        for server_lock in servers.iter() {
-                            let mut server = server_lock.write().await;
-
-                            if !unique_server_ids.contains(&server.id)
-                                && unique_server_ids.contains(&server.url)
-                            {
-                                dual_info!("Checking health of {}", &server.id);
-
-                                unique_server_ids.insert(server.id.clone());
-                                unique_server_ids.insert(server.url.clone());
-
-                                let is_healthy = server.check_health().await;
-                                if !is_healthy {
-                                    dual_warn!("{} server {} is unhealthy", kind, &server.id);
-                                    unhealthy_servers.push(server.id.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Unregister unhealthy servers
-            if !unhealthy_servers.is_empty() {
-                for server_id in unhealthy_servers {
-                    self.unregister_downstream_server(&server_id).await?;
-                }
-            }
-
-            // Push the healthy servers to the external service if configured
-            if let Some(push_url) = &self.config.read().await.server_health_push_url {
-                // collect the healthy servers by kind
-                let mut healthy_servers: HashMap<ServerKind, Vec<String>> = HashMap::new();
-                {
-                    let group_map = self.server_group.read().await;
-                    for (kind, group) in group_map.iter() {
-                        if group.is_empty().await {
-                            dual_warn!("No {} servers available after health check", kind);
-                        }
-
-                        healthy_servers.insert(
-                            *kind,
-                            group.healthy_servers.read().await.iter().cloned().collect(),
-                        );
-                    }
-                }
-
-                let health_status = serde_json::json!({
-                    "rag": self.config.read().await.rag.as_ref().unwrap().enable,
-                    "servers": healthy_servers,
-                });
-
-                dual_debug!(
-                    "Healthy servers:\n{}",
-                    serde_json::to_string_pretty(&health_status).unwrap()
-                );
-
-                // Send the healthy servers to the external service
-                reqwest::Client::new()
-                    .post(push_url)
-                    .json(&health_status)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        let err_msg = format!("Failed to send health check result: {e}");
-
-                        dual_error!("{}", err_msg);
-
-                        ServerError::Operation(err_msg)
-                    })?;
-            }
-        } else {
-            dual_warn!("No servers registered, skipping health check");
-        }
-
-        Ok(())
-    }
-
-    pub(crate) async fn start_health_check_task(self: Arc<Self>) {
-        let check_interval = HEALTH_CHECK_INTERVAL.get().unwrap_or(&60);
-        let check_interval = tokio::time::Duration::from_secs(*check_interval);
-
-        tokio::spawn(async move {
-            loop {
-                dual_debug!("Starting health check");
-
-                if let Err(e) = self.check_server_health().await {
-                    dual_error!("Health check error: {}", e);
-                }
-
-                tokio::time::sleep(check_interval).await;
-            }
-        });
-    }
-
-    pub(crate) async fn register_config_servers(self: &Arc<Self>) -> ServerResult<()> {
-        let config = self.config.read().await;
-
-        // Register chat service from configuration file
-        if let Some(chat_config) = &config.chat {
-            dual_info!("Registering chat service from config: {}", chat_config.url);
-            let server = Server::from_chat_config(chat_config)?;
-
-            // Update model list for the server
-            let headers = axum::http::HeaderMap::new();
-            if let Err(e) = crate::handlers::update_model_list(
-                axum::extract::State(Arc::clone(self)),
-                &headers,
-                "config-registration",
-                &server,
-            )
-            .await
-            {
-                dual_warn!(
-                    "Failed to update model list for chat server {}: {}",
-                    server.id,
-                    e
-                );
-                // Continue with registration even if model list update fails
-            }
-
-            self.register_downstream_server(server).await?;
-            dual_info!("Chat service registered successfully");
-        }
-
-        // Register embedding service from configuration file
-        if let Some(embedding_config) = &config.embedding {
-            dual_info!(
-                "Registering embedding service from config: {}",
-                embedding_config.url
-            );
-            let server = Server::from_embedding_config(embedding_config)?;
-
-            // Update model list for the server
-            let headers = axum::http::HeaderMap::new();
-            if let Err(e) = crate::handlers::update_model_list(
-                axum::extract::State(Arc::clone(self)),
-                &headers,
-                "config-registration",
-                &server,
-            )
-            .await
-            {
-                dual_warn!(
-                    "Failed to update model list for embedding server {}: {}",
-                    server.id,
-                    e
-                );
-                // Continue with registration even if model list update fails
-            }
-
-            self.register_downstream_server(server).await?;
-            dual_info!("Embedding service registered successfully");
-        }
-
-        Ok(())
     }
 }

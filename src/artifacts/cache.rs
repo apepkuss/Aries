@@ -39,6 +39,14 @@ pub struct ArtifactCache {
 }
 
 #[allow(dead_code)]
+impl Default for ArtifactCache {
+    /// Creates a cache with default settings (100 entries, 10MB)
+    fn default() -> Self {
+        Self::new(100, 10 * 1024 * 1024)
+    }
+}
+
+#[allow(dead_code)]
 impl ArtifactCache {
     /// Creates a new ArtifactCache
     ///
@@ -52,11 +60,6 @@ impl ArtifactCache {
             max_size,
             current_size: Arc::new(RwLock::new(0)),
         }
-    }
-
-    /// Creates a cache with default settings (100 entries, 10MB)
-    pub fn default() -> Self {
-        Self::new(100, 10 * 1024 * 1024)
     }
 
     /// Gets artifact metadata from cache

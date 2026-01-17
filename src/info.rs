@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::server::ServerId;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub(crate) struct ServerInfo {
+pub struct ServerInfo {
     #[serde(rename = "servers", skip_serializing_if = "HashMap::is_empty")]
     pub(crate) servers: HashMap<ServerId, ApiServer>,
 }

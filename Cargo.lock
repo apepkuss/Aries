@@ -3,53 +3,6 @@
 version = 4
 
 [[package]]
-name = "Aries"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "bitflags 2.9.4",
- "bollard",
- "bytes",
- "chat-prompts",
- "chrono",
- "clap",
- "config",
- "dirs",
- "dotenv",
- "endpoints",
- "futures-util",
- "http",
- "humantime-serde",
- "md5",
- "mime_guess",
- "notify",
- "once_cell",
- "regex",
- "reqwest",
- "rmcp",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "shellexpand",
- "sqlx",
- "tempfile",
- "thiserror 2.0.16",
- "tokio",
- "tokio-util",
- "toml 0.9.11+spec-1.1.0",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -182,6 +135,53 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "aries"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "bitflags 2.9.4",
+ "bollard",
+ "bytes",
+ "chat-prompts",
+ "chrono",
+ "clap",
+ "config",
+ "dirs",
+ "dotenv",
+ "endpoints",
+ "futures-util",
+ "http",
+ "humantime-serde",
+ "md5",
+ "mime_guess",
+ "notify",
+ "once_cell",
+ "regex",
+ "reqwest",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "shellexpand",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.16",
+ "tokio",
+ "tokio-util",
+ "toml 0.9.11+spec-1.1.0",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+ "zip",
 ]
 
 [[package]]

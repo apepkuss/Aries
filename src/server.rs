@@ -21,7 +21,7 @@ const TIMEOUT: u64 = 10;
 pub(crate) type ServerId = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct ServerIdToRemove {
+pub struct ServerIdToRemove {
     pub server_id: ServerId,
 }
 

@@ -1,7 +1,11 @@
 [package]
-name    = "Aries"
+name    = "aries"
 version = "0.0.1"
 edition = "2024"
+
+[lib]
+name = "aries"
+path = "src/lib.rs"
 
 [[bin]]
 name = "aries"

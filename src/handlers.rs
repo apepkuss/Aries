@@ -75,7 +75,7 @@ pub struct ConversationInfo {
     pub updated_at: String,
 }
 
-pub(crate) async fn chat_handler(
+pub async fn chat_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     headers: HeaderMap,
@@ -234,7 +234,7 @@ pub(crate) async fn chat_handler(
     res
 }
 
-pub(crate) async fn embeddings_handler(
+pub async fn embeddings_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     headers: HeaderMap,
@@ -380,7 +380,7 @@ pub(crate) async fn embeddings_handler(
     }
 }
 
-pub(crate) async fn audio_transcriptions_handler(
+pub async fn audio_transcriptions_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     req: axum::extract::Request<Body>,
@@ -507,7 +507,7 @@ pub(crate) async fn audio_transcriptions_handler(
     }
 }
 
-pub(crate) async fn audio_translations_handler(
+pub async fn audio_translations_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     req: axum::extract::Request<Body>,
@@ -634,7 +634,7 @@ pub(crate) async fn audio_translations_handler(
     }
 }
 
-pub(crate) async fn audio_tts_handler(
+pub async fn audio_tts_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     req: axum::extract::Request<Body>,
@@ -757,7 +757,7 @@ pub(crate) async fn audio_tts_handler(
     }
 }
 
-pub(crate) async fn image_handler(
+pub async fn image_handler(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
     req: axum::extract::Request<Body>,
@@ -881,7 +881,7 @@ pub(crate) async fn image_handler(
     }
 }
 
-pub(crate) async fn models_handler(
+pub async fn models_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> ServerResult<axum::response::Response> {
@@ -914,7 +914,7 @@ pub(crate) async fn models_handler(
         })
 }
 
-pub(crate) async fn info_handler(
+pub async fn info_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> ServerResult<axum::response::Response> {
@@ -975,7 +975,7 @@ pub(crate) async fn info_handler(
 }
 
 /// Handler to get chat history by conversation ID
-pub(crate) async fn get_conversation_history_handler(
+pub async fn get_conversation_history_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     axum::extract::Path(conv_id): axum::extract::Path<String>,
@@ -1060,7 +1060,7 @@ pub(crate) async fn get_conversation_history_handler(
 }
 
 /// Handler to get chat history by user ID
-pub(crate) async fn get_user_history_handler(
+pub async fn get_user_history_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     axum::extract::Path(user_id): axum::extract::Path<String>,
@@ -1145,7 +1145,7 @@ pub(crate) async fn get_user_history_handler(
 }
 
 /// Handler to list conversations for a specific user
-pub(crate) async fn list_user_conversations_handler(
+pub async fn list_user_conversations_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     axum::extract::Path(user_id): axum::extract::Path<String>,
@@ -1236,7 +1236,7 @@ pub(crate) async fn list_user_conversations_handler(
 
 /// Handler to delete a conversation by ID
 /// DELETE /v1/memory/conversations/{conv_id}
-pub(crate) async fn delete_conversation_handler(
+pub async fn delete_conversation_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     axum::extract::Path(conv_id): axum::extract::Path<String>,
@@ -1342,7 +1342,7 @@ pub(crate) async fn delete_conversation_handler(
 
 /// Handler to update a conversation (rename)
 /// PATCH /v1/memory/conversations/{conv_id}
-pub(crate) async fn update_conversation_handler(
+pub async fn update_conversation_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     axum::extract::Path(conv_id): axum::extract::Path<String>,
@@ -1620,10 +1620,10 @@ pub(crate) async fn update_model_list(
     Ok(())
 }
 
-pub(crate) mod admin {
+pub mod admin {
     use super::*;
 
-    pub(crate) async fn register_downstream_server_handler(
+    pub async fn register_downstream_server_handler(
         State(state): State<Arc<AppState>>,
         headers: HeaderMap,
         Json(mut server): Json<Server>,
@@ -1810,7 +1810,7 @@ pub(crate) mod admin {
         Ok(())
     }
 
-    pub(crate) async fn remove_downstream_server_handler(
+    pub async fn remove_downstream_server_handler(
         State(state): State<Arc<AppState>>,
         headers: HeaderMap,
         Json(server_id): Json<ServerIdToRemove>,
@@ -1845,7 +1845,7 @@ pub(crate) mod admin {
         Ok(response)
     }
 
-    pub(crate) async fn list_downstream_servers_handler(
+    pub async fn list_downstream_servers_handler(
         State(state): State<Arc<AppState>>,
         headers: HeaderMap,
     ) -> ServerResult<axum::response::Response> {

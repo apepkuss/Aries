@@ -2,6 +2,8 @@
 //!
 //! These validators perform fast, local checks without LLM calls.
 
+use std::str::FromStr;
+
 use async_trait::async_trait;
 
 use crate::reflection::validator::{
@@ -109,18 +111,21 @@ pub enum SupportedLanguage {
     TypeScript,
 }
 
-impl SupportedLanguage {
-    /// Parses a language from a string.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for SupportedLanguage {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "rust" | "rs" => Some(Self::Rust),
-            "python" | "py" => Some(Self::Python),
-            "javascript" | "js" => Some(Self::JavaScript),
-            "typescript" | "ts" => Some(Self::TypeScript),
-            _ => None,
+            "rust" | "rs" => Ok(Self::Rust),
+            "python" | "py" => Ok(Self::Python),
+            "javascript" | "js" => Ok(Self::JavaScript),
+            "typescript" | "ts" => Ok(Self::TypeScript),
+            _ => Err(()),
         }
     }
+}
 
+impl SupportedLanguage {
     /// Returns the file extension for this language.
     pub fn extension(&self) -> &str {
         match self {
@@ -149,7 +154,7 @@ impl CodeValidator {
 
     /// Creates a code validator from a language string.
     pub fn from_language_str(lang: &str) -> Option<Self> {
-        SupportedLanguage::from_str(lang).map(Self::new)
+        SupportedLanguage::from_str(lang).ok().map(Self::new)
     }
 
     /// Validates Rust code syntax using basic heuristic checks.
@@ -776,17 +781,17 @@ console.log(x);
     fn test_supported_language_from_str() {
         assert_eq!(
             SupportedLanguage::from_str("rust"),
-            Some(SupportedLanguage::Rust)
+            Ok(SupportedLanguage::Rust)
         );
         assert_eq!(
             SupportedLanguage::from_str("Python"),
-            Some(SupportedLanguage::Python)
+            Ok(SupportedLanguage::Python)
         );
         assert_eq!(
             SupportedLanguage::from_str("JS"),
-            Some(SupportedLanguage::JavaScript)
+            Ok(SupportedLanguage::JavaScript)
         );
-        assert_eq!(SupportedLanguage::from_str("unknown"), None);
+        assert_eq!(SupportedLanguage::from_str("unknown"), Err(()));
     }
 
     #[test]

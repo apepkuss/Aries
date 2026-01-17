@@ -1,7 +1,7 @@
 use once_cell::sync::OnceCell;
 
 // Global log configuration
-pub(crate) static LOG_DESTINATION: OnceCell<String> = OnceCell::new();
+pub static LOG_DESTINATION: OnceCell<String> = OnceCell::new();
 
 // Helper macro for dual logging (to both stdout and log file)
 #[macro_export]
