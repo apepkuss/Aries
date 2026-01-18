@@ -494,7 +494,7 @@ async fn call_responses_backend(
 
     let url = crate::handlers::build_api_url(&target_server.url, "responses");
 
-    let client = reqwest::Client::new();
+    let client = crate::utils::create_http_client();
     let response = client
         .post(&url)
         .header("Content-Type", "application/json")

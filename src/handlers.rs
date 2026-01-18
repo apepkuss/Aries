@@ -299,7 +299,7 @@ pub async fn embeddings_handler(
     let ds_request = if let Some(api_key) = &embedding_server.api_key
         && !api_key.is_empty()
     {
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .post(embeddings_service_url)
             .header("Content-Type", content_type)
             .header(AUTHORIZATION, api_key)
@@ -312,13 +312,13 @@ pub async fn embeddings_handler(
             .unwrap()
             .to_string();
 
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .post(embeddings_service_url)
             .header("Content-Type", content_type)
             .header("Authorization", authorization)
             .json(&request)
     } else {
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .post(embeddings_service_url)
             .header("Content-Type", content_type)
             .json(&request)
@@ -431,7 +431,7 @@ pub async fn audio_transcriptions_handler(
     );
 
     // Create request client
-    let mut ds_request = reqwest::Client::new().post(transcription_server_url);
+    let mut ds_request = crate::utils::create_http_client().post(transcription_server_url);
     if let Some(api_key) = &transcription_server.api_key
         && !api_key.is_empty()
     {
@@ -558,7 +558,7 @@ pub async fn audio_translations_handler(
     );
 
     // Create request client
-    let mut ds_request = reqwest::Client::new().post(translation_server_url);
+    let mut ds_request = crate::utils::create_http_client().post(translation_server_url);
     if let Some(api_key) = &translation_server.api_key
         && !api_key.is_empty()
     {
@@ -682,7 +682,7 @@ pub async fn audio_tts_handler(
     );
 
     // Create request client
-    let mut ds_request = reqwest::Client::new().post(tts_server_url);
+    let mut ds_request = crate::utils::create_http_client().post(tts_server_url);
     if let Some(api_key) = &tts_server.api_key
         && !api_key.is_empty()
     {
@@ -805,7 +805,7 @@ pub async fn image_handler(
     );
 
     // Create request client
-    let mut ds_request = reqwest::Client::new().post(image_server_url);
+    let mut ds_request = crate::utils::create_http_client().post(image_server_url);
     if let Some(api_key) = &image_server.api_key
         && !api_key.is_empty()
     {
@@ -1516,7 +1516,7 @@ pub(crate) async fn update_model_list(
             format!("Bearer {api_key}")
         };
 
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .get(&list_models_url)
             .header(CONTENT_TYPE, "application/json")
             .header(AUTHORIZATION, auth_info)
@@ -1534,7 +1534,7 @@ pub(crate) async fn update_model_list(
             .to_str()
             .unwrap()
             .to_string();
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .get(&list_models_url)
             .header(CONTENT_TYPE, "application/json")
             .header(AUTHORIZATION, authorization)
@@ -1546,7 +1546,7 @@ pub(crate) async fn update_model_list(
                 ServerError::Operation(err_msg)
             })?
     } else {
-        reqwest::Client::new()
+        crate::utils::create_http_client()
             .get(&list_models_url)
             .send()
             .await
@@ -1702,7 +1702,7 @@ pub mod admin {
 
         let server_info_url = format!("{server_url}/info");
 
-        let client = reqwest::Client::new();
+        let client = crate::utils::create_http_client();
         let response = if let Some(api_key) = &server.api_key
             && !api_key.is_empty()
         {

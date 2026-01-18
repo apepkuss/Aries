@@ -56,7 +56,7 @@ impl ReflectionEngine {
     /// Creates a new reflection engine.
     pub fn new(server: Arc<RwLock<LlmServerInfo>>, config: ReflectionConfig) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::utils::create_http_client(),
             server,
             config,
         }

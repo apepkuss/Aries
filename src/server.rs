@@ -112,7 +112,7 @@ impl Server {
         }
 
         // Perform new health check
-        let client = reqwest::Client::new();
+        let client = crate::utils::create_http_client();
         let health_url = format!("{}/info", self.url);
 
         // Use configured timeout duration
@@ -142,7 +142,7 @@ impl Server {
         is_healthy
     }
 
-    pub(crate) fn from_chat_config(chat_config: &crate::config::ChatConfig) -> ServerResult<Self> {
+    pub fn from_chat_config(chat_config: &crate::config::ChatConfig) -> ServerResult<Self> {
         // Validate URL format
         if chat_config.url.is_empty() {
             return Err(ServerError::Operation(
@@ -153,7 +153,7 @@ impl Server {
         // Check if API key is available
         let api_key = chat_config.get_api_key();
 
-        let id = format!("config-chat-{}", Uuid::new_v4());
+        let id = format!("chat-server-{}", Uuid::new_v4());
 
         Ok(Server {
             id,
@@ -178,7 +178,7 @@ impl Server {
         // Check if API key is available
         let api_key = embedding_config.get_api_key();
 
-        let id = format!("config-embedding-{}", Uuid::new_v4());
+        let id = format!("embeddings-server-{}", Uuid::new_v4());
 
         Ok(Server {
             id,
@@ -386,7 +386,7 @@ fn test_deserialize_server_kind() {
 }
 
 #[derive(Debug)]
-pub(crate) struct ServerGroup {
+pub struct ServerGroup {
     pub(crate) servers: RwLock<Vec<RwLock<Server>>>,
     pub(crate) healthy_servers: RwLock<HashSet<ServerId>>,
     ty: ServerKind,
@@ -457,6 +457,16 @@ impl ServerGroup {
 
     pub(crate) async fn is_empty(&self) -> bool {
         self.healthy_servers.read().await.is_empty()
+    }
+
+    /// Returns a list of all registered server IDs.
+    pub async fn server_ids(&self) -> Vec<String> {
+        let servers = self.servers.read().await;
+        let mut ids = Vec::with_capacity(servers.len());
+        for server in servers.iter() {
+            ids.push(server.read().await.id.clone());
+        }
+        ids
     }
 }
 #[async_trait]

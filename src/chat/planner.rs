@@ -246,8 +246,6 @@ pub struct ChatLlmProvider {
     api_key: Option<String>,
     /// Model name to use for requests.
     model: String,
-    /// HTTP client for making requests.
-    client: reqwest::Client,
 }
 
 impl ChatLlmProvider {
@@ -257,7 +255,6 @@ impl ChatLlmProvider {
             chat_url,
             api_key,
             model,
-            client: reqwest::Client::new(),
         }
     }
 }
@@ -265,38 +262,67 @@ impl ChatLlmProvider {
 #[async_trait]
 impl LlmProvider for ChatLlmProvider {
     async fn complete(&self, messages: Vec<PlannerMessage>) -> Result<String, ServerError> {
-        // Build request body
+        // Build request body - use minimal fields for maximum compatibility
+        // Some local LLM servers (LlamaEdge, Ollama) may not support all OpenAI parameters
         let body = serde_json::json!({
             "model": &self.model,
             "messages": messages,
-            "temperature": 0.7,
             "stream": false
         });
 
-        // Build request
-        let mut request = self.client.post(&self.chat_url).json(&body);
+        crate::dual_info!(
+            "📤 Sending planning request to: {} with model: {}",
+            self.chat_url,
+            self.model
+        );
+        crate::dual_debug!(
+            "📤 Request body: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_default()
+        );
 
+        // Use curl command directly for compatibility with LlamaEdge and other local LLM servers
+        // reqwest has issues with certain local servers that curl handles correctly
+        let body_string = serde_json::to_string(&body)
+            .map_err(|e| ServerError::Operation(format!("Failed to serialize request: {}", e)))?;
+
+        crate::dual_info!("📤 Using curl to send planning request...");
+
+        // Build curl command
+        let mut cmd = std::process::Command::new("curl");
+        cmd.arg("-s")
+            .arg("-X")
+            .arg("POST")
+            .arg(&self.chat_url)
+            .arg("-H")
+            .arg("Content-Type: application/json");
+
+        // Add authorization header if API key is present
         if let Some(ref key) = self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", key));
+            cmd.arg("-H").arg(format!("Authorization: Bearer {}", key));
         }
 
-        // Send request
-        let response = request.send().await.map_err(|e| {
-            ServerError::Operation(format!("Failed to send planning request: {}", e))
-        })?;
+        cmd.arg("-d").arg(&body_string);
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Err(ServerError::Operation(format!(
-                "Planning request failed with status {}: {}",
-                status, text
-            )));
+        let output = cmd
+            .output()
+            .map_err(|e| ServerError::Operation(format!("Failed to execute curl: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            crate::dual_error!("❌ Curl failed: {}", stderr);
+            return Err(ServerError::Operation(format!("Curl failed: {}", stderr)));
         }
+
+        let response_text = String::from_utf8_lossy(&output.stdout);
+        crate::dual_info!("✅ Curl response received (length: {} bytes)", response_text.len());
+        crate::dual_debug!("📥 Response: {}", response_text);
 
         // Parse response
-        let json: serde_json::Value = response.json().await.map_err(|e| {
-            ServerError::Operation(format!("Failed to parse planning response: {}", e))
+        let json: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
+            ServerError::Operation(format!(
+                "Failed to parse planning response: {} - raw: {}",
+                e, response_text
+            ))
         })?;
 
         // Extract content from OpenAI-compatible response format
@@ -502,7 +528,8 @@ impl TaskPlanner {
 4. 依赖关系中的 ID 必须是已定义的子任务 ID
 5. 如果任务简单，可以只有一个子任务
 6. 子任务数量不应超过 {max_subtasks} 个
-7. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值{skill_rule}"#,
+7. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值
+8. **重要**：对于你已经知道答案的常识性或事实性问题（如"法国的首都是哪里"、"1+1等于几"等），不要使用任何工具，直接在一个子任务中给出答案即可{skill_rule}"#,
             skills_section = skills_section,
             tools_desc = tools_desc,
             recommended_skill_tag = recommended_skill_tag,

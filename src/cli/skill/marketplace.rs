@@ -66,8 +66,9 @@ impl SkillsMarketplace {
     pub fn new(api_key: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .no_proxy()
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .unwrap_or_else(|_| crate::utils::create_http_client());
 
         Self { client, api_key }
     }

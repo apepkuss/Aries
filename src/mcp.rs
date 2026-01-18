@@ -85,7 +85,14 @@ pub fn format_mcp_tool_name(server_name: &str, tool_name: &str) -> String {
 /// assert_eq!(result, Some(("cardea-calculator", "sum")));
 /// ```
 pub fn parse_mcp_tool_name(full_name: &str) -> Option<(&str, &str)> {
-    let parts: Vec<&str> = full_name.split(MCP_SEPARATOR).collect();
+    // LLMs sometimes prefix tool names with "functions." or other namespaces
+    let normalized_name = full_name
+        .strip_prefix("functions.")
+        .unwrap_or(full_name)
+        .strip_prefix("mcp.")
+        .unwrap_or(full_name);
+
+    let parts: Vec<&str> = normalized_name.split(MCP_SEPARATOR).collect();
     if parts.len() == 3 && parts[0] == MCP_PREFIX {
         Some((parts[1], parts[2]))
     } else {

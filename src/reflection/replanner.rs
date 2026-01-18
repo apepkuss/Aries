@@ -626,7 +626,7 @@ impl DynamicReplanner {
     /// Creates a new dynamic replanner.
     pub fn new(server: Arc<RwLock<LlmServerInfo>>, config: ReplanConfig) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::utils::create_http_client(),
             server,
             config,
         }

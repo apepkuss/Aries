@@ -21,15 +21,15 @@ use crate::{
 
 /// Application state
 pub struct AppState {
-    pub(crate) server_group: Arc<RwLock<HashMap<server::ServerKind, server::ServerGroup>>>,
-    pub(crate) config: Arc<RwLock<Config>>,
+    pub server_group: Arc<RwLock<HashMap<server::ServerKind, server::ServerGroup>>>,
+    pub config: Arc<RwLock<Config>>,
     /// Path to the configuration file (for persistence)
-    pub(crate) config_path: Option<std::path::PathBuf>,
-    pub(crate) server_info: Arc<RwLock<info::ServerInfo>>,
-    pub(crate) models: Arc<RwLock<HashMap<server::ServerId, Vec<endpoints::models::Model>>>>,
-    pub(crate) memory: Option<Arc<memory::CompleteChatMemory>>,
+    pub config_path: Option<std::path::PathBuf>,
+    pub server_info: Arc<RwLock<info::ServerInfo>>,
+    pub models: Arc<RwLock<HashMap<server::ServerId, Vec<endpoints::models::Model>>>>,
+    pub memory: Option<Arc<memory::CompleteChatMemory>>,
     /// Timestamp of the last API-based config update (for conflict detection with file watcher)
-    pub(crate) last_config_update_time: RwLock<Option<Instant>>,
+    pub last_config_update_time: RwLock<Option<Instant>>,
 }
 
 impl AppState {
@@ -294,7 +294,7 @@ impl AppState {
                 );
 
                 // Send the healthy servers to the external service
-                reqwest::Client::new()
+                crate::utils::create_http_client()
                     .post(push_url)
                     .json(&health_status)
                     .send()

@@ -209,6 +209,14 @@ pub struct ChatConfig {
 }
 
 impl ChatConfig {
+    /// Creates a new ChatConfig with the given URL and API key.
+    pub fn new(url: impl Into<String>, api_key: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            api_key: api_key.into(),
+        }
+    }
+
     pub fn get_api_key(&self) -> Option<String> {
         if !self.api_key.is_empty() {
             Some(self.api_key.clone())

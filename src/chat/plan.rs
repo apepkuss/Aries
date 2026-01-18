@@ -23,7 +23,7 @@ use endpoints::chat::{
     ChatCompletionToolMessage, ChatCompletionUserMessage, ChatCompletionUserMessageContent,
 };
 use futures_util::stream::{self, StreamExt};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::CONTENT_TYPE;
 use rmcp::model::{CallToolRequestParam, RawContent};
 use tokio::{select, sync::mpsc};
 use tokio_util::sync::CancellationToken;
@@ -1154,25 +1154,8 @@ async fn execute_subtask_with_react(
             request_id
         );
 
-        // Build and send request to LLM
+        // Build and send request to LLM using curl
         let url = format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
-        let mut client = reqwest::Client::new().post(&url);
-        client = client.header(CONTENT_TYPE, "application/json");
-
-        if let Some(api_key) = &chat_server.api_key
-            && !api_key.is_empty()
-        {
-            let auth_info = if api_key.starts_with("Bearer ") {
-                api_key.clone()
-            } else {
-                format!("Bearer {api_key}")
-            };
-            client = client.header(AUTHORIZATION, auth_info);
-        } else if let Some(auth) = headers.get("authorization")
-            && let Ok(auth_str) = auth.to_str()
-        {
-            client = client.header(AUTHORIZATION, auth_str);
-        }
 
         // Build request with tools (filtered by active skills if any)
         let allowed_patterns = if active_skills.is_empty() {
@@ -1188,20 +1171,35 @@ async fn execute_subtask_with_react(
             "stream": false
         });
 
-        // Send request with cancellation support
-        let ds_response = select! {
-            response = client.json(&request_json).send() => {
-                response.map_err(|e| ServerError::Operation(format!("Failed to forward request: {e}")))
+        // Determine API key (prefer chat_server.api_key, fallback to headers)
+        let api_key = if let Some(key) = &chat_server.api_key {
+            if !key.is_empty() {
+                Some(key.clone())
+            } else {
+                None
+            }
+        } else if let Some(auth) = headers.get("authorization") {
+            auth.to_str().ok().map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        // Send request with cancellation support using curl
+        let response_text = select! {
+            result = super::shared::send_llm_request_async(
+                url.clone(),
+                api_key,
+                request_json,
+            ) => {
+                result?
             }
             _ = cancel_token.cancelled() => {
                 return Err(ServerError::Operation("Request was cancelled by client".to_string()));
             }
-        }?;
+        };
 
         // Parse response
-        let chat_completion: ChatCompletionObject = ds_response
-            .json()
-            .await
+        let chat_completion: ChatCompletionObject = serde_json::from_str(&response_text)
             .map_err(|e| ServerError::Operation(format!("Failed to parse response: {e}")))?;
 
         // Record token usage
@@ -2351,10 +2349,11 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 
 ## Instructions
 1. Analyze the task and think about how to accomplish it
-2. If a skill would help, request it using <use_skill>skill-name</use_skill> tags
+2. **Important**: For factual questions you already know the answer to (like "What is the capital of France?", "What is 1+1?"), respond directly without using any tools
+3. If a skill would help, request it using <use_skill>skill-name</use_skill> tags
    - You can request multiple skills: <use_skill>skill-a, skill-b</use_skill>
-3. Use the available tools as needed to complete the task
-4. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
+4. Use the available tools only when necessary to complete the task
+5. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
 
 ## Response Format
 - Use <thought></thought> tags to explain your reasoning
@@ -2363,11 +2362,11 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 - When done, use <final_answer></final_answer> tags for your final response
 
 ## Tool Call Example
-When you need to call a tool, output like this:
-<thought>I need to search for information</thought>
-<action>{{"name": "mcp__search__query", "arguments": {{"query": "example search"}}}}</action>
+When you need to call a tool (only if necessary), output like this:
+<thought>I need to use a specific tool to accomplish this task</thought>
+<action>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</action>
 
-Remember: Focus only on this specific subtask. Use the context from previous results if needed."#,
+Remember: Focus only on this specific subtask. Use the context from previous results if needed. For simple factual questions, respond directly without tools."#,
             subtask.description, skills_section, tools_desc
         )
     };
@@ -2609,38 +2608,35 @@ async fn generate_final_response(
         "stream": false
     });
 
-    // Build request
+    // Build request using curl
     let url = format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
-    let mut client = reqwest::Client::new().post(&url);
-    client = client.header(CONTENT_TYPE, "application/json");
 
-    if let Some(api_key) = &chat_server.api_key {
-        let auth = if api_key.starts_with("Bearer ") {
-            api_key.clone()
+    // Determine API key (prefer chat_server.api_key, fallback to headers)
+    let api_key = if let Some(key) = &chat_server.api_key {
+        if !key.is_empty() {
+            Some(key.clone())
         } else {
-            format!("Bearer {}", api_key)
-        };
-        client = client.header(AUTHORIZATION, auth);
-    } else if let Some(auth) = headers.get("authorization")
-        && let Ok(auth_str) = auth.to_str()
-    {
-        client = client.header(AUTHORIZATION, auth_str);
-    }
+            None
+        }
+    } else if let Some(auth) = headers.get("authorization") {
+        auth.to_str().ok().map(|s| s.to_string())
+    } else {
+        None
+    };
 
     dual_debug!(
         "Sending summary request to LLM - request_id: {}",
         request_id
     );
 
-    // Send request
-    let response =
-        client.json(&summary_request).send().await.map_err(|e| {
-            ServerError::Operation(format!("Failed to send summary request: {}", e))
-        })?;
+    // Send request using curl
+    let response_text = super::shared::send_llm_request_async(
+        url,
+        api_key,
+        summary_request,
+    ).await?;
 
-    let chat_completion: ChatCompletionObject = response
-        .json()
-        .await
+    let chat_completion: ChatCompletionObject = serde_json::from_str(&response_text)
         .map_err(|e| ServerError::Operation(format!("Failed to parse summary response: {}", e)))?;
 
     Ok(chat_completion)
@@ -2963,6 +2959,61 @@ fn apply_new_plan(
         current_plan.subtasks.len(),
         request_id
     );
+}
+
+// ============================================================================
+// Public API for External Integration
+// ============================================================================
+
+/// Executes a single subtask using a React loop (API version without HeaderMap).
+///
+/// This is a public wrapper around `execute_subtask_with_react` that doesn't
+/// require Axum's HeaderMap, making it suitable for external integrations
+/// like Tauri desktop applications.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_subtask_with_react_api(
+    state: &Arc<AppState>,
+    chat_server: &crate::server::TargetServerInfo,
+    subtask: &SubTask,
+    previous_results: &[(usize, String)],
+    available_tools: &[ToolDescription],
+    skills_summaries: Option<&[SkillSummary]>,
+    conv_id: Option<&str>,
+    timeout: Duration,
+    max_iterations: u32,
+    max_tools_per_iteration: usize,
+    tool_call_max_retries: u32,
+    tool_call_retry_delay_ms: u64,
+    cancel_token: &CancellationToken,
+    request_id: &str,
+    subtask_trace: &mut SubtaskTrace,
+    model: &str,
+    emitter: &dyn EventEmitter,
+) -> ServerResult<String> {
+    // Create an empty HeaderMap for the internal function
+    let headers = HeaderMap::new();
+
+    execute_subtask_with_react(
+        state,
+        chat_server,
+        &headers,
+        subtask,
+        previous_results,
+        available_tools,
+        skills_summaries,
+        conv_id,
+        timeout,
+        max_iterations,
+        max_tools_per_iteration,
+        tool_call_max_retries,
+        tool_call_retry_delay_ms,
+        cancel_token,
+        request_id,
+        subtask_trace,
+        model,
+        emitter,
+    )
+    .await
 }
 
 // ============================================================================

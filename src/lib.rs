@@ -86,7 +86,7 @@ pub mod info;
 pub mod utils;
 
 // Re-export commonly used types for convenience
-pub use app::AppState;
+pub use app::{AppState, AriesEngine};
 pub use config::Config;
 pub use error::{ServerError, ServerResult};
 

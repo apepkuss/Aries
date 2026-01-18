@@ -91,7 +91,7 @@ impl SemanticValidator {
     /// Creates a new semantic validator.
     pub fn new(server: Arc<RwLock<LlmServerInfo>>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::utils::create_http_client(),
             server,
             config: SemanticValidatorConfig::default(),
         }
@@ -103,7 +103,7 @@ impl SemanticValidator {
         config: SemanticValidatorConfig,
     ) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::utils::create_http_client(),
             server,
             config,
         }

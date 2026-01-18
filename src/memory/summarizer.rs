@@ -207,7 +207,7 @@ impl MessageSummarizer {
             &self.summary_service_base_url.trim_end_matches('/')
         );
 
-        let mut request = reqwest::Client::new()
+        let mut request = crate::utils::create_http_client()
             .post(&url)
             .header(CONTENT_TYPE, "application/json")
             .json(&chat_completion);

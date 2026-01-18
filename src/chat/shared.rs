@@ -1,9 +1,159 @@
 //! Shared utilities for chat modes
 //!
 //! This module contains shared components used across different chat modes,
-//! such as time budget management for Plan mode.
+//! such as time budget management for Plan mode and HTTP request utilities.
 
 use std::time::{Duration, Instant};
+
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+
+use crate::error::{ServerError, ServerResult};
+
+// ============================================================================
+// HTTP Request Utilities
+// ============================================================================
+
+/// Sends an HTTP POST request to an LLM chat completions endpoint.
+///
+/// This function uses reqwest with `no_proxy()` configuration to work correctly
+/// with local LLM servers like LlamaEdge. The `no_proxy()` setting prevents
+/// reqwest from using system proxy settings that can cause 502 Bad Gateway errors.
+///
+/// # Arguments
+///
+/// * `url` - The full URL of the chat completions endpoint
+/// * `api_key` - Optional API key for authorization
+/// * `request_body` - The JSON request body as a serde_json::Value
+///
+/// # Returns
+///
+/// The parsed JSON response from the server, or an error if the request failed.
+pub fn send_llm_request(
+    url: &str,
+    api_key: Option<&str>,
+    request_body: &serde_json::Value,
+) -> ServerResult<serde_json::Value> {
+    // Use a blocking runtime for sync context
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| ServerError::Operation(format!("Failed to create runtime: {}", e)))?;
+
+    rt.block_on(async {
+        let client = crate::utils::create_http_client();
+
+        let mut request = client
+            .post(url)
+            .header(CONTENT_TYPE, "application/json")
+            .json(request_body);
+
+        // Add authorization header if API key is present
+        if let Some(key) = api_key {
+            if !key.is_empty() {
+                let auth = if key.starts_with("Bearer ") {
+                    key.to_string()
+                } else {
+                    format!("Bearer {}", key)
+                };
+                request = request.header(AUTHORIZATION, auth);
+            }
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| ServerError::Operation(format!("Request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ServerError::Operation(format!(
+                "Server returned error {}: {}",
+                status, body
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| ServerError::Operation(format!("Failed to parse LLM response: {}", e)))
+    })
+}
+
+/// Extracts the message content from a chat completion response.
+///
+/// # Arguments
+///
+/// * `response` - The JSON response from the LLM
+///
+/// # Returns
+///
+/// The content string, or an error if the response format is invalid.
+pub fn extract_chat_content(response: &serde_json::Value) -> ServerResult<String> {
+    response["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| ServerError::Operation("Invalid response format from LLM".to_string()))
+}
+
+/// Sends an HTTP POST request to an LLM chat completions endpoint (async version).
+///
+/// This function uses reqwest with `no_proxy()` configuration to work correctly
+/// with local LLM servers like LlamaEdge. The `no_proxy()` setting prevents
+/// reqwest from using system proxy settings that can cause 502 Bad Gateway errors.
+///
+/// # Arguments
+///
+/// * `url` - The full URL of the chat completions endpoint
+/// * `api_key` - Optional API key for authorization
+/// * `request_body` - The JSON request body as a serde_json::Value
+///
+/// # Returns
+///
+/// The raw response text from the server, or an error if the request failed.
+pub async fn send_llm_request_async(
+    url: String,
+    api_key: Option<String>,
+    request_body: serde_json::Value,
+) -> ServerResult<String> {
+    let client = crate::utils::create_http_client();
+
+    let mut request = client
+        .post(&url)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&request_body);
+
+    // Add authorization header if API key is present
+    if let Some(key) = &api_key {
+        if !key.is_empty() {
+            let auth = if key.starts_with("Bearer ") {
+                key.clone()
+            } else {
+                format!("Bearer {}", key)
+            };
+            request = request.header(AUTHORIZATION, auth);
+        }
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| ServerError::Operation(format!("Request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ServerError::Operation(format!(
+            "Server returned error {}: {}",
+            status, body
+        )));
+    }
+
+    response
+        .text()
+        .await
+        .map_err(|e| ServerError::Operation(format!("Failed to read response: {}", e)))
+}
 
 /// Time budget manager for allocating execution time across subtasks.
 ///
