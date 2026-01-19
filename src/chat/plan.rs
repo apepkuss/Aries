@@ -34,8 +34,8 @@ use super::{
     shared::TimeBudget,
     trace::{IterationTrace, ToolCallTrace},
     xml_parser::{
-        extract_action, extract_final_answer, extract_thought, extract_xml_tool_call,
-        has_action_tag, has_final_answer_tag,
+        PlannerOutput, extract_action, extract_final_answer, extract_thought,
+        extract_xml_tool_call, has_action_tag, has_final_answer_tag,
     },
 };
 use crate::{
@@ -295,9 +295,9 @@ pub(crate) async fn chat(
     .with_tools(available_tools.clone())
     .with_skills(skills_summaries.clone());
 
-    // Generate task plan
-    let mut plan = match planner.plan(&user_request).await {
-        Ok(plan) => plan,
+    // Generate task plan or direct answer
+    let planner_output = match planner.plan(&user_request).await {
+        Ok(output) => output,
         Err(e) => {
             dual_error!(
                 "Failed to generate task plan: {} - request_id: {}",
@@ -305,6 +305,38 @@ pub(crate) async fn chat(
                 request_id
             );
             return Err(e);
+        }
+    };
+
+    // Handle direct answer case - return immediately without task execution
+    let mut plan = match planner_output {
+        PlannerOutput::DirectAnswer(answer) => {
+            dual_info!("📝 Direct answer mode - request_id: {}", request_id);
+
+            // Store assistant response to memory if available
+            if let Some(memory) = &state.memory
+                && let Some(conv_id) = &conv_id
+                && let Err(e) = memory
+                    .add_assistant_message(conv_id, &answer.answer, vec![])
+                    .await
+            {
+                dual_error!(
+                    "Failed to add assistant message to memory: {} - request_id: {}",
+                    e,
+                    request_id
+                );
+            }
+
+            // Build and return response directly
+            return build_direct_answer_response(
+                &answer.answer,
+                request_id,
+                request.stream.unwrap_or(false),
+            );
+        }
+        PlannerOutput::TaskPlan(raw_plan) => {
+            // Convert raw plan to validated TaskPlan
+            TaskPlan::from_raw(raw_plan)?
         }
     };
 
@@ -2807,6 +2839,123 @@ fn build_standard_streaming_response(
             );
             ServerError::Operation(format!("Failed to create streaming response: {}", e))
         })
+}
+
+// ============================================================================
+// Direct Answer Response Builder
+// ============================================================================
+
+/// Builds HTTP response for direct answers (simple queries).
+///
+/// This function handles both streaming and non-streaming responses for queries
+/// that can be answered directly without task planning and execution.
+fn build_direct_answer_response(
+    answer: &str,
+    request_id: &str,
+    stream: bool,
+) -> ServerResult<Response<Body>> {
+    let id = gen_chat_id();
+    let created = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if stream {
+        // Streaming response
+        let chunks = gen_chunks_with_formatting(answer, 10);
+        let model = "direct-answer".to_string();
+        let chunks_len = chunks.len();
+
+        let request_id_owned = request_id.to_string();
+        let stream = stream::iter(chunks.into_iter().enumerate().map(move |(i, chunk)| {
+            let mut chat_completion_chunk = ChatCompletionChunk {
+                id: id.clone(),
+                object: "chat.completion.chunk".to_string(),
+                created,
+                model: model.clone(),
+                system_fingerprint: "fp_direct_answer".to_string(),
+                choices: vec![ChatCompletionChunkChoice {
+                    index: i as u32,
+                    delta: ChatCompletionChunkChoiceDelta {
+                        role: ChatCompletionRole::Assistant,
+                        content: Some(chunk),
+                        tool_calls: vec![],
+                    },
+                    logprobs: None,
+                    finish_reason: None,
+                }],
+                usage: None,
+            };
+
+            if i == chunks_len - 1 {
+                chat_completion_chunk.choices[0].finish_reason =
+                    Some(endpoints::common::FinishReason::stop);
+            }
+
+            let json_str = serde_json::to_string(&chat_completion_chunk).unwrap();
+            format!("data: {json_str}\n\n")
+        }))
+        .chain(stream::once(async { "data: [DONE]\n\n".to_string() }))
+        .map(|s| Ok::<_, std::convert::Infallible>(s.into_bytes()));
+
+        Response::builder()
+            .header(CONTENT_TYPE, "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .header("Connection", "keep-alive")
+            .status(StatusCode::OK)
+            .body(Body::from_stream(stream))
+            .map_err(|e| {
+                dual_error!(
+                    "Failed to create direct answer streaming response: {} - request_id: {}",
+                    e,
+                    request_id_owned
+                );
+                ServerError::Operation(format!(
+                    "Failed to create direct answer streaming response: {}",
+                    e
+                ))
+            })
+    } else {
+        // Non-streaming response
+        let chat_completion = ChatCompletionObject {
+            id,
+            object: "chat.completion".to_string(),
+            created,
+            model: "direct-answer".to_string(),
+            choices: vec![endpoints::chat::ChatCompletionObjectChoice {
+                index: 0,
+                message: endpoints::chat::ChatCompletionObjectMessage {
+                    role: ChatCompletionRole::Assistant,
+                    content: Some(answer.to_string()),
+                    tool_calls: vec![],
+                    function_call: None,
+                },
+                finish_reason: endpoints::common::FinishReason::stop,
+                logprobs: None,
+            }],
+            usage: endpoints::common::Usage {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
+        };
+
+        let response_body = serde_json::to_string(&chat_completion)
+            .map_err(|e| ServerError::Operation(format!("Failed to serialize response: {}", e)))?;
+
+        Response::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .status(StatusCode::OK)
+            .body(Body::from(response_body))
+            .map_err(|e| {
+                dual_error!(
+                    "Failed to create direct answer response: {} - request_id: {}",
+                    e,
+                    request_id
+                );
+                ServerError::Operation(format!("Failed to create direct answer response: {}", e))
+            })
+    }
 }
 
 // ============================================================================

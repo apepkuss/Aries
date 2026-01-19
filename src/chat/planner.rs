@@ -76,6 +76,56 @@ impl TaskPlan {
             .iter()
             .filter_map(|&idx| self.subtasks.get(idx))
     }
+
+    /// Creates a TaskPlan from a raw plan structure.
+    ///
+    /// This method validates the raw plan and converts it to a validated TaskPlan.
+    pub fn from_raw(raw: crate::chat::xml_parser::TaskPlanRaw) -> Result<Self, ServerError> {
+        // Check for empty plan
+        if raw.subtasks.is_empty() {
+            return Err(ServerError::EmptyPlan);
+        }
+
+        // Convert raw subtasks to SubTask
+        let mut subtasks = Vec::new();
+        let mut id_set: HashSet<usize> = HashSet::new();
+
+        for raw_subtask in &raw.subtasks {
+            // Parse ID
+            let id: usize = raw_subtask.id.parse().map_err(|_| {
+                ServerError::PlanParseError(format!("Invalid subtask ID: '{}'", raw_subtask.id))
+            })?;
+
+            if !id_set.insert(id) {
+                return Err(ServerError::PlanParseError(format!(
+                    "Duplicate subtask ID: {}",
+                    id
+                )));
+            }
+
+            // Parse dependencies
+            let mut dependencies = Vec::new();
+            for dep_str in &raw_subtask.dependencies {
+                let dep_id: usize = dep_str.parse().map_err(|_| {
+                    ServerError::InvalidReference(format!(
+                        "Invalid dependency ID '{}' in subtask {}",
+                        dep_str, id
+                    ))
+                })?;
+                dependencies.push(dep_id);
+            }
+
+            let subtask = SubTask::new(id, raw_subtask.description.clone())
+                .with_dependencies(dependencies)
+                .with_tools(raw_subtask.tools.clone())
+                .with_skill(raw_subtask.recommended_skill.clone());
+
+            subtasks.push(subtask);
+        }
+
+        // Create the plan (this will compute execution order)
+        Self::new(raw.goal, subtasks)
+    }
 }
 
 /// A single subtask within a task plan.
@@ -378,8 +428,87 @@ impl TaskPlanner {
         self
     }
 
-    /// Generates a task plan for the given user request.
-    pub async fn plan(&self, user_request: &str) -> Result<TaskPlan, ServerError> {
+    /// Generates a task plan or direct answer for the given user request.
+    ///
+    /// Returns `PlannerOutput::DirectAnswer` for simple queries that can be answered directly,
+    /// or `PlannerOutput::TaskPlan` for complex queries requiring tool usage.
+    pub async fn plan(
+        &self,
+        user_request: &str,
+    ) -> Result<crate::chat::xml_parser::PlannerOutput, ServerError> {
+        // Build the planning prompt
+        let system_prompt = self.build_system_prompt();
+        let user_prompt = self.build_user_prompt(user_request);
+
+        let messages = vec![
+            PlannerMessage::system(system_prompt),
+            PlannerMessage::user(user_prompt),
+        ];
+
+        // Get LLM response
+        tracing::debug!(
+            provider = self.llm_provider.name(),
+            "Requesting task plan from LLM"
+        );
+
+        let response = self.llm_provider.complete(messages).await?;
+
+        // Parse the response into PlannerOutput (either DirectAnswer or TaskPlan)
+        let planner_output =
+            crate::chat::xml_parser::PlannerOutput::parse(&response).ok_or_else(|| {
+                if crate::chat::xml_parser::has_direct_answer_tag(&response) {
+                    ServerError::PlanParseError(
+                        "Found <direct_answer> tag but failed to parse its content".to_string(),
+                    )
+                } else if crate::chat::xml_parser::has_task_plan_tag(&response) {
+                    ServerError::PlanParseError(
+                        "Found <task_plan> tag but failed to parse its content".to_string(),
+                    )
+                } else {
+                    ServerError::PlanParseError(
+                        "LLM response does not contain a valid <direct_answer> or <task_plan> tag"
+                            .to_string(),
+                    )
+                }
+            })?;
+
+        // If it's a task plan, validate it
+        match planner_output {
+            crate::chat::xml_parser::PlannerOutput::DirectAnswer(answer) => {
+                Ok(crate::chat::xml_parser::PlannerOutput::DirectAnswer(answer))
+            }
+            crate::chat::xml_parser::PlannerOutput::TaskPlan(raw_plan) => {
+                let validated_plan = self.validate_and_build_plan(raw_plan)?;
+                // Convert back to raw for PlannerOutput (we'll handle validation in plan.rs)
+                Ok(crate::chat::xml_parser::PlannerOutput::TaskPlan(
+                    crate::chat::xml_parser::TaskPlanRaw {
+                        goal: validated_plan.original_goal,
+                        subtasks: validated_plan
+                            .subtasks
+                            .into_iter()
+                            .map(|s| crate::chat::xml_parser::SubTaskRaw {
+                                id: s.id.to_string(),
+                                description: s.description,
+                                dependencies: s
+                                    .dependencies
+                                    .iter()
+                                    .map(|d| d.to_string())
+                                    .collect(),
+                                tools: s.required_tools,
+                                recommended_skill: s.recommended_skill,
+                            })
+                            .collect(),
+                    },
+                ))
+            }
+        }
+    }
+
+    /// Generates a task plan for the given user request (legacy method).
+    ///
+    /// This method only supports task plans and will fail if the LLM returns a direct answer.
+    /// For new code, prefer using `plan()` which handles both direct answers and task plans.
+    pub async fn plan_task_only(&self, user_request: &str) -> Result<TaskPlan, ServerError> {
         // Build the planning prompt
         let system_prompt = self.build_system_prompt();
         let user_prompt = self.build_user_prompt(user_request);
@@ -468,7 +597,7 @@ impl TaskPlanner {
         };
 
         format!(
-            r#"你是一个专业的任务规划专家。你的任务是将用户的复杂请求分解为可执行的子任务。
+            r#"你是一个智能助手，能够直接回答简单问题，也能将复杂请求分解为可执行的子任务。
 {skills_section}
 ## 可用工具
 
@@ -476,7 +605,26 @@ impl TaskPlanner {
 
 ## 输出格式
 
-请使用以下 XML 格式输出任务计划：
+根据用户请求的性质，选择以下两种输出格式之一：
+
+### 格式一：直接回答（适用于简单问题）
+
+如果用户的问题满足以下条件，请直接回答：
+- 常识性问答（如"中国的首都是哪里？"、"1+1等于几？"）
+- 概念定义或解释（如"什么是 REST API？"）
+- 简单问候或闲聊（如"你好"、"谢谢"）
+- 基于已有知识可直接回答，不需要调用任何工具
+- 不需要实时信息（如当前天气、股价等）
+
+使用以下 XML 格式：
+
+<direct_answer>
+  <answer>直接回答内容</answer>
+</direct_answer>
+
+### 格式二：任务计划（适用于复杂任务）
+
+如果用户的请求需要调用工具或多步骤处理，使用以下 XML 格式：
 
 <task_plan>
   <goal>用户的最终目标描述</goal>
@@ -494,7 +642,14 @@ impl TaskPlanner {
   </subtasks>
 </task_plan>
 
-## 规划原则
+## 判断原则
+
+1. **优先直接回答**：如果问题可以基于知识直接回答且不需要工具，使用 `<direct_answer>`
+2. **需要工具时规划**：如果需要搜索、读取文件、执行代码等操作，使用 `<task_plan>`
+3. **需要实时信息时规划**：天气、股价、最新新闻等需要工具获取
+4. **不确定时规划**：如果不确定是否需要工具，保守地使用 `<task_plan>`
+
+## 规划原则（仅适用于 task_plan）
 
 1. 每个子任务应该是原子性的、可独立执行的
 2. 每个子任务对应一次工具调用（细粒度规划）

@@ -109,6 +109,9 @@ pub fn sanitize_xml_content(content: &str) -> String {
     result = fix_missing_closing_tag(&result, "description");
     result = fix_missing_closing_tag(&result, "dependencies");
     result = fix_missing_closing_tag(&result, "tools");
+    // Direct answer mode tags
+    result = fix_missing_closing_tag(&result, "direct_answer");
+    result = fix_missing_closing_tag(&result, "answer");
 
     // 3. Fix common typos
     result = fix_common_typos(&result);
@@ -174,6 +177,16 @@ fn fix_common_typos(content: &str) -> String {
     result = result.replace("</TaskPlan>", "</task_plan>");
     result = result.replace("<Taskplan>", "<task_plan>");
     result = result.replace("</Taskplan>", "</task_plan>");
+
+    // Common typos for direct_answer (Direct answer mode)
+    result = result.replace("<directanswer>", "<direct_answer>");
+    result = result.replace("</directanswer>", "</direct_answer>");
+    result = result.replace("<direct-answer>", "<direct_answer>");
+    result = result.replace("</direct-answer>", "</direct_answer>");
+    result = result.replace("<DirectAnswer>", "<direct_answer>");
+    result = result.replace("</DirectAnswer>", "</direct_answer>");
+    result = result.replace("<Directanswer>", "<direct_answer>");
+    result = result.replace("</Directanswer>", "</direct_answer>");
 
     // Common typos for subtask
     result = result.replace("<sub_task", "<subtask");
@@ -592,6 +605,100 @@ pub fn extract_task_plan(content: &str) -> Option<TaskPlanRaw> {
 pub fn has_task_plan_tag(content: &str) -> bool {
     let lower = content.to_lowercase();
     lower.contains("<task_plan") || lower.contains("< task_plan")
+}
+
+// ============================================================================
+// Direct Answer Parsing (Plan Mode - Simple Queries)
+// ============================================================================
+
+/// Regex pattern for direct_answer extraction.
+static DIRECT_ANSWER_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?si)<\s*direct_answer\s*>(.*?)<\s*/\s*direct_answer\s*>").unwrap());
+
+/// Regex pattern for answer extraction within direct_answer.
+static ANSWER_PATTERN: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?si)<\s*answer\s*>(.*?)<\s*/\s*answer\s*>").unwrap());
+
+/// Raw direct answer structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectAnswerRaw {
+    /// The answer content.
+    pub answer: String,
+}
+
+/// Planner output - either a direct answer or a task plan.
+#[derive(Debug, Clone)]
+pub enum PlannerOutput {
+    /// Direct answer for simple queries.
+    DirectAnswer(DirectAnswerRaw),
+    /// Task plan for complex queries requiring tools.
+    TaskPlan(TaskPlanRaw),
+}
+
+impl PlannerOutput {
+    /// Parses LLM response into either a DirectAnswer or TaskPlan.
+    ///
+    /// Attempts to parse direct_answer first, then falls back to task_plan.
+    pub fn parse(content: &str) -> Option<Self> {
+        // Try to parse direct_answer first
+        if let Some(answer) = extract_direct_answer(content) {
+            return Some(PlannerOutput::DirectAnswer(answer));
+        }
+
+        // Fall back to task_plan
+        if let Some(plan) = extract_task_plan(content) {
+            return Some(PlannerOutput::TaskPlan(plan));
+        }
+
+        None
+    }
+
+    /// Returns true if this is a direct answer.
+    pub fn is_direct_answer(&self) -> bool {
+        matches!(self, PlannerOutput::DirectAnswer(_))
+    }
+
+    /// Returns true if this is a task plan.
+    pub fn is_task_plan(&self) -> bool {
+        matches!(self, PlannerOutput::TaskPlan(_))
+    }
+}
+
+/// Extracts a direct answer from LLM response content.
+///
+/// Expected format:
+/// ```xml
+/// <direct_answer>
+///   <answer>The answer content here</answer>
+/// </direct_answer>
+/// ```
+pub fn extract_direct_answer(content: &str) -> Option<DirectAnswerRaw> {
+    // First sanitize the content
+    let sanitized = sanitize_xml_content(content);
+
+    // Extract the direct_answer block
+    let answer_block = DIRECT_ANSWER_PATTERN
+        .captures(&sanitized)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str())?;
+
+    // Extract answer content
+    let answer = ANSWER_PATTERN
+        .captures(answer_block)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().trim().to_string())?;
+
+    if answer.is_empty() {
+        return None;
+    }
+
+    Some(DirectAnswerRaw { answer })
+}
+
+/// Checks if the content contains a direct_answer tag.
+pub fn has_direct_answer_tag(content: &str) -> bool {
+    let lower = content.to_lowercase();
+    lower.contains("<direct_answer") || lower.contains("< direct_answer")
 }
 
 /// Result of task plan extraction with diagnostic information.
@@ -1670,5 +1777,166 @@ mod tests {
         assert!(result.is_some());
         let plan = result.unwrap();
         assert_eq!(plan.subtasks.len(), 2);
+    }
+
+    // ==================== Direct Answer Parsing Tests ====================
+
+    #[test]
+    fn test_extract_direct_answer_basic() {
+        let content = r#"
+<direct_answer>
+  <answer>北京是中国的首都。</answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert_eq!(result.answer, "北京是中国的首都。");
+    }
+
+    #[test]
+    fn test_extract_direct_answer_multiline() {
+        let content = r#"
+<direct_answer>
+  <answer>
+REST API 是一种基于 HTTP 协议的 Web 服务架构风格。
+它使用标准的 HTTP 方法（GET、POST、PUT、DELETE）来操作资源。
+  </answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert!(result.answer.contains("REST API"));
+        assert!(result.answer.contains("HTTP"));
+    }
+
+    #[test]
+    fn test_extract_direct_answer_case_insensitive() {
+        let content = r#"
+<DIRECT_ANSWER>
+  <ANSWER>Test answer</ANSWER>
+</DIRECT_ANSWER>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert_eq!(result.answer, "Test answer");
+    }
+
+    #[test]
+    fn test_extract_direct_answer_with_spaces() {
+        let content = r#"
+< direct_answer >
+  < answer >Test answer</ answer >
+</ direct_answer >
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert_eq!(result.answer, "Test answer");
+    }
+
+    #[test]
+    fn test_extract_direct_answer_empty() {
+        let content = r#"
+<direct_answer>
+  <answer></answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_has_direct_answer_tag() {
+        assert!(has_direct_answer_tag("<direct_answer>"));
+        assert!(has_direct_answer_tag("< direct_answer >"));
+        assert!(has_direct_answer_tag("<DIRECT_ANSWER>"));
+        assert!(!has_direct_answer_tag("<task_plan>"));
+    }
+
+    #[test]
+    fn test_fix_common_typos_direct_answer() {
+        let content = "<directanswer><answer>test</answer></directanswer>";
+        let fixed = fix_common_typos(content);
+        assert_eq!(
+            fixed,
+            "<direct_answer><answer>test</answer></direct_answer>"
+        );
+    }
+
+    #[test]
+    fn test_fix_common_typos_direct_answer_hyphen() {
+        let content = "<direct-answer><answer>test</answer></direct-answer>";
+        let fixed = fix_common_typos(content);
+        assert_eq!(
+            fixed,
+            "<direct_answer><answer>test</answer></direct_answer>"
+        );
+    }
+
+    #[test]
+    fn test_planner_output_parse_direct_answer() {
+        let content = r#"
+<direct_answer>
+  <answer>Hello! How can I help you today?</answer>
+</direct_answer>
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_direct_answer());
+        assert!(!result.is_task_plan());
+
+        if let PlannerOutput::DirectAnswer(answer) = result {
+            assert!(answer.answer.contains("Hello"));
+        } else {
+            panic!("Expected DirectAnswer");
+        }
+    }
+
+    #[test]
+    fn test_planner_output_parse_task_plan() {
+        let content = r#"
+<task_plan>
+  <goal>Query weather</goal>
+  <subtasks>
+    <subtask id="1">
+      <description>Query Beijing weather</description>
+      <dependencies></dependencies>
+      <tools>weather_api</tools>
+    </subtask>
+  </subtasks>
+</task_plan>
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_task_plan());
+        assert!(!result.is_direct_answer());
+
+        if let PlannerOutput::TaskPlan(plan) = result {
+            assert_eq!(plan.goal, "Query weather");
+        } else {
+            panic!("Expected TaskPlan");
+        }
+    }
+
+    #[test]
+    fn test_planner_output_parse_invalid() {
+        let content = "This is just plain text without any XML tags";
+        let result = PlannerOutput::parse(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_planner_output_prefers_direct_answer() {
+        // If both tags are present, direct_answer should be preferred
+        let content = r#"
+<direct_answer>
+  <answer>Simple answer</answer>
+</direct_answer>
+<task_plan>
+  <goal>Some goal</goal>
+  <subtasks>
+    <subtask id="1">
+      <description>Task</description>
+      <dependencies></dependencies>
+      <tools>tool</tools>
+    </subtask>
+  </subtasks>
+</task_plan>
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_direct_answer());
     }
 }

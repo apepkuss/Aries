@@ -550,7 +550,10 @@ async fn test_ttp_003_plan_end_to_end_with_mock() {
         .with_skills(summaries);
 
     // Execute planning
-    let plan = planner.plan("查询东京天气并审查代码").await.unwrap();
+    let plan = planner
+        .plan_task_only("查询东京天气并审查代码")
+        .await
+        .unwrap();
 
     assert_eq!(plan.len(), 2);
 
@@ -596,7 +599,7 @@ async fn test_ttp_004_planner_without_skills_plan_works() {
         .with_tools(get_test_tools());
 
     // Planning should still work
-    let plan = planner.plan("执行简单搜索").await.unwrap();
+    let plan = planner.plan_task_only("执行简单搜索").await.unwrap();
 
     assert!(!plan.subtasks.is_empty());
     assert_eq!(plan.subtasks[0].recommended_skill, None);
@@ -664,7 +667,7 @@ async fn test_integration_full_workflow() {
     assert!(system_prompt.contains("## 可用工具"));
 
     // Phase 3: Execute planning
-    let plan = planner.plan("查询天气并审查代码").await.unwrap();
+    let plan = planner.plan_task_only("查询天气并审查代码").await.unwrap();
     assert!(!plan.subtasks.is_empty());
 
     // Verify skills integration
