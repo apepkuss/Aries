@@ -1102,7 +1102,7 @@ async fn test_tda_005_system_prompt_contains_judgment_principles() {
         "System prompt should mention when to use task plan"
     );
     assert!(
-        system_prompt.contains("不确定时规划"),
+        system_prompt.contains("不确定时倾向规划"),
         "System prompt should mention fallback to task plan"
     );
 }
