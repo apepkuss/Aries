@@ -1939,4 +1939,201 @@ REST API 是一种基于 HTTP 协议的 Web 服务架构风格。
         let result = PlannerOutput::parse(content).unwrap();
         assert!(result.is_direct_answer());
     }
+
+    // ==================== Direct Answer Error Handling Tests ====================
+
+    #[test]
+    fn test_extract_direct_answer_missing_answer_tag() {
+        // direct_answer tag exists but no answer tag inside
+        let content = r#"
+<direct_answer>
+  北京是中国的首都。
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_direct_answer_whitespace_only() {
+        let content = r#"
+<direct_answer>
+  <answer>   </answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_direct_answer_with_special_characters() {
+        let content = r#"
+<direct_answer>
+  <answer>1 + 1 = 2, 并且 3 > 2 < 4</answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert!(result.answer.contains("1 + 1 = 2"));
+    }
+
+    #[test]
+    fn test_extract_direct_answer_with_code_block() {
+        let content = r#"
+<direct_answer>
+  <answer>
+这是一个简单的 Python 示例：
+```python
+print("Hello, World!")
+```
+  </answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert!(result.answer.contains("print"));
+        assert!(result.answer.contains("Hello, World!"));
+    }
+
+    #[test]
+    fn test_extract_direct_answer_with_chinese() {
+        let content = r#"
+<direct_answer>
+  <answer>中华人民共和国的首都是北京市，位于华北平原北部。</answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert!(result.answer.contains("北京市"));
+        assert!(result.answer.contains("华北平原"));
+    }
+
+    #[test]
+    fn test_extract_direct_answer_with_markdown() {
+        let content = r#"
+<direct_answer>
+  <answer>
+REST API 有以下特点：
+
+1. **无状态** - 每个请求都是独立的
+2. **统一接口** - 使用标准 HTTP 方法
+3. **可缓存** - 响应可以被缓存
+  </answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        assert!(result.answer.contains("**无状态**"));
+        assert!(result.answer.contains("1."));
+    }
+
+    #[test]
+    fn test_planner_output_parse_malformed_direct_answer() {
+        // Malformed: missing closing tag
+        let content = r#"
+<direct_answer>
+  <answer>This answer has no closing tag
+</direct_answer>
+"#;
+        let result = PlannerOutput::parse(content);
+        // Should fail to parse as direct_answer, also no task_plan
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_planner_output_parse_with_preamble() {
+        // LLM might output some text before the XML
+        let content = r#"
+好的，我来回答你的问题：
+
+<direct_answer>
+  <answer>北京是中国的首都。</answer>
+</direct_answer>
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_direct_answer());
+        if let PlannerOutput::DirectAnswer(answer) = result {
+            assert_eq!(answer.answer, "北京是中国的首都。");
+        }
+    }
+
+    #[test]
+    fn test_planner_output_parse_with_postamble() {
+        // LLM might output some text after the XML
+        let content = r#"
+<direct_answer>
+  <answer>北京是中国的首都。</answer>
+</direct_answer>
+
+希望这个回答对你有帮助！
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_direct_answer());
+    }
+
+    #[test]
+    fn test_fix_common_typos_direct_answer_pascal_case() {
+        let content = "<DirectAnswer><answer>test</answer></DirectAnswer>";
+        let fixed = fix_common_typos(content);
+        assert_eq!(
+            fixed,
+            "<direct_answer><answer>test</answer></direct_answer>"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_xml_content_fixes_direct_answer_tag() {
+        // Test that sanitize_xml_content handles direct_answer typos
+        let content = "<directanswer><answer>test</answer></directanswer>";
+        let sanitized = sanitize_xml_content(content);
+        assert!(sanitized.contains("<direct_answer>"));
+        assert!(sanitized.contains("</direct_answer>"));
+    }
+
+    #[test]
+    fn test_extract_direct_answer_nested_xml() {
+        // Answer containing XML-like content (escaped entities)
+        let content = r#"
+<direct_answer>
+  <answer>在 XML 中，你需要使用 &lt;tag&gt; 来表示标签。</answer>
+</direct_answer>
+"#;
+        let result = extract_direct_answer(content).unwrap();
+        // The content should be preserved as-is (escaped entities remain escaped)
+        assert!(result.answer.contains("XML"));
+        assert!(result.answer.contains("标签"));
+    }
+
+    #[test]
+    fn test_has_direct_answer_tag_with_attributes() {
+        // Some LLMs might add attributes to tags
+        assert!(has_direct_answer_tag("<direct_answer type=\"simple\">"));
+        assert!(has_direct_answer_tag("<direct_answer  >"));
+    }
+
+    #[test]
+    fn test_planner_output_task_plan_only() {
+        // Ensure task_plan still works when there's no direct_answer
+        let content = r#"
+我来帮你规划这个任务：
+
+<task_plan>
+  <goal>搜索并汇总最新新闻</goal>
+  <subtasks>
+    <subtask id="1">
+      <description>使用搜索工具搜索最新新闻</description>
+      <dependencies></dependencies>
+      <tools>web_search</tools>
+    </subtask>
+    <subtask id="2">
+      <description>汇总搜索结果</description>
+      <dependencies>1</dependencies>
+      <tools></tools>
+    </subtask>
+  </subtasks>
+</task_plan>
+"#;
+        let result = PlannerOutput::parse(content).unwrap();
+        assert!(result.is_task_plan());
+        if let PlannerOutput::TaskPlan(plan) = result {
+            assert_eq!(plan.subtasks.len(), 2);
+            assert!(plan.goal.contains("新闻"));
+        }
+    }
 }

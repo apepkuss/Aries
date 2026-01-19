@@ -880,3 +880,540 @@ async fn test_build_system_prompt_accessible() {
     // This should compile - proving build_system_prompt is accessible
     let _prompt = planner.build_system_prompt();
 }
+
+// ============================================================================
+// Direct Answer Mode Integration Tests
+// ============================================================================
+
+/// Mock LLM provider that returns direct answer response
+struct MockDirectAnswerProvider {
+    response: String,
+}
+
+impl MockDirectAnswerProvider {
+    fn new(answer: &str) -> Self {
+        Self {
+            response: format!(
+                r#"
+<direct_answer>
+  <answer>{}</answer>
+</direct_answer>
+"#,
+                answer
+            ),
+        }
+    }
+
+    /// Create a mock for simple factual question
+    fn for_factual_question() -> Self {
+        Self::new("北京是中华人民共和国的首都，位于华北平原北部。")
+    }
+
+    /// Create a mock for greeting
+    fn for_greeting() -> Self {
+        Self::new("你好！我是 Aries，一个智能助手。有什么可以帮助你的吗？")
+    }
+
+    /// Create a mock for concept explanation
+    fn for_concept_explanation() -> Self {
+        Self::new(
+            r#"REST API（Representational State Transfer Application Programming Interface）是一种基于 HTTP 协议的 Web 服务架构风格。
+
+主要特点：
+1. **无状态** - 每个请求都是独立的
+2. **统一接口** - 使用标准 HTTP 方法（GET、POST、PUT、DELETE）
+3. **可缓存** - 响应可以被缓存以提高性能"#,
+        )
+    }
+
+    /// Create a mock for simple math
+    fn for_simple_math() -> Self {
+        Self::new("1 + 1 = 2")
+    }
+}
+
+#[async_trait]
+impl LlmProvider for MockDirectAnswerProvider {
+    async fn complete(&self, _messages: Vec<PlannerMessage>) -> Result<String, ServerError> {
+        Ok(self.response.clone())
+    }
+
+    fn name(&self) -> &str {
+        "mock-direct-answer"
+    }
+}
+
+// ============================================================================
+// TDA-001: Direct Answer for Factual Questions
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_001_direct_answer_for_factual_question() {
+    use super::xml_parser::PlannerOutput;
+
+    let planner = TaskPlanner::with_provider(
+        Arc::new(MockDirectAnswerProvider::for_factual_question()),
+        10,
+    )
+    .with_tools(get_test_tools());
+
+    let result = planner.plan("中国的首都是哪里？").await.unwrap();
+
+    // Should return DirectAnswer, not TaskPlan
+    assert!(
+        result.is_direct_answer(),
+        "Simple factual question should return DirectAnswer"
+    );
+
+    if let PlannerOutput::DirectAnswer(answer) = result {
+        assert!(answer.answer.contains("北京"));
+        assert!(answer.answer.contains("首都"));
+    }
+}
+
+#[tokio::test]
+async fn test_tda_001_direct_answer_content_preserved() {
+    use super::xml_parser::PlannerOutput;
+
+    let planner =
+        TaskPlanner::with_provider(Arc::new(MockDirectAnswerProvider::for_simple_math()), 10);
+
+    let result = planner.plan("1+1等于几？").await.unwrap();
+
+    if let PlannerOutput::DirectAnswer(answer) = result {
+        assert_eq!(answer.answer, "1 + 1 = 2");
+    } else {
+        panic!("Expected DirectAnswer");
+    }
+}
+
+// ============================================================================
+// TDA-002: Direct Answer for Greetings
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_002_direct_answer_for_greeting() {
+    use super::xml_parser::PlannerOutput;
+
+    let planner =
+        TaskPlanner::with_provider(Arc::new(MockDirectAnswerProvider::for_greeting()), 10);
+
+    let result = planner.plan("你好").await.unwrap();
+
+    assert!(
+        result.is_direct_answer(),
+        "Greeting should return DirectAnswer"
+    );
+
+    if let PlannerOutput::DirectAnswer(answer) = result {
+        assert!(answer.answer.contains("你好"));
+    }
+}
+
+// ============================================================================
+// TDA-003: Direct Answer for Concept Explanation
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_003_direct_answer_for_concept_explanation() {
+    use super::xml_parser::PlannerOutput;
+
+    let planner = TaskPlanner::with_provider(
+        Arc::new(MockDirectAnswerProvider::for_concept_explanation()),
+        10,
+    );
+
+    let result = planner.plan("什么是 REST API？").await.unwrap();
+
+    assert!(
+        result.is_direct_answer(),
+        "Concept explanation should return DirectAnswer"
+    );
+
+    if let PlannerOutput::DirectAnswer(answer) = result {
+        assert!(answer.answer.contains("REST API"));
+        assert!(answer.answer.contains("HTTP"));
+        // Should preserve markdown formatting
+        assert!(answer.answer.contains("**无状态**"));
+    }
+}
+
+// ============================================================================
+// TDA-004: Task Plan Mode Still Works
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_004_task_plan_mode_still_works() {
+    use super::xml_parser::PlannerOutput;
+
+    // Use the existing MockLlmProvider that returns task_plan
+    let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
+        .with_tools(get_test_tools());
+
+    let result = planner.plan("搜索最新的天气预报").await.unwrap();
+
+    // Complex tasks should still return TaskPlan
+    assert!(result.is_task_plan(), "Complex task should return TaskPlan");
+
+    if let PlannerOutput::TaskPlan(plan) = result {
+        assert!(!plan.subtasks.is_empty());
+    }
+}
+
+// ============================================================================
+// TDA-005: System Prompt Contains Direct Answer Instructions
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_005_system_prompt_contains_direct_answer_format() {
+    let planner =
+        TaskPlanner::with_provider(Arc::new(MockDirectAnswerProvider::for_greeting()), 10);
+
+    let system_prompt = planner.build_system_prompt();
+
+    // System prompt should contain direct_answer format instructions
+    assert!(
+        system_prompt.contains("<direct_answer>"),
+        "System prompt should contain direct_answer tag example"
+    );
+    assert!(
+        system_prompt.contains("<answer>"),
+        "System prompt should contain answer tag example"
+    );
+    assert!(
+        system_prompt.contains("格式一：直接回答") || system_prompt.contains("直接回答"),
+        "System prompt should mention direct answer format"
+    );
+}
+
+#[tokio::test]
+async fn test_tda_005_system_prompt_contains_judgment_principles() {
+    let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::without_skills_plan()), 10);
+
+    let system_prompt = planner.build_system_prompt();
+
+    // System prompt should contain judgment principles
+    assert!(
+        system_prompt.contains("优先直接回答"),
+        "System prompt should mention direct answer priority"
+    );
+    assert!(
+        system_prompt.contains("需要工具时规划"),
+        "System prompt should mention when to use task plan"
+    );
+    assert!(
+        system_prompt.contains("不确定时规划"),
+        "System prompt should mention fallback to task plan"
+    );
+}
+
+// ============================================================================
+// TDA-006: Plan Method Return Type Test
+// ============================================================================
+
+#[tokio::test]
+async fn test_tda_006_plan_returns_planner_output() {
+    use super::xml_parser::PlannerOutput;
+
+    // Test that plan() returns PlannerOutput enum
+    let planner =
+        TaskPlanner::with_provider(Arc::new(MockDirectAnswerProvider::for_greeting()), 10);
+
+    let result: Result<PlannerOutput, ServerError> = planner.plan("你好").await;
+    assert!(result.is_ok());
+
+    // Verify the enum variant
+    let output = result.unwrap();
+    match output {
+        PlannerOutput::DirectAnswer(_) => {} // Expected
+        PlannerOutput::TaskPlan(_) => panic!("Expected DirectAnswer, got TaskPlan"),
+    }
+}
+
+#[tokio::test]
+async fn test_tda_006_plan_task_only_still_works() {
+    // Test backward compatibility with plan_task_only()
+    let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
+        .with_tools(get_test_tools());
+
+    let result = planner.plan_task_only("查询天气").await;
+    assert!(result.is_ok());
+
+    let plan = result.unwrap();
+    assert!(!plan.subtasks.is_empty());
+}
+
+// ============================================================================
+// TDA-007: Edge Cases
+// ============================================================================
+
+/// Mock that returns malformed direct_answer (missing answer tag)
+struct MockMalformedDirectAnswerProvider;
+
+#[async_trait]
+impl LlmProvider for MockMalformedDirectAnswerProvider {
+    async fn complete(&self, _messages: Vec<PlannerMessage>) -> Result<String, ServerError> {
+        Ok(r#"
+<direct_answer>
+  这是一个没有 answer 标签的回答。
+</direct_answer>
+"#
+        .to_string())
+    }
+
+    fn name(&self) -> &str {
+        "mock-malformed"
+    }
+}
+
+#[tokio::test]
+async fn test_tda_007_malformed_direct_answer_returns_error() {
+    let planner = TaskPlanner::with_provider(Arc::new(MockMalformedDirectAnswerProvider), 10);
+
+    let result = planner.plan("测试问题").await;
+
+    // Should return error because the direct_answer is malformed
+    assert!(
+        result.is_err(),
+        "Malformed direct_answer should return error"
+    );
+
+    if let Err(e) = result {
+        // Error message should indicate parsing failure
+        let error_msg = format!("{:?}", e);
+        assert!(
+            error_msg.contains("parse") || error_msg.contains("Parse"),
+            "Error should mention parsing: {}",
+            error_msg
+        );
+    }
+}
+
+/// Mock that returns neither direct_answer nor task_plan
+struct MockInvalidResponseProvider;
+
+#[async_trait]
+impl LlmProvider for MockInvalidResponseProvider {
+    async fn complete(&self, _messages: Vec<PlannerMessage>) -> Result<String, ServerError> {
+        Ok("This is just plain text without any XML tags.".to_string())
+    }
+
+    fn name(&self) -> &str {
+        "mock-invalid"
+    }
+}
+
+#[tokio::test]
+async fn test_tda_007_invalid_response_returns_error() {
+    let planner = TaskPlanner::with_provider(Arc::new(MockInvalidResponseProvider), 10);
+
+    let result = planner.plan("测试问题").await;
+
+    assert!(
+        result.is_err(),
+        "Invalid response (no XML tags) should return error"
+    );
+}
+
+// ============================================================================
+// TaskPlan::from_raw() Tests
+// ============================================================================
+
+use super::{
+    planner::TaskPlan,
+    xml_parser::{SubTaskRaw, TaskPlanRaw},
+};
+
+#[test]
+fn test_task_plan_from_raw_basic() {
+    let raw = TaskPlanRaw {
+        goal: "Test goal".to_string(),
+        subtasks: vec![SubTaskRaw {
+            id: "1".to_string(),
+            description: "First task".to_string(),
+            dependencies: vec![],
+            tools: vec!["tool1".to_string()],
+            recommended_skill: None,
+        }],
+    };
+
+    let plan = TaskPlan::from_raw(raw).unwrap();
+
+    assert_eq!(plan.original_goal, "Test goal");
+    assert_eq!(plan.len(), 1);
+    assert_eq!(plan.subtasks[0].id, 1);
+    assert_eq!(plan.subtasks[0].description, "First task");
+}
+
+#[test]
+fn test_task_plan_from_raw_with_dependencies() {
+    let raw = TaskPlanRaw {
+        goal: "Multi-step task".to_string(),
+        subtasks: vec![
+            SubTaskRaw {
+                id: "1".to_string(),
+                description: "First step".to_string(),
+                dependencies: vec![],
+                tools: vec!["tool1".to_string()],
+                recommended_skill: None,
+            },
+            SubTaskRaw {
+                id: "2".to_string(),
+                description: "Second step".to_string(),
+                dependencies: vec!["1".to_string()],
+                tools: vec!["tool2".to_string()],
+                recommended_skill: None,
+            },
+            SubTaskRaw {
+                id: "3".to_string(),
+                description: "Third step".to_string(),
+                dependencies: vec!["1".to_string(), "2".to_string()],
+                tools: vec!["tool3".to_string()],
+                recommended_skill: None,
+            },
+        ],
+    };
+
+    let plan = TaskPlan::from_raw(raw).unwrap();
+
+    assert_eq!(plan.len(), 3);
+
+    // Check dependencies are parsed correctly
+    assert!(plan.subtasks[0].dependencies.is_empty());
+    assert_eq!(plan.subtasks[1].dependencies, vec![1]);
+    assert_eq!(plan.subtasks[2].dependencies, vec![1, 2]);
+}
+
+#[test]
+fn test_task_plan_from_raw_with_skills() {
+    let raw = TaskPlanRaw {
+        goal: "Task with skills".to_string(),
+        subtasks: vec![
+            SubTaskRaw {
+                id: "1".to_string(),
+                description: "Query weather".to_string(),
+                dependencies: vec![],
+                tools: vec!["weather_api".to_string()],
+                recommended_skill: Some("weather-query".to_string()),
+            },
+            SubTaskRaw {
+                id: "2".to_string(),
+                description: "Review code".to_string(),
+                dependencies: vec!["1".to_string()],
+                tools: vec!["read_file".to_string()],
+                recommended_skill: Some("code-review".to_string()),
+            },
+        ],
+    };
+
+    let plan = TaskPlan::from_raw(raw).unwrap();
+
+    assert_eq!(
+        plan.subtasks[0].recommended_skill,
+        Some("weather-query".to_string())
+    );
+    assert_eq!(
+        plan.subtasks[1].recommended_skill,
+        Some("code-review".to_string())
+    );
+}
+
+#[test]
+fn test_task_plan_from_raw_empty_plan_error() {
+    let raw = TaskPlanRaw {
+        goal: "Empty goal".to_string(),
+        subtasks: vec![],
+    };
+
+    let result = TaskPlan::from_raw(raw);
+
+    assert!(result.is_err(), "Empty plan should return error");
+}
+
+#[test]
+fn test_task_plan_from_raw_invalid_id_error() {
+    let raw = TaskPlanRaw {
+        goal: "Test".to_string(),
+        subtasks: vec![SubTaskRaw {
+            id: "not-a-number".to_string(),
+            description: "Task".to_string(),
+            dependencies: vec![],
+            tools: vec![],
+            recommended_skill: None,
+        }],
+    };
+
+    let result = TaskPlan::from_raw(raw);
+
+    assert!(result.is_err(), "Invalid ID should return error");
+}
+
+#[test]
+fn test_task_plan_from_raw_duplicate_id_error() {
+    let raw = TaskPlanRaw {
+        goal: "Test".to_string(),
+        subtasks: vec![
+            SubTaskRaw {
+                id: "1".to_string(),
+                description: "First".to_string(),
+                dependencies: vec![],
+                tools: vec![],
+                recommended_skill: None,
+            },
+            SubTaskRaw {
+                id: "1".to_string(), // Duplicate ID
+                description: "Second".to_string(),
+                dependencies: vec![],
+                tools: vec![],
+                recommended_skill: None,
+            },
+        ],
+    };
+
+    let result = TaskPlan::from_raw(raw);
+
+    assert!(result.is_err(), "Duplicate ID should return error");
+}
+
+#[test]
+fn test_task_plan_from_raw_invalid_dependency_id_error() {
+    let raw = TaskPlanRaw {
+        goal: "Test".to_string(),
+        subtasks: vec![SubTaskRaw {
+            id: "1".to_string(),
+            description: "Task".to_string(),
+            dependencies: vec!["invalid".to_string()],
+            tools: vec![],
+            recommended_skill: None,
+        }],
+    };
+
+    let result = TaskPlan::from_raw(raw);
+
+    assert!(result.is_err(), "Invalid dependency ID should return error");
+}
+
+#[test]
+fn test_task_plan_from_raw_preserves_tools() {
+    let raw = TaskPlanRaw {
+        goal: "Test".to_string(),
+        subtasks: vec![SubTaskRaw {
+            id: "1".to_string(),
+            description: "Task".to_string(),
+            dependencies: vec![],
+            tools: vec![
+                "tool1".to_string(),
+                "tool2".to_string(),
+                "tool3".to_string(),
+            ],
+            recommended_skill: None,
+        }],
+    };
+
+    let plan = TaskPlan::from_raw(raw).unwrap();
+
+    assert_eq!(
+        plan.subtasks[0].required_tools,
+        vec!["tool1", "tool2", "tool3"]
+    );
+}
