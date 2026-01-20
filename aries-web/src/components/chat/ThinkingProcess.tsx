@@ -37,27 +37,27 @@ const phaseConfig: Record<
   idle: { icon: Loader2, label: '', color: '', bgColor: '' },
   planning: {
     icon: Brain,
-    label: 'Planning',
+    label: '正在规划',
     color: 'text-purple-600 dark:text-purple-400',
-    bgColor: 'bg-purple-50 dark:bg-purple-950/30',
+    bgColor: 'bg-purple-500/10 dark:bg-purple-950/30',
   },
   executing: {
     icon: Cog,
-    label: 'Executing',
+    label: '正在执行',
     color: 'text-blue-600 dark:text-blue-400',
-    bgColor: 'bg-blue-50 dark:bg-blue-950/30',
+    bgColor: 'bg-blue-500/10 dark:bg-blue-950/30',
   },
   reflecting: {
     icon: RefreshCw,
-    label: 'Reflecting',
+    label: '正在审视',
     color: 'text-amber-600 dark:text-amber-400',
-    bgColor: 'bg-amber-50 dark:bg-amber-950/30',
+    bgColor: 'bg-amber-500/10 dark:bg-amber-950/30',
   },
   completing: {
     icon: CheckCircle2,
-    label: 'Completing',
+    label: '即将完成',
     color: 'text-green-600 dark:text-green-400',
-    bgColor: 'bg-green-50 dark:bg-green-950/30',
+    bgColor: 'bg-green-500/10 dark:bg-green-950/30',
   },
 };
 
@@ -155,9 +155,9 @@ export function ThinkingProcess({
             <span className="font-medium">{config.label}</span>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-muted-foreground group-hover:text-foreground transition-colors">
             <Brain className="h-4 w-4" />
-            <span className="font-medium">Thinking Process</span>
+            <span className="font-medium">思考过程</span>
           </div>
         )}
 
@@ -165,8 +165,8 @@ export function ThinkingProcess({
         {isStreaming &&
           executionStatus?.subtaskTotal !== undefined &&
           executionStatus.subtaskTotal > 0 && (
-            <span className="text-xs text-muted-foreground">
-              Task {executionStatus.subtaskCurrent ?? 1}/
+            <span className="text-xs text-muted-foreground bg-muted/50 px-2 py-0.5 rounded-full border border-border/50">
+              任务 {executionStatus.subtaskCurrent ?? 1}/
               {executionStatus.subtaskTotal}
             </span>
           )}
@@ -175,18 +175,18 @@ export function ThinkingProcess({
         {!isExpanded && (
           <div className="flex items-center gap-2 ml-auto text-xs text-muted-foreground">
             {totalTools > 0 && (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
                 <Cog className="h-3 w-3" />
-                {completedTools}/{totalTools} tools
+                {completedTools}/{totalTools} 工具
                 {hasErrors && (
                   <AlertCircle className="h-3 w-3 text-destructive" />
                 )}
               </span>
             )}
             {hasThinking && (
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 bg-purple-500/10 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded">
                 <Brain className="h-3 w-3" />
-                thoughts
+                想法
               </span>
             )}
           </div>
@@ -200,10 +200,10 @@ export function ThinkingProcess({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
               </span>
-              <span className="text-xs text-muted-foreground">Live</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-green-600 dark:text-green-400">运行中</span>
             </>
           ) : (
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-gray-400"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-muted-foreground/30"></span>
           )}
         </div>
       </button>
@@ -227,10 +227,10 @@ export function ThinkingProcess({
           {/* Task plan ToDo list */}
           {hasTaskPlan && (
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                <ListTodo className="h-3 w-3" />
-                <span>Task Plan</span>
-                <span className="text-muted-foreground font-normal">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-tight">
+                <ListTodo className="h-3.5 w-3.5" />
+                <span>任务规划</span>
+                <span className="text-muted-foreground font-medium ml-1">
                   ({taskPlan!.subtasks.filter((s) => s.status === 'completed').length}/
                   {taskPlan!.subtasks.length})
                 </span>
@@ -260,11 +260,11 @@ export function ThinkingProcess({
               {/* Thinking content */}
               {hasThinking && (
                 <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-purple-600 dark:text-purple-400">
-                    <Brain className="h-3 w-3" />
-                    <span>Thoughts</span>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-purple-600 dark:text-purple-400 uppercase tracking-tight">
+                    <Brain className="h-3.5 w-3.5" />
+                    <span>详细想法</span>
                   </div>
-                  <div className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/50 rounded-md p-2 max-h-40 overflow-y-auto">
+                  <div className="text-[13px] text-muted-foreground leading-relaxed whitespace-pre-wrap bg-purple-500/5 border border-purple-500/10 rounded-xl p-3 max-h-48 overflow-y-auto">
                     {thinking}
                   </div>
                 </div>
@@ -273,10 +273,10 @@ export function ThinkingProcess({
               {/* Tool calls */}
               {hasToolCalls && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-                    <Cog className="h-3 w-3" />
-                    <span>Tool Calls</span>
-                    <span className="text-muted-foreground font-normal">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-tight">
+                    <Cog className="h-3.5 w-3.5" />
+                    <span>工具调用</span>
+                    <span className="text-muted-foreground font-medium ml-1">
                       ({completedTools}/{totalTools})
                     </span>
                   </div>
@@ -414,10 +414,10 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
           {/* Arguments */}
           {toolCall.arguments && Object.keys(toolCall.arguments).length > 0 && (
             <div>
-              <div className="text-xs text-muted-foreground mb-1">
-                Arguments
+              <div className="text-[10px] font-bold text-muted-foreground mb-1.5 uppercase tracking-wider">
+                输入参数
               </div>
-              <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-24">
+              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 font-mono leading-tight">
                 {JSON.stringify(toolCall.arguments, null, 2)}
               </pre>
             </div>
@@ -426,10 +426,10 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
           {/* Result */}
           {toolCall.result && toolCall.status === 'success' && (
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Result</div>
-              <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-24">
-                {toolCall.result.length > 500
-                  ? toolCall.result.slice(0, 500) + '...'
+              <div className="text-[10px] font-bold text-muted-foreground mb-1.5 uppercase tracking-wider">输出结果</div>
+              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 font-mono leading-tight">
+                {toolCall.result.length > 1000
+                  ? toolCall.result.slice(0, 1000) + '...'
                   : toolCall.result}
               </pre>
             </div>
@@ -438,8 +438,8 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
           {/* Error */}
           {toolCall.error && toolCall.status === 'error' && (
             <div>
-              <div className="text-xs text-destructive mb-1">Error</div>
-              <div className="text-xs bg-destructive/10 text-destructive p-2 rounded">
+              <div className="text-[10px] font-bold text-destructive mb-1.5 uppercase tracking-wider">错误信息</div>
+              <div className="text-xs bg-destructive/5 text-destructive p-2.5 rounded-lg border border-destructive/20 leading-normal">
                 {toolCall.error}
               </div>
             </div>

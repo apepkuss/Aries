@@ -12,12 +12,13 @@ export function Header() {
   const { sidebarOpen, toggleSidebar, theme, setTheme, setSettingsOpen } = useUIStore();
 
   return (
-    <header className="h-14 border-b bg-background flex items-center justify-between px-4">
+    <header className="h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4">
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleSidebar}
+          className="hover:bg-muted/50 transition-colors"
           title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
         >
           {sidebarOpen ? (
@@ -26,7 +27,9 @@ export function Header() {
             <PanelLeft className="h-5 w-5" />
           )}
         </Button>
-        <h1 className="text-lg font-semibold">Aries</h1>
+        <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent italic">
+          Aries
+        </h1>
       </div>
 
       <div className="flex items-center gap-2">
