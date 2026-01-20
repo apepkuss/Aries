@@ -1125,8 +1125,10 @@ async fn execute_chat_plan_realtime(
     _reflection_config: crate::reflection::ReflectionConfig,
     event_sender: mpsc::Sender<String>,
 ) -> ServerResult<()> {
-    use super::emitter::SseEventEmitter;
-    use super::events::{TextEvent, PlanEvent, PlanSubtask, format_sse_event};
+    use super::{
+        emitter::SseEventEmitter,
+        events::{PlanEvent, PlanSubtask, TextEvent, format_sse_event},
+    };
 
     // Create emitter that writes directly to the event sender
     let emitter: Box<dyn EventEmitter> = Box::new(SseEventEmitter::new(
@@ -1263,9 +1265,12 @@ async fn execute_chat_plan_realtime(
                 request_id
             );
             // Send error event before returning
-            let error_event = format_sse_event("error", &serde_json::json!({
-                "message": format!("Failed to generate task plan: {}", e)
-            }));
+            let error_event = format_sse_event(
+                "error",
+                &serde_json::json!({
+                    "message": format!("Failed to generate task plan: {}", e)
+                }),
+            );
             let _ = event_sender.send(error_event).await;
             let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
             return Err(e);
@@ -1310,9 +1315,12 @@ async fn execute_chat_plan_realtime(
             match TaskPlan::from_raw(raw_plan) {
                 Ok(plan) => plan,
                 Err(e) => {
-                    let error_event = format_sse_event("error", &serde_json::json!({
-                        "message": format!("Invalid task plan: {}", e)
-                    }));
+                    let error_event = format_sse_event(
+                        "error",
+                        &serde_json::json!({
+                            "message": format!("Invalid task plan: {}", e)
+                        }),
+                    );
                     let _ = event_sender.send(error_event).await;
                     let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
                     return Err(e);
@@ -1348,20 +1356,27 @@ async fn execute_chat_plan_realtime(
     }
 
     // Send plan event to frontend with subtask list
-    let plan_subtasks: Vec<PlanSubtask> = plan.subtasks.iter().map(|s| {
-        let status_str = match &s.status {
-            super::planner::SubTaskStatus::Pending => "pending",
-            super::planner::SubTaskStatus::InProgress => "in_progress",
-            super::planner::SubTaskStatus::Completed => "completed",
-            super::planner::SubTaskStatus::Failed(_) => "failed",
-            super::planner::SubTaskStatus::Skipped => "skipped",
-        };
-        PlanSubtask::new(s.id, &s.description, status_str)
-    }).collect();
+    let plan_subtasks: Vec<PlanSubtask> = plan
+        .subtasks
+        .iter()
+        .map(|s| {
+            let status_str = match &s.status {
+                super::planner::SubTaskStatus::Pending => "pending",
+                super::planner::SubTaskStatus::InProgress => "in_progress",
+                super::planner::SubTaskStatus::Completed => "completed",
+                super::planner::SubTaskStatus::Failed(_) => "failed",
+                super::planner::SubTaskStatus::Skipped => "skipped",
+            };
+            PlanSubtask::new(s.id, &s.description, status_str)
+        })
+        .collect();
     let plan_event = PlanEvent::new(&plan.original_goal, plan_subtasks);
     let plan_event_str = format_sse_event("plan", &plan_event);
     if event_sender.send(plan_event_str).await.is_err() {
-        dual_info!("Client disconnected while sending plan event - request_id: {}", request_id);
+        dual_info!(
+            "Client disconnected while sending plan event - request_id: {}",
+            request_id
+        );
         return Ok(());
     }
 
@@ -1420,7 +1435,10 @@ async fn execute_chat_plan_realtime(
         for &subtask_idx in &execution_order {
             // Check if client disconnected
             if event_sender.is_closed() {
-                dual_info!("Client disconnected, stopping execution - request_id: {}", request_id);
+                dual_info!(
+                    "Client disconnected, stopping execution - request_id: {}",
+                    request_id
+                );
                 return Ok(());
             }
 
@@ -1435,9 +1453,12 @@ async fn execute_chat_plan_realtime(
                 dual_info!("Plan trace: {}", trace.summary());
 
                 // Send timeout error event
-                let error_event = format_sse_event("error", &serde_json::json!({
-                    "message": format!("Plan execution timed out after {} seconds", time_budget.elapsed().as_secs())
-                }));
+                let error_event = format_sse_event(
+                    "error",
+                    &serde_json::json!({
+                        "message": format!("Plan execution timed out after {} seconds", time_budget.elapsed().as_secs())
+                    }),
+                );
                 let _ = event_sender.send(error_event).await;
                 let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
                 return Err(ServerError::TimeBudgetExhausted {
@@ -1451,9 +1472,12 @@ async fn execute_chat_plan_realtime(
                 dual_warn!("{} - request_id: {}", warn_msg, request_id);
                 trace.finalize(TraceStatus::Error(warn_msg.to_string()));
 
-                let error_event = format_sse_event("error", &serde_json::json!({
-                    "message": warn_msg
-                }));
+                let error_event = format_sse_event(
+                    "error",
+                    &serde_json::json!({
+                        "message": warn_msg
+                    }),
+                );
                 let _ = event_sender.send(error_event).await;
                 let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
                 return Err(ServerError::Operation(warn_msg.to_string()));
@@ -1527,7 +1551,10 @@ async fn execute_chat_plan_realtime(
             for attempt in 0..=subtask_max_retries {
                 // Check if client disconnected
                 if event_sender.is_closed() {
-                    dual_info!("Client disconnected, stopping execution - request_id: {}", request_id);
+                    dual_info!(
+                        "Client disconnected, stopping execution - request_id: {}",
+                        request_id
+                    );
                     return Ok(());
                 }
 
