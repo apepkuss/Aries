@@ -1126,7 +1126,7 @@ async fn execute_chat_plan_realtime(
     event_sender: mpsc::Sender<String>,
 ) -> ServerResult<()> {
     use super::emitter::SseEventEmitter;
-    use super::events::{TextEvent, format_sse_event};
+    use super::events::{TextEvent, PlanEvent, PlanSubtask, format_sse_event};
 
     // Create emitter that writes directly to the event sender
     let emitter: Box<dyn EventEmitter> = Box::new(SseEventEmitter::new(
@@ -1345,6 +1345,24 @@ async fn execute_chat_plan_realtime(
         if i < plan.execution_order.len() {
             dual_debug!("  Execution order[{}]: {}", i, plan.execution_order[i]);
         }
+    }
+
+    // Send plan event to frontend with subtask list
+    let plan_subtasks: Vec<PlanSubtask> = plan.subtasks.iter().map(|s| {
+        let status_str = match &s.status {
+            super::planner::SubTaskStatus::Pending => "pending",
+            super::planner::SubTaskStatus::InProgress => "in_progress",
+            super::planner::SubTaskStatus::Completed => "completed",
+            super::planner::SubTaskStatus::Failed(_) => "failed",
+            super::planner::SubTaskStatus::Skipped => "skipped",
+        };
+        PlanSubtask::new(s.id, &s.description, status_str)
+    }).collect();
+    let plan_event = PlanEvent::new(&plan.original_goal, plan_subtasks);
+    let plan_event_str = format_sse_event("plan", &plan_event);
+    if event_sender.send(plan_event_str).await.is_err() {
+        dual_info!("Client disconnected while sending plan event - request_id: {}", request_id);
+        return Ok(());
     }
 
     // Initialize execution trace

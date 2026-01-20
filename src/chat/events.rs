@@ -58,6 +58,8 @@ pub enum StreamEventType {
     Text,
     /// Macro-level execution status update.
     Status,
+    /// Task plan with subtask list.
+    Plan,
     /// Task completion signal.
     Finish,
     /// Artifact created event.
@@ -76,6 +78,7 @@ impl fmt::Display for StreamEventType {
             StreamEventType::ToolResult => write!(f, "tool_result"),
             StreamEventType::Text => write!(f, "text"),
             StreamEventType::Status => write!(f, "status"),
+            StreamEventType::Plan => write!(f, "plan"),
             StreamEventType::Finish => write!(f, "finish"),
             StreamEventType::ArtifactCreated => write!(f, "artifact_created"),
             StreamEventType::ArtifactUpdated => write!(f, "artifact_updated"),
@@ -373,6 +376,52 @@ impl StatusEvent {
 }
 
 // ============================================================================
+// Plan Event
+// ============================================================================
+
+/// Event payload for task plan with subtask list.
+/// Sent after planning phase completes, contains all planned subtasks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanEvent {
+    /// Overall goal of the task plan.
+    pub goal: String,
+    /// List of planned subtasks.
+    pub subtasks: Vec<PlanSubtask>,
+}
+
+/// A subtask within a plan event (simplified view for frontend).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanSubtask {
+    /// Subtask ID (0-indexed).
+    pub id: usize,
+    /// Human-readable description of the subtask.
+    pub description: String,
+    /// Current status of the subtask.
+    pub status: String,
+}
+
+impl PlanEvent {
+    /// Creates a new PlanEvent from goal and subtasks.
+    pub fn new(goal: impl Into<String>, subtasks: Vec<PlanSubtask>) -> Self {
+        Self {
+            goal: goal.into(),
+            subtasks,
+        }
+    }
+}
+
+impl PlanSubtask {
+    /// Creates a new PlanSubtask.
+    pub fn new(id: usize, description: impl Into<String>, status: impl Into<String>) -> Self {
+        Self {
+            id,
+            description: description.into(),
+            status: status.into(),
+        }
+    }
+}
+
+// ============================================================================
 // Finish Event
 // ============================================================================
 
@@ -599,6 +648,8 @@ pub enum StreamEvent {
     Text(TextEvent),
     /// Status event.
     Status(StatusEvent),
+    /// Plan event.
+    Plan(PlanEvent),
     /// Finish event.
     Finish(FinishEvent),
     /// Artifact created event.
@@ -618,6 +669,7 @@ impl StreamEvent {
             StreamEvent::ToolResult(_) => StreamEventType::ToolResult,
             StreamEvent::Text(_) => StreamEventType::Text,
             StreamEvent::Status(_) => StreamEventType::Status,
+            StreamEvent::Plan(_) => StreamEventType::Plan,
             StreamEvent::Finish(_) => StreamEventType::Finish,
             StreamEvent::ArtifactCreated(_) => StreamEventType::ArtifactCreated,
             StreamEvent::ArtifactUpdated(_) => StreamEventType::ArtifactUpdated,
@@ -779,6 +831,7 @@ pub fn format_stream_event(event: &StreamEvent) -> String {
         StreamEvent::ToolResult(e) => format_sse_event(&event_type, e),
         StreamEvent::Text(e) => format_sse_event(&event_type, e),
         StreamEvent::Status(e) => format_sse_event(&event_type, e),
+        StreamEvent::Plan(e) => format_sse_event(&event_type, e),
         StreamEvent::Finish(e) => format_sse_event(&event_type, e),
         StreamEvent::ArtifactCreated(e) => format_sse_event(&event_type, e),
         StreamEvent::ArtifactUpdated(e) => format_sse_event(&event_type, e),
