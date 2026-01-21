@@ -55,7 +55,10 @@ pub mod tools;
 // pub mod handlers;
 
 // 公开导出
-pub use config::*;
+pub use config::{
+    ConfigValidationError, FailurePolicy, SubAgentSpawnConfig, SubAgentSystemConfig,
+    SubAgentToolAccess,
+};
 pub use context::SubAgentContext;
 pub use executor::{
     SubAgentExecutor, execute_cancel_sub_agent, execute_get_sub_agent_result,

@@ -10,13 +10,8 @@
 //! - `integration_test`: 集成测试
 //! - `e2e_test`: 端到端测试
 
-// TODO: 阶段一完成后取消注释
-// mod types_test;
-// mod manager_test;
-
-// TODO: 阶段二完成后取消注释
-// mod executor_test;
-// mod integration_test;
+// 阶段二：集成测试
+mod integration_test;
 
 // TODO: 阶段四完成后取消注释
 // mod e2e_test;

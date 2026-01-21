@@ -64,6 +64,12 @@ use crate::{
         LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
         SkillSummary,
     },
+    subagent::{
+        self, CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL,
+        GetSubAgentResultArgs, SPAWN_SUB_AGENT_TOOL, SpawnSubAgentArgs, SubAgentManager,
+        SubAgentSystemConfig, all_subagent_tool_descriptions, is_subagent_tool,
+        parse_subagent_tool_name,
+    },
 };
 
 // ============================================================================
@@ -2126,6 +2132,14 @@ async fn get_available_tools() -> Vec<ToolDescription> {
         });
     }
 
+    // Add Sub-Agent tools
+    for tool_desc in all_subagent_tool_descriptions() {
+        tools.push(ToolDescription {
+            name: tool_desc.name,
+            description: tool_desc.description,
+        });
+    }
+
     tools
 }
 
@@ -2171,6 +2185,18 @@ async fn execute_subtask_with_react(
         .as_ref()
         .map(|s| s.max_reference_size)
         .unwrap_or(102400); // Default 100KB
+
+    // Create Sub-Agent manager and context for tool execution
+    let subagent_config = SubAgentSystemConfig::default_enabled();
+    let subagent_manager = Arc::new(SubAgentManager::new(subagent_config));
+    let subagent_ctx = SubAgentToolContext {
+        chat_server: chat_server.clone(),
+        headers: headers.clone(),
+        manager: subagent_manager,
+        available_tools: available_tools.to_vec(),
+        model: model.to_string(),
+        cancel_token: cancel_token.clone(),
+    };
 
     // Track active skills for Phase 2 (supports multi-skill activation)
     let mut active_skills: Vec<LoadedSkill> = Vec::new();
@@ -2369,6 +2395,8 @@ async fn execute_subtask_with_react(
                         tool_call_retry_delay,
                         request_id,
                         &mut iter_trace,
+                        Some(&subagent_ctx),
+                        emitter,
                     )
                     .await;
 
@@ -2483,6 +2511,8 @@ async fn execute_subtask_with_react(
                         tool_call_retry_delay,
                         request_id,
                         &mut iter_trace,
+                        Some(&subagent_ctx),
+                        emitter,
                     )
                     .await;
 
@@ -2687,6 +2717,17 @@ async fn execute_subtask_with_react(
     }
 }
 
+/// Context for executing Sub-Agent tools
+#[derive(Clone)]
+pub struct SubAgentToolContext {
+    pub chat_server: crate::server::TargetServerInfo,
+    pub headers: HeaderMap,
+    pub manager: Arc<SubAgentManager>,
+    pub available_tools: Vec<ToolDescription>,
+    pub model: String,
+    pub cancel_token: CancellationToken,
+}
+
 /// Executes a single tool call with retry logic.
 ///
 /// Supports both MCP tools (format: `mcp__{server}__{tool}`) and internal tools
@@ -2694,9 +2735,12 @@ async fn execute_subtask_with_react(
 ///
 /// # Internal Tools
 /// - `internal__skill_run_script`: Execute a script from the active skill
+/// - `internal__spawn_sub_agent`: Spawn a new Sub-Agent
+/// - `internal__get_sub_agent_result`: Get result from a Sub-Agent
+/// - `internal__cancel_sub_agent`: Cancel a running Sub-Agent
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool_call(
-    _state: &Arc<AppState>,
+    state: &Arc<AppState>,
     tool_call: &endpoints::chat::ToolCall,
     active_skills: &[LoadedSkill],
     conv_id: Option<&str>,
@@ -2704,12 +2748,29 @@ async fn execute_tool_call(
     retry_delay: Duration,
     request_id: &str,
     iter_trace: &mut IterationTrace,
+    subagent_ctx: Option<&SubAgentToolContext>,
+    emitter: &dyn EventEmitter,
 ) -> ServerResult<String> {
     let tool_call_start = Instant::now();
     let tool_args: serde_json::Value =
         serde_json::from_str(&tool_call.function.arguments).unwrap_or(serde_json::json!({}));
 
-    // Check if this is an internal tool
+    // Check if this is a Sub-Agent tool
+    if is_subagent_tool(&tool_call.function.name) {
+        return execute_subagent_tool(
+            state,
+            &tool_call.function.name,
+            tool_args,
+            request_id,
+            iter_trace,
+            tool_call_start,
+            subagent_ctx,
+            emitter,
+        )
+        .await;
+    }
+
+    // Check if this is an internal tool (skill tools)
     if is_internal_tool(&tool_call.function.name) {
         return execute_internal_tool(
             &tool_call.function.name,
@@ -2837,6 +2898,135 @@ async fn execute_tool_call(
         attempts: max_retries + 1,
         message: err_msg,
     })
+}
+
+/// Executes a Sub-Agent tool.
+///
+/// # Supported Sub-Agent Tools
+///
+/// - `internal__spawn_sub_agent`: Create and execute a new Sub-Agent
+/// - `internal__get_sub_agent_result`: Get result from a completed Sub-Agent
+/// - `internal__cancel_sub_agent`: Cancel a running Sub-Agent
+#[allow(clippy::too_many_arguments)]
+async fn execute_subagent_tool(
+    state: &Arc<AppState>,
+    full_tool_name: &str,
+    tool_args: serde_json::Value,
+    request_id: &str,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+    subagent_ctx: Option<&SubAgentToolContext>,
+    emitter: &dyn EventEmitter,
+) -> ServerResult<String> {
+    let tool_name = parse_subagent_tool_name(full_tool_name).ok_or_else(|| {
+        ServerError::Operation(format!("Invalid Sub-Agent tool name: {}", full_tool_name))
+    })?;
+
+    // Initialize tool trace
+    let mut tool_trace = ToolCallTrace::new(
+        tool_name.to_string(),
+        subagent::SUBAGENT_TOOL_PREFIX.to_string(),
+        tool_args.clone(),
+    );
+
+    // Get Sub-Agent context
+    let ctx = subagent_ctx.ok_or_else(|| {
+        let err_msg = "Sub-Agent tools require SubAgentToolContext";
+        tool_trace.set_error(err_msg.to_string(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg.to_string())
+    })?;
+
+    let result = match tool_name {
+        SPAWN_SUB_AGENT_TOOL => {
+            let args: SpawnSubAgentArgs =
+                serde_json::from_value(tool_args.clone()).map_err(|e| {
+                    ServerError::Operation(format!("Invalid spawn_sub_agent args: {}", e))
+                })?;
+
+            dual_info!(
+                "Spawning Sub-Agent '{}' - request_id: {}",
+                args.name,
+                request_id
+            );
+
+            subagent::execute_spawn_sub_agent(
+                state.clone(),
+                ctx.chat_server.clone(),
+                ctx.headers.clone(),
+                ctx.manager.clone(),
+                ctx.available_tools.clone(),
+                ctx.model.clone(),
+                args.name,
+                args.role,
+                args.task,
+                args.allowed_tools,
+                args.wait_for_completion,
+                args.timeout_secs,
+                args.max_iterations,
+                None, // parent_id
+                emitter,
+            )
+            .await
+        }
+        GET_SUB_AGENT_RESULT_TOOL => {
+            let args: GetSubAgentResultArgs =
+                serde_json::from_value(tool_args.clone()).map_err(|e| {
+                    ServerError::Operation(format!("Invalid get_sub_agent_result args: {}", e))
+                })?;
+
+            dual_info!(
+                "Getting Sub-Agent result '{}' - request_id: {}",
+                args.subagent_id,
+                request_id
+            );
+
+            subagent::execute_get_sub_agent_result(
+                ctx.manager.clone(),
+                args.subagent_id,
+                args.wait,
+                args.timeout_secs,
+            )
+            .await
+        }
+        CANCEL_SUB_AGENT_TOOL => {
+            let args: CancelSubAgentArgs =
+                serde_json::from_value(tool_args.clone()).map_err(|e| {
+                    ServerError::Operation(format!("Invalid cancel_sub_agent args: {}", e))
+                })?;
+
+            dual_info!(
+                "Cancelling Sub-Agent '{}' - request_id: {}",
+                args.subagent_id,
+                request_id
+            );
+
+            subagent::execute_cancel_sub_agent(ctx.manager.clone(), args.subagent_id, args.reason)
+                .await
+        }
+        _ => {
+            let err_msg = format!("Unknown Sub-Agent tool: {}", tool_name);
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace);
+            return Err(ServerError::Operation(err_msg));
+        }
+    };
+
+    match result {
+        Ok(value) => {
+            let result_str =
+                serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+            tool_trace.set_result(result_str.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace);
+            Ok(result_str)
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace);
+            Err(e)
+        }
+    }
 }
 
 /// Executes an internal tool (non-MCP tool).
