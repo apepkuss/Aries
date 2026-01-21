@@ -43,10 +43,10 @@ pub mod config;
 pub mod manager;
 pub mod types;
 
-// TODO: 阶段二完成后取消注释
-// pub mod executor;
-// pub mod context;
-// pub mod tools;
+// 阶段二：工具集成
+pub mod context;
+pub mod executor;
+pub mod tools;
 
 // TODO: 阶段三完成后取消注释
 // pub mod channel;
@@ -56,5 +56,16 @@ pub mod types;
 
 // 公开导出
 pub use config::*;
+pub use context::SubAgentContext;
+pub use executor::{
+    SubAgentExecutor, execute_cancel_sub_agent, execute_get_sub_agent_result,
+    execute_spawn_sub_agent,
+};
 pub use manager::{SubAgentManager, SubAgentStats};
+pub use tools::{
+    CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL, GetSubAgentResultArgs,
+    SPAWN_SUB_AGENT_TOOL, SUBAGENT_TOOL_PREFIX, SpawnSubAgentArgs, SubAgentToolDescription,
+    all_subagent_tool_descriptions, all_subagent_tool_schemas, is_subagent_tool,
+    parse_subagent_tool_name, subagent_tool_name,
+};
 pub use types::*;
