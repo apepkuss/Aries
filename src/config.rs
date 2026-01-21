@@ -68,6 +68,9 @@ pub struct Config {
     /// Configuration API settings (hot reload, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_api: Option<ConfigApiSettings>,
+    /// Sub-Agent system configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<crate::subagent::SubAgentSystemConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -128,6 +131,7 @@ impl Default for Config {
             replan: None,
             artifacts: None,
             config_api: None,
+            subagent: None,
         }
     }
 }

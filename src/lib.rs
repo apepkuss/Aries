@@ -71,6 +71,7 @@ pub mod memory;
 pub mod reflection;
 pub mod responses;
 pub mod skills;
+pub mod subagent;
 
 // Integration modules (also available via crate::integration::*)
 pub mod mcp;
