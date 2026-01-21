@@ -46,18 +46,23 @@ pub mod types;
 // 阶段二：工具集成
 pub mod context;
 pub mod executor;
+pub mod reflector;
 pub mod tools;
 
-// TODO: 阶段三完成后取消注释
-// pub mod channel;
+// 阶段三：通信通道
+pub mod channel;
 
 // TODO: 阶段四完成后取消注释
 // pub mod handlers;
 
+// 通信通道
+pub use channel::{
+    ChannelError, ChannelManager, ChannelMessage, InstructionType, MessageEnvelope, SubAgentChannel,
+};
 // 公开导出
 pub use config::{
-    ConfigValidationError, FailurePolicy, SubAgentSpawnConfig, SubAgentSystemConfig,
-    SubAgentToolAccess,
+    ConfigValidationError, FailurePolicy, SubAgentReflectionConfig, SubAgentSpawnConfig,
+    SubAgentSystemConfig, SubAgentToolAccess,
 };
 pub use context::SubAgentContext;
 pub use executor::{
@@ -65,6 +70,7 @@ pub use executor::{
     execute_spawn_sub_agent,
 };
 pub use manager::{SubAgentManager, SubAgentStats};
+pub use reflector::{ReflectionAction, SubAgentReflector};
 pub use tools::{
     CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL, GetSubAgentResultArgs,
     SPAWN_SUB_AGENT_TOOL, SUBAGENT_TOOL_PREFIX, SpawnSubAgentArgs, SubAgentToolDescription,

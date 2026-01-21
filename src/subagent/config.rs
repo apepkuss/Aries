@@ -58,6 +58,10 @@ pub struct SubAgentSystemConfig {
     /// 所有 Sub-Agent 总计最大 token 数（0 = 不限制）
     #[serde(default)]
     pub max_total_tokens: u64,
+
+    /// 反思（Reflection）配置
+    #[serde(default)]
+    pub reflection: SubAgentReflectionConfig,
 }
 
 impl SubAgentSystemConfig {
@@ -130,8 +134,140 @@ impl Default for SubAgentSystemConfig {
             failure_policy: FailurePolicy::default(),
             retry_attempts: default_retry_attempts(),
             max_total_tokens: 0,
+            reflection: SubAgentReflectionConfig::default(),
         }
     }
+}
+
+// ============================================================================
+// SubAgentReflectionConfig - 反思配置
+// ============================================================================
+
+/// Sub-Agent 反思配置
+///
+/// 控制 Sub-Agent 执行过程中的自我评估和纠错机制
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentReflectionConfig {
+    /// 是否启用反思
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// 触发反思的迭代间隔（每 N 次迭代触发一次反思）
+    /// 0 表示仅在完成时反思
+    #[serde(default = "default_reflection_interval")]
+    pub interval_iterations: u32,
+
+    /// 触发反思的最小迭代次数
+    /// 低于此迭代数不触发反思（避免简单任务浪费 Token）
+    #[serde(default = "default_min_iterations_for_reflection")]
+    pub min_iterations: u32,
+
+    /// 是否在工具调用错误后触发反思
+    #[serde(default = "default_true")]
+    pub reflect_on_tool_error: bool,
+
+    /// 是否在完成时进行最终反思
+    #[serde(default = "default_true")]
+    pub reflect_on_completion: bool,
+
+    /// 置信度阈值（低于此值触发深度反思）
+    #[serde(default = "default_confidence_threshold")]
+    pub confidence_threshold: f64,
+
+    /// 最大反思重试次数
+    #[serde(default = "default_max_reflection_retries")]
+    pub max_retries: u32,
+}
+
+impl Default for SubAgentReflectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_iterations: default_reflection_interval(),
+            min_iterations: default_min_iterations_for_reflection(),
+            reflect_on_tool_error: true,
+            reflect_on_completion: true,
+            confidence_threshold: default_confidence_threshold(),
+            max_retries: default_max_reflection_retries(),
+        }
+    }
+}
+
+impl SubAgentReflectionConfig {
+    /// 创建启用反思的配置
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// 创建禁用反思的配置
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// 设置迭代间隔
+    pub fn with_interval(mut self, iterations: u32) -> Self {
+        self.interval_iterations = iterations;
+        self
+    }
+
+    /// 设置最小迭代次数
+    pub fn with_min_iterations(mut self, min: u32) -> Self {
+        self.min_iterations = min;
+        self
+    }
+
+    /// 判断是否应在指定迭代触发反思
+    pub fn should_reflect_at_iteration(&self, iteration: u32) -> bool {
+        if !self.enabled {
+            return false;
+        }
+
+        // 未达到最小迭代次数
+        if iteration < self.min_iterations {
+            return false;
+        }
+
+        // 间隔为 0 表示仅在完成时反思
+        if self.interval_iterations == 0 {
+            return false;
+        }
+
+        // 检查是否是反思间隔
+        iteration.is_multiple_of(self.interval_iterations)
+    }
+
+    /// 判断是否应在完成时反思
+    pub fn should_reflect_on_completion(&self, total_iterations: u32) -> bool {
+        if !self.enabled {
+            return false;
+        }
+
+        // 未达到最小迭代次数
+        if total_iterations < self.min_iterations {
+            return false;
+        }
+
+        self.reflect_on_completion
+    }
+}
+
+fn default_reflection_interval() -> u32 {
+    5 // 每 5 次迭代触发一次反思
+}
+
+fn default_min_iterations_for_reflection() -> u32 {
+    3 // 至少 3 次迭代才触发反思
+}
+
+fn default_confidence_threshold() -> f64 {
+    0.7
+}
+
+fn default_max_reflection_retries() -> u32 {
+    2
 }
 
 // ============================================================================
@@ -458,5 +594,138 @@ mod tests {
         let blocked = default_blocked_tools();
         assert!(blocked.contains("mcp__filesystem__delete_file"));
         assert!(blocked.contains("internal__spawn_sub_agent"));
+    }
+
+    // ========== Reflection Config Tests ==========
+
+    #[test]
+    fn test_reflection_config_default() {
+        let config = SubAgentReflectionConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.interval_iterations, 5);
+        assert_eq!(config.min_iterations, 3);
+        assert!(config.reflect_on_tool_error);
+        assert!(config.reflect_on_completion);
+        assert_eq!(config.confidence_threshold, 0.7);
+        assert_eq!(config.max_retries, 2);
+    }
+
+    #[test]
+    fn test_reflection_config_enabled() {
+        let config = SubAgentReflectionConfig::enabled();
+        assert!(config.enabled);
+    }
+
+    #[test]
+    fn test_reflection_config_disabled() {
+        let config = SubAgentReflectionConfig::disabled();
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    fn test_reflection_config_builder() {
+        let config = SubAgentReflectionConfig::enabled()
+            .with_interval(10)
+            .with_min_iterations(5);
+
+        assert!(config.enabled);
+        assert_eq!(config.interval_iterations, 10);
+        assert_eq!(config.min_iterations, 5);
+    }
+
+    #[test]
+    fn test_should_reflect_at_iteration_disabled() {
+        let config = SubAgentReflectionConfig::disabled();
+        assert!(!config.should_reflect_at_iteration(5));
+        assert!(!config.should_reflect_at_iteration(10));
+    }
+
+    #[test]
+    fn test_should_reflect_at_iteration_enabled() {
+        let config = SubAgentReflectionConfig::enabled()
+            .with_interval(5)
+            .with_min_iterations(3);
+
+        // 低于最小迭代次数
+        assert!(!config.should_reflect_at_iteration(1));
+        assert!(!config.should_reflect_at_iteration(2));
+
+        // 达到最小迭代次数但不是间隔倍数
+        assert!(!config.should_reflect_at_iteration(3));
+        assert!(!config.should_reflect_at_iteration(4));
+
+        // 达到间隔倍数
+        assert!(config.should_reflect_at_iteration(5));
+        assert!(config.should_reflect_at_iteration(10));
+        assert!(config.should_reflect_at_iteration(15));
+    }
+
+    #[test]
+    fn test_should_reflect_at_iteration_zero_interval() {
+        let config = SubAgentReflectionConfig {
+            enabled: true,
+            interval_iterations: 0, // 仅在完成时反思
+            ..Default::default()
+        };
+
+        assert!(!config.should_reflect_at_iteration(5));
+        assert!(!config.should_reflect_at_iteration(10));
+    }
+
+    #[test]
+    fn test_should_reflect_on_completion_disabled() {
+        let config = SubAgentReflectionConfig::disabled();
+        assert!(!config.should_reflect_on_completion(10));
+    }
+
+    #[test]
+    fn test_should_reflect_on_completion_enabled() {
+        let config = SubAgentReflectionConfig::enabled().with_min_iterations(3);
+
+        // 低于最小迭代次数
+        assert!(!config.should_reflect_on_completion(1));
+        assert!(!config.should_reflect_on_completion(2));
+
+        // 达到最小迭代次数
+        assert!(config.should_reflect_on_completion(3));
+        assert!(config.should_reflect_on_completion(10));
+    }
+
+    #[test]
+    fn test_should_reflect_on_completion_flag_disabled() {
+        let config = SubAgentReflectionConfig {
+            enabled: true,
+            reflect_on_completion: false,
+            min_iterations: 1,
+            ..Default::default()
+        };
+
+        assert!(!config.should_reflect_on_completion(10));
+    }
+
+    #[test]
+    fn test_reflection_config_in_system_config() {
+        let mut config = SubAgentSystemConfig::default_enabled();
+        config.reflection = SubAgentReflectionConfig::enabled().with_interval(10);
+
+        assert!(config.reflection.enabled);
+        assert_eq!(config.reflection.interval_iterations, 10);
+    }
+
+    #[test]
+    fn test_reflection_config_serialization() {
+        let config = SubAgentReflectionConfig::enabled()
+            .with_interval(10)
+            .with_min_iterations(5);
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"enabled\":true"));
+        assert!(json.contains("\"interval_iterations\":10"));
+        assert!(json.contains("\"min_iterations\":5"));
+
+        let deserialized: SubAgentReflectionConfig = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.enabled);
+        assert_eq!(deserialized.interval_iterations, 10);
+        assert_eq!(deserialized.min_iterations, 5);
     }
 }

@@ -77,6 +77,8 @@ pub enum ServerError {
     SubAgentTimeout { id: String, timeout_secs: u64 },
     #[error("Sub-Agent already in terminal state: {id} is {state}")]
     SubAgentAlreadyTerminal { id: String, state: String },
+    #[error("Sub-Agent global token limit exceeded: used {used} of {max} tokens")]
+    SubAgentTokenLimitExceeded { used: u64, max: u64 },
 }
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
@@ -267,6 +269,13 @@ impl IntoResponse for ServerError {
                 "conflict_error".into(),
                 Some("subagent_state".into()),
                 Some("subagent_already_terminal".into()),
+            ),
+            ServerError::SubAgentTokenLimitExceeded { used, max } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("Sub-Agent global token limit exceeded: used {used} of {max} tokens"),
+                "rate_limit_error".into(),
+                Some("token_limit".into()),
+                Some("subagent_token_limit_exceeded".into()),
             ),
         };
 

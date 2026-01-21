@@ -6,15 +6,15 @@ use std::{
     collections::HashMap,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use http::HeaderMap;
 use tokio::sync::{RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::{
     SubAgentContext, SubAgentExecutor,
@@ -69,6 +69,12 @@ pub struct SubAgentManager {
     cancel_tokens: RwLock<HashMap<SubAgentId, CancellationToken>>,
     /// 并发控制信号量
     concurrency_semaphore: Arc<Semaphore>,
+    /// 全局 Token 使用量（所有 Sub-Agent 总计）
+    global_prompt_tokens: AtomicU64,
+    /// 全局完成 Token 使用量
+    global_completion_tokens: AtomicU64,
+    /// Sub-Agent 启动时间映射（用于超时检测）
+    start_times: RwLock<HashMap<SubAgentId, Instant>>,
 }
 
 impl SubAgentManager {
@@ -81,6 +87,9 @@ impl SubAgentManager {
             running_count: AtomicUsize::new(0),
             cancel_tokens: RwLock::new(HashMap::new()),
             concurrency_semaphore: Arc::new(Semaphore::new(max_concurrent)),
+            global_prompt_tokens: AtomicU64::new(0),
+            global_completion_tokens: AtomicU64::new(0),
+            start_times: RwLock::new(HashMap::new()),
         }
     }
 
@@ -290,6 +299,11 @@ impl SubAgentManager {
 
         if agent.start() {
             self.running_count.fetch_add(1, Ordering::SeqCst);
+            // 记录启动时间
+            {
+                let mut start_times = self.start_times.write().await;
+                start_times.insert(id.clone(), Instant::now());
+            }
             Ok(())
         } else {
             Err(ServerError::SubAgentAlreadyTerminal {
@@ -318,6 +332,11 @@ impl SubAgentManager {
             if was_running {
                 self.running_count.fetch_sub(1, Ordering::SeqCst);
             }
+            // 清理启动时间记录
+            {
+                let mut start_times = self.start_times.write().await;
+                start_times.remove(id);
+            }
             Ok(())
         } else {
             Err(ServerError::SubAgentAlreadyTerminal {
@@ -341,6 +360,11 @@ impl SubAgentManager {
         if agent.fail(error) {
             if was_running {
                 self.running_count.fetch_sub(1, Ordering::SeqCst);
+            }
+            // 清理启动时间记录
+            {
+                let mut start_times = self.start_times.write().await;
+                start_times.remove(id);
             }
             Ok(())
         } else {
@@ -401,6 +425,13 @@ impl SubAgentManager {
             stats.total_completion_tokens += agent.metrics.completion_tokens;
         }
 
+        // 添加全局 token 统计
+        let (global_prompt, global_completion) = self.global_token_usage();
+        stats.global_prompt_tokens = global_prompt;
+        stats.global_completion_tokens = global_completion;
+        stats.max_total_tokens = self.config.max_total_tokens;
+        stats.token_limit_exceeded = self.is_token_limit_exceeded();
+
         stats
     }
 
@@ -410,6 +441,7 @@ impl SubAgentManager {
     pub async fn cleanup_completed(&self) -> usize {
         let mut agents = self.agents.write().await;
         let mut tokens = self.cancel_tokens.write().await;
+        let mut start_times = self.start_times.write().await;
 
         let to_remove: Vec<SubAgentId> = agents
             .iter()
@@ -421,9 +453,115 @@ impl SubAgentManager {
         for id in to_remove {
             agents.remove(&id);
             tokens.remove(&id);
+            start_times.remove(&id);
         }
 
         count
+    }
+
+    // ============================================================================
+    // Resource Control Methods
+    // ============================================================================
+
+    /// 获取全局 Token 使用量
+    pub fn global_token_usage(&self) -> (u64, u64) {
+        (
+            self.global_prompt_tokens.load(Ordering::SeqCst),
+            self.global_completion_tokens.load(Ordering::SeqCst),
+        )
+    }
+
+    /// 获取全局 Token 总量
+    pub fn global_total_tokens(&self) -> u64 {
+        self.global_prompt_tokens.load(Ordering::SeqCst)
+            + self.global_completion_tokens.load(Ordering::SeqCst)
+    }
+
+    /// 检查是否超出全局 Token 限制
+    ///
+    /// 如果 `max_total_tokens` 为 0，则不限制
+    pub fn is_token_limit_exceeded(&self) -> bool {
+        let max = self.config.max_total_tokens;
+        if max == 0 {
+            return false;
+        }
+        self.global_total_tokens() >= max
+    }
+
+    /// 添加全局 Token 使用量
+    ///
+    /// 由 Executor 调用以报告 Token 使用
+    pub(crate) fn add_global_tokens(&self, prompt_tokens: u64, completion_tokens: u64) {
+        self.global_prompt_tokens
+            .fetch_add(prompt_tokens, Ordering::SeqCst);
+        self.global_completion_tokens
+            .fetch_add(completion_tokens, Ordering::SeqCst);
+    }
+
+    /// 检查并取消超时的 Sub-Agent
+    ///
+    /// 返回取消的数量
+    pub async fn check_and_cancel_timed_out(&self) -> usize {
+        let timeout = Duration::from_secs(self.config.default_timeout_secs);
+        let now = Instant::now();
+        let mut timed_out_ids = Vec::new();
+
+        // 收集超时的 Sub-Agent ID
+        {
+            let start_times = self.start_times.read().await;
+            for (id, start_time) in start_times.iter() {
+                if now.duration_since(*start_time) > timeout {
+                    timed_out_ids.push(id.clone());
+                }
+            }
+        }
+
+        // 取消超时的 Sub-Agent
+        let mut cancelled_count = 0;
+        for id in timed_out_ids {
+            debug!(subagent_id = %id, "Sub-Agent timed out, cancelling");
+            if self.cancel(&id).await.is_ok() {
+                cancelled_count += 1;
+            }
+        }
+
+        if cancelled_count > 0 {
+            info!(count = cancelled_count, "Cancelled timed out Sub-Agents");
+        }
+
+        cancelled_count
+    }
+
+    /// 启动超时监控任务
+    ///
+    /// 定期检查并取消超时的 Sub-Agent
+    pub fn start_timeout_monitor(self: &Arc<Self>, check_interval: Duration) {
+        let manager = Arc::clone(self);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(check_interval).await;
+
+                // 检查是否还有运行中的 Sub-Agent
+                if manager.running_count() == 0 {
+                    continue;
+                }
+
+                let cancelled = manager.check_and_cancel_timed_out().await;
+                if cancelled > 0 {
+                    debug!(count = cancelled, "Timeout monitor cancelled Sub-Agents");
+                }
+            }
+        });
+    }
+
+    /// 重置全局 Token 计数器
+    ///
+    /// 仅用于测试或会话重置
+    #[allow(dead_code)]
+    pub(crate) fn reset_global_tokens(&self) {
+        self.global_prompt_tokens.store(0, Ordering::SeqCst);
+        self.global_completion_tokens.store(0, Ordering::SeqCst);
     }
 
     /// 异步启动 Sub-Agent 执行
@@ -693,16 +831,29 @@ pub struct SubAgentStats {
     pub failed: usize,
     /// 已取消
     pub cancelled: usize,
-    /// 总提示词 token 数
+    /// 当前会话中所有 Sub-Agent 的提示词 token 总数
     pub total_prompt_tokens: u64,
-    /// 总完成 token 数
+    /// 当前会话中所有 Sub-Agent 的完成 token 总数
     pub total_completion_tokens: u64,
+    /// 全局提示词 token 使用量（累计）
+    pub global_prompt_tokens: u64,
+    /// 全局完成 token 使用量（累计）
+    pub global_completion_tokens: u64,
+    /// 最大允许的全局 token 数（0 = 不限制）
+    pub max_total_tokens: u64,
+    /// 是否已超出 token 限制
+    pub token_limit_exceeded: bool,
 }
 
 impl SubAgentStats {
-    /// 获取总 token 数
+    /// 获取当前会话 token 总数
     pub fn total_tokens(&self) -> u64 {
         self.total_prompt_tokens + self.total_completion_tokens
+    }
+
+    /// 获取全局 token 总数
+    pub fn global_total_tokens(&self) -> u64 {
+        self.global_prompt_tokens + self.global_completion_tokens
     }
 }
 
@@ -1061,5 +1212,177 @@ mod tests {
         let token = manager.get_cancel_token(&id).await;
         assert!(token.is_some());
         assert!(token.unwrap().is_cancelled());
+    }
+
+    // ========================================================================
+    // Resource Control Tests
+    // ========================================================================
+
+    #[test]
+    fn test_global_token_tracking() {
+        let config = create_enabled_config();
+        let manager = SubAgentManager::new(config);
+
+        // Initial state
+        assert_eq!(manager.global_total_tokens(), 0);
+        let (prompt, completion) = manager.global_token_usage();
+        assert_eq!(prompt, 0);
+        assert_eq!(completion, 0);
+
+        // Add tokens
+        manager.add_global_tokens(100, 50);
+        assert_eq!(manager.global_total_tokens(), 150);
+
+        let (prompt, completion) = manager.global_token_usage();
+        assert_eq!(prompt, 100);
+        assert_eq!(completion, 50);
+
+        // Add more tokens
+        manager.add_global_tokens(200, 100);
+        assert_eq!(manager.global_total_tokens(), 450);
+
+        let (prompt, completion) = manager.global_token_usage();
+        assert_eq!(prompt, 300);
+        assert_eq!(completion, 150);
+    }
+
+    #[test]
+    fn test_token_limit_not_exceeded_when_disabled() {
+        let config = create_enabled_config(); // max_total_tokens = 0 (disabled)
+        let manager = SubAgentManager::new(config);
+
+        // Add many tokens
+        manager.add_global_tokens(1_000_000, 1_000_000);
+
+        // Should not be exceeded because limit is disabled
+        assert!(!manager.is_token_limit_exceeded());
+    }
+
+    #[test]
+    fn test_token_limit_exceeded() {
+        let mut config = create_enabled_config();
+        config.max_total_tokens = 1000; // Set limit
+        let manager = SubAgentManager::new(config);
+
+        // Add tokens below limit
+        manager.add_global_tokens(400, 400);
+        assert!(!manager.is_token_limit_exceeded());
+
+        // Add more tokens to exceed limit
+        manager.add_global_tokens(100, 200);
+        assert!(manager.is_token_limit_exceeded());
+    }
+
+    #[test]
+    fn test_reset_global_tokens() {
+        let config = create_enabled_config();
+        let manager = SubAgentManager::new(config);
+
+        // Add tokens
+        manager.add_global_tokens(500, 500);
+        assert_eq!(manager.global_total_tokens(), 1000);
+
+        // Reset
+        manager.reset_global_tokens();
+        assert_eq!(manager.global_total_tokens(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_stats_includes_global_tokens() {
+        let mut config = create_enabled_config();
+        config.max_total_tokens = 10000;
+        let manager = SubAgentManager::new(config);
+
+        // Add global tokens
+        manager.add_global_tokens(1000, 500);
+
+        let stats = manager.stats().await;
+        assert_eq!(stats.global_prompt_tokens, 1000);
+        assert_eq!(stats.global_completion_tokens, 500);
+        assert_eq!(stats.global_total_tokens(), 1500);
+        assert_eq!(stats.max_total_tokens, 10000);
+        assert!(!stats.token_limit_exceeded);
+    }
+
+    #[tokio::test]
+    async fn test_start_time_tracking() {
+        let config = create_enabled_config();
+        let manager = SubAgentManager::new(config);
+
+        let id = manager
+            .spawn("Agent", "system", "task", None, None)
+            .await
+            .unwrap();
+
+        // Before start, no start time
+        {
+            let start_times = manager.start_times.read().await;
+            assert!(!start_times.contains_key(&id));
+        }
+
+        // After start, start time should be recorded
+        manager.mark_started(&id).await.unwrap();
+        {
+            let start_times = manager.start_times.read().await;
+            assert!(start_times.contains_key(&id));
+        }
+
+        // After completion, start time should be removed
+        manager
+            .mark_completed(&id, SubAgentResult::success("Done", Default::default()))
+            .await
+            .unwrap();
+        {
+            let start_times = manager.start_times.read().await;
+            assert!(!start_times.contains_key(&id));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_start_time_removed_on_failure() {
+        let config = create_enabled_config();
+        let manager = SubAgentManager::new(config);
+
+        let id = manager
+            .spawn("Agent", "system", "task", None, None)
+            .await
+            .unwrap();
+
+        manager.mark_started(&id).await.unwrap();
+        {
+            let start_times = manager.start_times.read().await;
+            assert!(start_times.contains_key(&id));
+        }
+
+        manager.mark_failed(&id, "Error".to_string()).await.unwrap();
+        {
+            let start_times = manager.start_times.read().await;
+            assert!(!start_times.contains_key(&id));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_check_and_cancel_timed_out() {
+        let mut config = create_enabled_config();
+        config.default_timeout_secs = 0; // Immediate timeout for testing
+        let manager = SubAgentManager::new(config);
+
+        let id = manager
+            .spawn("Agent", "system", "task", None, None)
+            .await
+            .unwrap();
+
+        manager.mark_started(&id).await.unwrap();
+
+        // Wait a tiny bit to ensure timeout
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Check and cancel timed out
+        let cancelled = manager.check_and_cancel_timed_out().await;
+        assert_eq!(cancelled, 1);
+
+        // Verify agent is cancelled
+        let agent = manager.get(&id).await.unwrap();
+        assert_eq!(agent.state, SubAgentState::Cancelled);
     }
 }

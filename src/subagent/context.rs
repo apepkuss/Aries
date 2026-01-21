@@ -241,6 +241,11 @@ impl SubAgentContext {
         self.iteration_count
     }
 
+    /// 获取任务描述
+    pub fn task_description(&self) -> &str {
+        &self.task
+    }
+
     /// 重置上下文（重新初始化消息）
     pub fn reset(&mut self) {
         self.iteration_count = 0;

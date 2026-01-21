@@ -11,12 +11,14 @@ use std::{
 use endpoints::chat::ChatCompletionObject;
 use http::HeaderMap;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
-use tokio::select;
+use tokio::{select, sync::RwLock};
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 use super::{
     context::SubAgentContext,
     manager::SubAgentManager,
+    reflector::{ReflectionAction, SubAgentReflector},
     tools::{SubAgentResultSummary, is_subagent_tool},
     types::{SubAgentId, SubAgentMetrics, SubAgentResult},
 };
@@ -25,6 +27,7 @@ use crate::{
     chat::{emitter::EventEmitter, events::ThoughtStatus, planner::ToolDescription},
     error::{ServerError, ServerResult},
     mcp::MCP_SERVICES,
+    reflection::engine::LlmServerInfo,
     server::TargetServerInfo,
 };
 
@@ -50,6 +53,8 @@ pub struct SubAgentExecutor {
     available_tools: Vec<ToolDescription>,
     /// 模型名称
     model: String,
+    /// LLM 服务器信息（用于反思）
+    llm_server: Option<Arc<RwLock<LlmServerInfo>>>,
 }
 
 impl SubAgentExecutor {
@@ -62,6 +67,12 @@ impl SubAgentExecutor {
         available_tools: Vec<ToolDescription>,
         model: String,
     ) -> Self {
+        // 创建 LLM 服务器信息用于反思
+        let llm_server = Some(Arc::new(RwLock::new(LlmServerInfo {
+            url: chat_server.url.clone(),
+            api_key: chat_server.api_key.clone(),
+        })));
+
         Self {
             state,
             chat_server,
@@ -69,6 +80,7 @@ impl SubAgentExecutor {
             manager,
             available_tools,
             model,
+            llm_server,
         }
     }
 
@@ -103,6 +115,10 @@ impl SubAgentExecutor {
         // 过滤工具列表
         let filtered_tools = self.filter_tools_for_context(&context);
 
+        // 创建反思器
+        let reflection_config = self.manager.config().reflection.clone();
+        let mut reflector = SubAgentReflector::new(reflection_config, self.llm_server.clone());
+
         // 执行 React 循环
         let result = self
             .execute_react_loop(
@@ -114,6 +130,7 @@ impl SubAgentExecutor {
                 cancel_token,
                 emitter,
                 start_time,
+                &mut reflector,
             )
             .await;
 
@@ -159,7 +176,13 @@ impl SubAgentExecutor {
         cancel_token: &CancellationToken,
         emitter: &dyn EventEmitter,
         start_time: Instant,
+        reflector: &mut SubAgentReflector,
     ) -> ServerResult<String> {
+        // 获取任务描述用于反思
+        let task_description = context.task_description().to_string();
+        // 工具调用历史（用于反思上下文）
+        let mut tool_history: Vec<String> = Vec::new();
+
         loop {
             // 检查迭代限制
             context.increment_iteration();
@@ -195,13 +218,27 @@ impl SubAgentExecutor {
             let content = message.content.as_ref();
 
             // 更新 token 使用量
+            let prompt_tokens = chat_completion.usage.prompt_tokens;
+            let completion_tokens = chat_completion.usage.completion_tokens;
+
             self.manager
                 .update_metrics(id, |metrics| {
-                    metrics.prompt_tokens += chat_completion.usage.prompt_tokens;
-                    metrics.completion_tokens += chat_completion.usage.completion_tokens;
+                    metrics.prompt_tokens += prompt_tokens;
+                    metrics.completion_tokens += completion_tokens;
                 })
                 .await
                 .ok();
+
+            // 报告全局 Token 使用量
+            self.manager
+                .add_global_tokens(prompt_tokens, completion_tokens);
+
+            // 检查全局 Token 限制
+            if self.manager.is_token_limit_exceeded() {
+                let max = self.manager.config().max_total_tokens;
+                let used = self.manager.global_total_tokens();
+                return Err(ServerError::SubAgentTokenLimitExceeded { used, max });
+            }
 
             // 检查是否有工具调用
             if !tool_calls.is_empty() {
@@ -239,7 +276,13 @@ impl SubAgentExecutor {
 
                     let tool_duration = tool_start.elapsed();
 
-                    // 发射工具结果事件
+                    // 记录工具调用历史
+                    let tool_record = format!(
+                        "Tool: {} | Args: {} | Duration: {:?}",
+                        tool_call.function.name, tool_args, tool_duration
+                    );
+
+                    // 发射工具结果事件并处理错误反思
                     match &tool_result {
                         Ok(result) => {
                             emitter
@@ -251,17 +294,42 @@ impl SubAgentExecutor {
                                     None,
                                 )
                                 .await;
+                            tool_history.push(format!("{} | Result: OK", tool_record));
                         }
                         Err(e) => {
+                            let error_msg = e.to_string();
                             emitter
                                 .emit_tool_result(
                                     &tool_call.id,
-                                    &e.to_string(),
+                                    &error_msg,
                                     true,
                                     Some(tool_duration),
                                     None,
                                 )
                                 .await;
+                            tool_history.push(format!("{} | Error: {}", tool_record, error_msg));
+
+                            // 工具错误后的反思
+                            let action = reflector
+                                .reflect_on_tool_error(
+                                    &task_description,
+                                    &tool_call.function.name,
+                                    &error_msg,
+                                    &tool_history,
+                                )
+                                .await
+                                .unwrap_or(ReflectionAction::Continue);
+
+                            // 处理反思动作
+                            if let ReflectionAction::Abort { reason } = action {
+                                return Err(ServerError::Operation(format!(
+                                    "Sub-Agent aborted after tool error reflection: {}",
+                                    reason
+                                )));
+                            }
+
+                            // 如果反思建议继续，则传播原始错误
+                            // （让 LLM 有机会从错误中恢复）
                         }
                     }
 
@@ -276,16 +344,112 @@ impl SubAgentExecutor {
                     let observation = format!("<observation>{}</observation>", tool_result);
                     context.add_tool_result(&observation, &tool_call.id);
                 }
+
+                // 周期性反思检查（在处理完工具调用后）
+                let current_progress = format!(
+                    "Iteration {}: Processed {} tool call(s). Last tool: {}",
+                    iteration,
+                    tool_calls.len(),
+                    tool_calls
+                        .last()
+                        .map(|t| t.function.name.as_str())
+                        .unwrap_or("none")
+                );
+
+                let action = reflector
+                    .reflect_on_iteration(
+                        iteration,
+                        &task_description,
+                        &current_progress,
+                        &tool_history,
+                    )
+                    .await
+                    .unwrap_or(ReflectionAction::Continue);
+
+                // 处理周期性反思动作
+                if let ReflectionAction::Abort { reason } = action {
+                    return Err(ServerError::Operation(format!(
+                        "Sub-Agent aborted after periodic reflection: {}",
+                        reason
+                    )));
+                }
+
+                // 如果有指导建议，添加到上下文
+                if let Some(guidance) = action.guidance() {
+                    debug!("Reflection guidance: {}", guidance);
+                    // 可以选择将指导添加到上下文中
+                    // context.add_system_hint(guidance);
+                }
             } else {
                 // 没有工具调用，检查是否有最终答案
                 if let Some(content) = content {
                     // 检查是否包含最终答案
                     if let Some(answer) = extract_final_answer(content) {
+                        // 完成时的反思
+                        let action = reflector
+                            .reflect_on_completion(
+                                iteration,
+                                &task_description,
+                                &answer,
+                                &tool_history,
+                            )
+                            .await
+                            .unwrap_or(ReflectionAction::Accept);
+
+                        // 处理完成反思动作
+                        match action {
+                            ReflectionAction::Abort { reason } => {
+                                return Err(ServerError::Operation(format!(
+                                    "Sub-Agent answer rejected by reflection: {}",
+                                    reason
+                                )));
+                            }
+                            ReflectionAction::Retry { reason }
+                            | ReflectionAction::RetryWithGuidance { guidance: reason } => {
+                                // 如果可以重试且反思建议重试
+                                if reflector.can_retry() {
+                                    debug!("Reflection suggests retry: {}", reason);
+                                    // 添加提示让 LLM 重新考虑
+                                    context.add_assistant_message(Some(content.clone()), None);
+                                    context.add_tool_result(
+                                        &format!(
+                                            "<reflection_feedback>Please reconsider your answer. {}</reflection_feedback>",
+                                            reason
+                                        ),
+                                        "reflection",
+                                    );
+                                    continue; // 继续循环，让 LLM 重新生成
+                                }
+                                // 超过重试限制，接受当前答案
+                            }
+                            _ => {
+                                // Accept, AcceptWithGuidance, Continue - 接受答案
+                            }
+                        }
+
                         return Ok(answer);
                     }
 
                     // 如果内容不为空且没有工具调用，视为最终响应
                     if !content.trim().is_empty() {
+                        // 对非结构化答案也进行完成反思
+                        let action = reflector
+                            .reflect_on_completion(
+                                iteration,
+                                &task_description,
+                                content,
+                                &tool_history,
+                            )
+                            .await
+                            .unwrap_or(ReflectionAction::Accept);
+
+                        if let ReflectionAction::Abort { reason } = action {
+                            return Err(ServerError::Operation(format!(
+                                "Sub-Agent response rejected by reflection: {}",
+                                reason
+                            )));
+                        }
+
                         return Ok(content.to_string());
                     }
                 }
