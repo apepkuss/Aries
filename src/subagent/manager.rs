@@ -4,17 +4,29 @@
 
 use std::{
     collections::HashMap,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
 };
 
-use tokio::sync::RwLock;
+use http::HeaderMap;
+use tokio::sync::{RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use super::{
+    SubAgentContext, SubAgentExecutor,
     config::{SubAgentSpawnConfig, SubAgentSystemConfig},
     types::{SubAgent, SubAgentId, SubAgentResult, SubAgentState},
 };
-use crate::error::{ServerError, ServerResult};
+use crate::{
+    app::AppState,
+    chat::{emitter::EventEmitter, planner::ToolDescription},
+    error::{ServerError, ServerResult},
+    server::TargetServerInfo,
+};
 
 // ============================================================================
 // SubAgentManager
@@ -55,16 +67,20 @@ pub struct SubAgentManager {
     running_count: AtomicUsize,
     /// 取消令牌映射（用于取消正在执行的 Sub-Agent）
     cancel_tokens: RwLock<HashMap<SubAgentId, CancellationToken>>,
+    /// 并发控制信号量
+    concurrency_semaphore: Arc<Semaphore>,
 }
 
 impl SubAgentManager {
     /// 创建新的 SubAgentManager
     pub fn new(config: SubAgentSystemConfig) -> Self {
+        let max_concurrent = config.max_concurrent;
         Self {
             config,
             agents: RwLock::new(HashMap::new()),
             running_count: AtomicUsize::new(0),
             cancel_tokens: RwLock::new(HashMap::new()),
+            concurrency_semaphore: Arc::new(Semaphore::new(max_concurrent)),
         }
     }
 
@@ -408,6 +424,253 @@ impl SubAgentManager {
         }
 
         count
+    }
+
+    /// 异步启动 Sub-Agent 执行
+    ///
+    /// 此方法会在后台 spawn 一个任务来执行 Sub-Agent。
+    /// 使用 Semaphore 控制并发数量。
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Sub-Agent ID
+    /// * `state` - 应用状态
+    /// * `chat_server` - 聊天服务器信息
+    /// * `headers` - HTTP 头信息
+    /// * `available_tools` - 可用工具列表
+    /// * `model` - 模型名称
+    /// * `emitter` - 事件发射器
+    ///
+    /// # Returns
+    ///
+    /// 成功返回 `Ok(())`，如果 Sub-Agent 不存在或状态不对返回错误
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start(
+        self: &Arc<Self>,
+        id: SubAgentId,
+        state: Arc<AppState>,
+        chat_server: TargetServerInfo,
+        headers: HeaderMap,
+        available_tools: Vec<ToolDescription>,
+        model: String,
+        emitter: Arc<dyn EventEmitter>,
+    ) -> ServerResult<()> {
+        // 验证 Sub-Agent 存在且状态为 Pending
+        {
+            let agents = self.agents.read().await;
+            let agent = agents
+                .get(&id)
+                .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+
+            if agent.state != SubAgentState::Pending {
+                return Err(ServerError::SubAgentAlreadyTerminal {
+                    id: id.to_string(),
+                    state: agent.state.to_string(),
+                });
+            }
+        }
+
+        // 获取取消令牌
+        let cancel_token = self
+            .get_cancel_token(&id)
+            .await
+            .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+
+        // 获取 Sub-Agent 配置
+        let timeout = Duration::from_secs(self.config.default_timeout_secs);
+        let max_iterations = self.config.default_max_iterations;
+
+        // 克隆必要的引用
+        let manager = Arc::clone(self);
+        let semaphore = Arc::clone(&self.concurrency_semaphore);
+        let id_clone = id.clone();
+
+        // 在后台 spawn 执行任务
+        tokio::spawn(async move {
+            // 获取信号量许可（限制并发）
+            let _permit = match semaphore.acquire().await {
+                Ok(permit) => permit,
+                Err(_) => {
+                    warn!(subagent_id = %id_clone, "Failed to acquire semaphore permit");
+                    let _ = manager
+                        .mark_failed(&id_clone, "Failed to acquire execution permit".to_string())
+                        .await;
+                    return;
+                }
+            };
+
+            info!(subagent_id = %id_clone, "Starting Sub-Agent execution");
+
+            // 获取 Sub-Agent 信息并创建上下文
+            let context = {
+                let agents = manager.agents.read().await;
+                match agents.get(&id_clone) {
+                    Some(agent) => SubAgentContext::from_agent(agent),
+                    None => {
+                        warn!(subagent_id = %id_clone, "Sub-Agent not found when starting execution");
+                        return;
+                    }
+                }
+            };
+
+            // 创建执行器
+            let executor = SubAgentExecutor::new(
+                state,
+                chat_server,
+                headers,
+                Arc::clone(&manager),
+                available_tools,
+                model,
+            );
+
+            // 执行 Sub-Agent
+            let result = executor
+                .execute(
+                    &id_clone,
+                    context,
+                    timeout,
+                    max_iterations,
+                    &cancel_token,
+                    emitter.as_ref(),
+                )
+                .await;
+
+            // 记录结果
+            match &result {
+                Ok(sub_result) => {
+                    info!(
+                        subagent_id = %id_clone,
+                        iterations = sub_result.metrics.total_iterations,
+                        "Sub-Agent completed successfully"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        subagent_id = %id_clone,
+                        error = %e,
+                        "Sub-Agent execution failed"
+                    );
+                }
+            }
+
+            // Permit 会在这里自动释放
+        });
+
+        Ok(())
+    }
+
+    /// 同步执行 Sub-Agent（等待完成）
+    ///
+    /// 此方法会阻塞直到 Sub-Agent 执行完成。
+    /// 主要用于 `wait_for_completion` 场景。
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Sub-Agent ID
+    /// * `state` - 应用状态
+    /// * `chat_server` - 聊天服务器信息
+    /// * `headers` - HTTP 头信息
+    /// * `available_tools` - 可用工具列表
+    /// * `model` - 模型名称
+    /// * `emitter` - 事件发射器
+    /// * `timeout` - 超时时间（可选，使用默认值如果未指定）
+    /// * `max_iterations` - 最大迭代次数（可选，使用默认值如果未指定）
+    ///
+    /// # Returns
+    ///
+    /// 返回执行结果
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_sync(
+        self: &Arc<Self>,
+        id: &SubAgentId,
+        state: Arc<AppState>,
+        chat_server: TargetServerInfo,
+        headers: HeaderMap,
+        available_tools: Vec<ToolDescription>,
+        model: String,
+        emitter: &dyn EventEmitter,
+        timeout: Option<Duration>,
+        max_iterations: Option<u32>,
+    ) -> ServerResult<SubAgentResult> {
+        // 获取信号量许可（限制并发）
+        let _permit = self.concurrency_semaphore.acquire().await.map_err(|_| {
+            ServerError::Operation("Failed to acquire execution permit".to_string())
+        })?;
+
+        // 获取取消令牌
+        let cancel_token = self
+            .get_cancel_token(id)
+            .await
+            .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+
+        // 获取超时和迭代限制
+        let timeout = timeout.unwrap_or(Duration::from_secs(self.config.default_timeout_secs));
+        let max_iterations = max_iterations.unwrap_or(self.config.default_max_iterations);
+
+        // 获取 Sub-Agent 信息并创建上下文
+        let context = {
+            let agents = self.agents.read().await;
+            let agent = agents
+                .get(id)
+                .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+            SubAgentContext::from_agent(agent)
+        };
+
+        // 创建执行器
+        let executor = SubAgentExecutor::new(
+            state,
+            chat_server,
+            headers,
+            Arc::clone(self),
+            available_tools,
+            model,
+        );
+
+        // 执行 Sub-Agent
+        executor
+            .execute(id, context, timeout, max_iterations, &cancel_token, emitter)
+            .await
+    }
+
+    /// 等待 Sub-Agent 完成
+    ///
+    /// 轮询检查 Sub-Agent 状态直到进入终态。
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Sub-Agent ID
+    /// * `poll_interval` - 轮询间隔
+    /// * `timeout` - 超时时间
+    ///
+    /// # Returns
+    ///
+    /// 返回 Sub-Agent 结果（如果有）
+    pub async fn wait_for_completion(
+        &self,
+        id: &SubAgentId,
+        poll_interval: Duration,
+        timeout: Duration,
+    ) -> ServerResult<Option<SubAgentResult>> {
+        let start = std::time::Instant::now();
+
+        loop {
+            // 检查超时
+            if start.elapsed() > timeout {
+                return Err(ServerError::SubAgentTimeout {
+                    id: id.to_string(),
+                    timeout_secs: timeout.as_secs(),
+                });
+            }
+
+            // 检查状态
+            let state = self.get_state(id).await?;
+            if state.is_terminal() {
+                return self.get_result(id).await;
+            }
+
+            // 等待一段时间后再检查
+            tokio::time::sleep(poll_interval).await;
+        }
     }
 }
 

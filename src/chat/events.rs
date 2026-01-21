@@ -68,6 +68,20 @@ pub enum StreamEventType {
     ArtifactUpdated,
     /// Artifact deleted event.
     ArtifactDeleted,
+    /// Sub-Agent spawned event.
+    SubAgentSpawned,
+    /// Sub-Agent started execution.
+    SubAgentStarted,
+    /// Sub-Agent progress update.
+    SubAgentProgress,
+    /// Sub-Agent thought event.
+    SubAgentThought,
+    /// Sub-Agent tool call event.
+    SubAgentToolCall,
+    /// Sub-Agent completed successfully.
+    SubAgentCompleted,
+    /// Sub-Agent failed with error.
+    SubAgentFailed,
 }
 
 impl fmt::Display for StreamEventType {
@@ -83,6 +97,13 @@ impl fmt::Display for StreamEventType {
             StreamEventType::ArtifactCreated => write!(f, "artifact_created"),
             StreamEventType::ArtifactUpdated => write!(f, "artifact_updated"),
             StreamEventType::ArtifactDeleted => write!(f, "artifact_deleted"),
+            StreamEventType::SubAgentSpawned => write!(f, "subagent_spawned"),
+            StreamEventType::SubAgentStarted => write!(f, "subagent_started"),
+            StreamEventType::SubAgentProgress => write!(f, "subagent_progress"),
+            StreamEventType::SubAgentThought => write!(f, "subagent_thought"),
+            StreamEventType::SubAgentToolCall => write!(f, "subagent_tool_call"),
+            StreamEventType::SubAgentCompleted => write!(f, "subagent_completed"),
+            StreamEventType::SubAgentFailed => write!(f, "subagent_failed"),
         }
     }
 }
@@ -631,6 +652,260 @@ impl ArtifactDeletedEvent {
 }
 
 // ============================================================================
+// Sub-Agent Events
+// ============================================================================
+
+/// Event payload when a Sub-Agent is spawned.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentSpawnedEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Sub-Agent name.
+    pub name: String,
+    /// Task assigned to the Sub-Agent.
+    pub task: String,
+    /// Parent Sub-Agent ID (if nested).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Nesting depth level.
+    pub depth: u32,
+}
+
+impl SubAgentSpawnedEvent {
+    /// Creates a new SubAgentSpawnedEvent.
+    pub fn new(
+        subagent_id: impl Into<String>,
+        name: impl Into<String>,
+        task: impl Into<String>,
+    ) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            name: name.into(),
+            task: task.into(),
+            parent_id: None,
+            depth: 0,
+        }
+    }
+
+    /// Sets the parent ID.
+    pub fn with_parent(mut self, parent_id: impl Into<String>) -> Self {
+        self.parent_id = Some(parent_id.into());
+        self
+    }
+
+    /// Sets the depth level.
+    pub fn with_depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
+    }
+}
+
+/// Event payload when a Sub-Agent starts execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentStartedEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Sub-Agent name.
+    pub name: String,
+}
+
+impl SubAgentStartedEvent {
+    /// Creates a new SubAgentStartedEvent.
+    pub fn new(subagent_id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            name: name.into(),
+        }
+    }
+}
+
+/// Event payload for Sub-Agent progress updates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentProgressEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Current iteration number.
+    pub iteration: u32,
+    /// Maximum iterations allowed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<u32>,
+    /// Optional progress message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl SubAgentProgressEvent {
+    /// Creates a new SubAgentProgressEvent.
+    pub fn new(subagent_id: impl Into<String>, iteration: u32) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            iteration,
+            max_iterations: None,
+            message: None,
+        }
+    }
+
+    /// Sets the maximum iterations.
+    pub fn with_max_iterations(mut self, max: u32) -> Self {
+        self.max_iterations = Some(max);
+        self
+    }
+
+    /// Sets the progress message.
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+}
+
+/// Event payload for Sub-Agent thought (Chain of Thought).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentThoughtEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Thought content.
+    pub content: String,
+    /// Current iteration number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u32>,
+    /// Thought status.
+    #[serde(default)]
+    pub status: ThoughtStatus,
+}
+
+impl SubAgentThoughtEvent {
+    /// Creates a new SubAgentThoughtEvent.
+    pub fn new(subagent_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            content: content.into(),
+            iteration: None,
+            status: ThoughtStatus::Done,
+        }
+    }
+
+    /// Sets the iteration number.
+    pub fn with_iteration(mut self, iteration: u32) -> Self {
+        self.iteration = Some(iteration);
+        self
+    }
+
+    /// Sets the thought status.
+    pub fn with_status(mut self, status: ThoughtStatus) -> Self {
+        self.status = status;
+        self
+    }
+}
+
+/// Event payload for Sub-Agent tool call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentToolCallEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Tool call ID.
+    pub tool_call_id: String,
+    /// Tool name.
+    pub tool_name: String,
+    /// Tool arguments.
+    pub args: serde_json::Value,
+    /// Current iteration number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<u32>,
+}
+
+impl SubAgentToolCallEvent {
+    /// Creates a new SubAgentToolCallEvent.
+    pub fn new(
+        subagent_id: impl Into<String>,
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            tool_call_id: tool_call_id.into(),
+            tool_name: tool_name.into(),
+            args,
+            iteration: None,
+        }
+    }
+
+    /// Sets the iteration number.
+    pub fn with_iteration(mut self, iteration: u32) -> Self {
+        self.iteration = Some(iteration);
+        self
+    }
+}
+
+/// Event payload when a Sub-Agent completes successfully.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentCompletedEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Sub-Agent name.
+    pub name: String,
+    /// Final output/result.
+    pub output: String,
+    /// Total iterations executed.
+    pub iterations: u32,
+    /// Execution duration in milliseconds.
+    pub duration_ms: u64,
+}
+
+impl SubAgentCompletedEvent {
+    /// Creates a new SubAgentCompletedEvent.
+    pub fn new(
+        subagent_id: impl Into<String>,
+        name: impl Into<String>,
+        output: impl Into<String>,
+        iterations: u32,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            name: name.into(),
+            output: output.into(),
+            iterations,
+            duration_ms,
+        }
+    }
+}
+
+/// Event payload when a Sub-Agent fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubAgentFailedEvent {
+    /// Sub-Agent ID.
+    pub subagent_id: String,
+    /// Sub-Agent name.
+    pub name: String,
+    /// Error message.
+    pub error: String,
+    /// Total iterations executed before failure.
+    pub iterations: u32,
+    /// Execution duration in milliseconds.
+    pub duration_ms: u64,
+}
+
+impl SubAgentFailedEvent {
+    /// Creates a new SubAgentFailedEvent.
+    pub fn new(
+        subagent_id: impl Into<String>,
+        name: impl Into<String>,
+        error: impl Into<String>,
+        iterations: u32,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            subagent_id: subagent_id.into(),
+            name: name.into(),
+            error: error.into(),
+            iterations,
+            duration_ms,
+        }
+    }
+}
+
+// ============================================================================
 // Unified Stream Event
 // ============================================================================
 
@@ -658,6 +933,20 @@ pub enum StreamEvent {
     ArtifactUpdated(ArtifactUpdatedEvent),
     /// Artifact deleted event.
     ArtifactDeleted(ArtifactDeletedEvent),
+    /// Sub-Agent spawned event.
+    SubAgentSpawned(SubAgentSpawnedEvent),
+    /// Sub-Agent started event.
+    SubAgentStarted(SubAgentStartedEvent),
+    /// Sub-Agent progress event.
+    SubAgentProgress(SubAgentProgressEvent),
+    /// Sub-Agent thought event.
+    SubAgentThought(SubAgentThoughtEvent),
+    /// Sub-Agent tool call event.
+    SubAgentToolCall(SubAgentToolCallEvent),
+    /// Sub-Agent completed event.
+    SubAgentCompleted(SubAgentCompletedEvent),
+    /// Sub-Agent failed event.
+    SubAgentFailed(SubAgentFailedEvent),
 }
 
 impl StreamEvent {
@@ -674,6 +963,13 @@ impl StreamEvent {
             StreamEvent::ArtifactCreated(_) => StreamEventType::ArtifactCreated,
             StreamEvent::ArtifactUpdated(_) => StreamEventType::ArtifactUpdated,
             StreamEvent::ArtifactDeleted(_) => StreamEventType::ArtifactDeleted,
+            StreamEvent::SubAgentSpawned(_) => StreamEventType::SubAgentSpawned,
+            StreamEvent::SubAgentStarted(_) => StreamEventType::SubAgentStarted,
+            StreamEvent::SubAgentProgress(_) => StreamEventType::SubAgentProgress,
+            StreamEvent::SubAgentThought(_) => StreamEventType::SubAgentThought,
+            StreamEvent::SubAgentToolCall(_) => StreamEventType::SubAgentToolCall,
+            StreamEvent::SubAgentCompleted(_) => StreamEventType::SubAgentCompleted,
+            StreamEvent::SubAgentFailed(_) => StreamEventType::SubAgentFailed,
         }
     }
 }
@@ -698,6 +994,8 @@ pub struct EnhancedStreamConfig {
     pub include_status: bool,
     /// Whether to include artifact events.
     pub include_artifacts: bool,
+    /// Whether to include Sub-Agent events.
+    pub include_subagents: bool,
 }
 
 impl EnhancedStreamConfig {
@@ -709,6 +1007,7 @@ impl EnhancedStreamConfig {
             include_tool_calls: true,
             include_status: true,
             include_artifacts: true,
+            include_subagents: true,
         }
     }
 
@@ -751,6 +1050,7 @@ impl EnhancedStreamConfig {
             include_tool_calls: false,
             include_status: false,
             include_artifacts: false,
+            include_subagents: false,
         };
 
         for part in value.split(',') {
@@ -759,11 +1059,13 @@ impl EnhancedStreamConfig {
                 "tool_calls" | "tools" => config.include_tool_calls = true,
                 "status" => config.include_status = true,
                 "artifacts" | "artifact" => config.include_artifacts = true,
+                "subagents" | "subagent" => config.include_subagents = true,
                 "all" => {
                     config.include_thoughts = true;
                     config.include_tool_calls = true;
                     config.include_status = true;
                     config.include_artifacts = true;
+                    config.include_subagents = true;
                 }
                 _ => {}
             }
@@ -774,6 +1076,7 @@ impl EnhancedStreamConfig {
             && !config.include_tool_calls
             && !config.include_status
             && !config.include_artifacts
+            && !config.include_subagents
         {
             config = Self::all_enabled();
         }
@@ -800,6 +1103,11 @@ impl EnhancedStreamConfig {
     #[allow(dead_code)]
     pub fn should_emit_artifacts(&self) -> bool {
         self.enabled && self.include_artifacts
+    }
+
+    /// Returns true if Sub-Agent events should be emitted.
+    pub fn should_emit_subagent_events(&self) -> bool {
+        self.enabled && self.include_subagents
     }
 }
 
@@ -836,6 +1144,14 @@ pub fn format_stream_event(event: &StreamEvent) -> String {
         StreamEvent::ArtifactCreated(e) => format_sse_event(&event_type, e),
         StreamEvent::ArtifactUpdated(e) => format_sse_event(&event_type, e),
         StreamEvent::ArtifactDeleted(e) => format_sse_event(&event_type, e),
+        // Sub-Agent events
+        StreamEvent::SubAgentSpawned(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentStarted(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentProgress(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentThought(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentToolCall(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentCompleted(e) => format_sse_event(&event_type, e),
+        StreamEvent::SubAgentFailed(e) => format_sse_event(&event_type, e),
     }
 }
 

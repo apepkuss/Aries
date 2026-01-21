@@ -32,8 +32,10 @@ use tokio::sync::mpsc;
 use super::{
     events::{
         ArtifactCreatedEvent, ArtifactDeletedEvent, ArtifactUpdatedEvent, EnhancedStreamConfig,
-        ExecutionPhase, ExecutionSummary, FinishEvent, StatusEvent, StreamEvent, TextEvent,
-        ThoughtEvent, ThoughtStatus, ToolCallEvent, ToolResultEvent, format_stream_event,
+        ExecutionPhase, ExecutionSummary, FinishEvent, StatusEvent, StreamEvent,
+        SubAgentCompletedEvent, SubAgentFailedEvent, SubAgentProgressEvent, SubAgentSpawnedEvent,
+        SubAgentStartedEvent, SubAgentThoughtEvent, SubAgentToolCallEvent, TextEvent, ThoughtEvent,
+        ThoughtStatus, ToolCallEvent, ToolResultEvent, format_stream_event,
     },
     trace::TokenUsage,
 };
@@ -127,6 +129,71 @@ pub trait EventEmitter: Send + Sync {
     /// Emits an artifact deleted event.
     #[allow(dead_code)]
     async fn emit_artifact_deleted(&self, artifact_id: &str, subtask_id: Option<usize>);
+
+    // ========================================================================
+    // Sub-Agent Events
+    // ========================================================================
+
+    /// Emits a Sub-Agent spawned event.
+    async fn emit_subagent_spawned(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        task: &str,
+        parent_id: Option<&str>,
+        depth: u32,
+    );
+
+    /// Emits a Sub-Agent started event.
+    async fn emit_subagent_started(&self, subagent_id: &str, name: &str);
+
+    /// Emits a Sub-Agent progress event.
+    async fn emit_subagent_progress(
+        &self,
+        subagent_id: &str,
+        iteration: u32,
+        max_iterations: Option<u32>,
+        message: Option<&str>,
+    );
+
+    /// Emits a Sub-Agent thought event.
+    async fn emit_subagent_thought(
+        &self,
+        subagent_id: &str,
+        content: &str,
+        iteration: Option<u32>,
+        status: ThoughtStatus,
+    );
+
+    /// Emits a Sub-Agent tool call event.
+    async fn emit_subagent_tool_call(
+        &self,
+        subagent_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        iteration: Option<u32>,
+    );
+
+    /// Emits a Sub-Agent completed event.
+    async fn emit_subagent_completed(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        output: &str,
+        iterations: u32,
+        duration_ms: u64,
+    );
+
+    /// Emits a Sub-Agent failed event.
+    async fn emit_subagent_failed(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        error: &str,
+        iterations: u32,
+        duration_ms: u64,
+    );
 
     /// Returns whether this emitter is active (will actually emit events).
     #[allow(dead_code)]
@@ -361,6 +428,133 @@ impl EventEmitter for SseEventEmitter {
         self.send_event(StreamEvent::ArtifactDeleted(event)).await;
     }
 
+    // ========================================================================
+    // Sub-Agent Events
+    // ========================================================================
+
+    async fn emit_subagent_spawned(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        task: &str,
+        parent_id: Option<&str>,
+        depth: u32,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let mut event = SubAgentSpawnedEvent::new(subagent_id, name, task).with_depth(depth);
+        if let Some(pid) = parent_id {
+            event = event.with_parent(pid);
+        }
+
+        self.send_event(StreamEvent::SubAgentSpawned(event)).await;
+    }
+
+    async fn emit_subagent_started(&self, subagent_id: &str, name: &str) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let event = SubAgentStartedEvent::new(subagent_id, name);
+        self.send_event(StreamEvent::SubAgentStarted(event)).await;
+    }
+
+    async fn emit_subagent_progress(
+        &self,
+        subagent_id: &str,
+        iteration: u32,
+        max_iterations: Option<u32>,
+        message: Option<&str>,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let mut event = SubAgentProgressEvent::new(subagent_id, iteration);
+        if let Some(max) = max_iterations {
+            event = event.with_max_iterations(max);
+        }
+        if let Some(msg) = message {
+            event = event.with_message(msg);
+        }
+
+        self.send_event(StreamEvent::SubAgentProgress(event)).await;
+    }
+
+    async fn emit_subagent_thought(
+        &self,
+        subagent_id: &str,
+        content: &str,
+        iteration: Option<u32>,
+        status: ThoughtStatus,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let mut event = SubAgentThoughtEvent::new(subagent_id, content).with_status(status);
+        if let Some(iter) = iteration {
+            event = event.with_iteration(iter);
+        }
+
+        self.send_event(StreamEvent::SubAgentThought(event)).await;
+    }
+
+    async fn emit_subagent_tool_call(
+        &self,
+        subagent_id: &str,
+        tool_call_id: &str,
+        tool_name: &str,
+        args: &serde_json::Value,
+        iteration: Option<u32>,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let mut event =
+            SubAgentToolCallEvent::new(subagent_id, tool_call_id, tool_name, args.clone());
+        if let Some(iter) = iteration {
+            event = event.with_iteration(iter);
+        }
+
+        self.send_event(StreamEvent::SubAgentToolCall(event)).await;
+    }
+
+    async fn emit_subagent_completed(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        output: &str,
+        iterations: u32,
+        duration_ms: u64,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let event = SubAgentCompletedEvent::new(subagent_id, name, output, iterations, duration_ms);
+        self.send_event(StreamEvent::SubAgentCompleted(event)).await;
+    }
+
+    async fn emit_subagent_failed(
+        &self,
+        subagent_id: &str,
+        name: &str,
+        error: &str,
+        iterations: u32,
+        duration_ms: u64,
+    ) {
+        if !self.config.should_emit_subagent_events() {
+            return;
+        }
+
+        let event = SubAgentFailedEvent::new(subagent_id, name, error, iterations, duration_ms);
+        self.send_event(StreamEvent::SubAgentFailed(event)).await;
+    }
+
     fn is_active(&self) -> bool {
         true
     }
@@ -468,6 +662,78 @@ impl EventEmitter for NoopEventEmitter {
     }
 
     async fn emit_artifact_deleted(&self, _artifact_id: &str, _subtask_id: Option<usize>) {
+        // No-op
+    }
+
+    // ========================================================================
+    // Sub-Agent Events
+    // ========================================================================
+
+    async fn emit_subagent_spawned(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _task: &str,
+        _parent_id: Option<&str>,
+        _depth: u32,
+    ) {
+        // No-op
+    }
+
+    async fn emit_subagent_started(&self, _subagent_id: &str, _name: &str) {
+        // No-op
+    }
+
+    async fn emit_subagent_progress(
+        &self,
+        _subagent_id: &str,
+        _iteration: u32,
+        _max_iterations: Option<u32>,
+        _message: Option<&str>,
+    ) {
+        // No-op
+    }
+
+    async fn emit_subagent_thought(
+        &self,
+        _subagent_id: &str,
+        _content: &str,
+        _iteration: Option<u32>,
+        _status: ThoughtStatus,
+    ) {
+        // No-op
+    }
+
+    async fn emit_subagent_tool_call(
+        &self,
+        _subagent_id: &str,
+        _tool_call_id: &str,
+        _tool_name: &str,
+        _args: &serde_json::Value,
+        _iteration: Option<u32>,
+    ) {
+        // No-op
+    }
+
+    async fn emit_subagent_completed(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _output: &str,
+        _iterations: u32,
+        _duration_ms: u64,
+    ) {
+        // No-op
+    }
+
+    async fn emit_subagent_failed(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _error: &str,
+        _iterations: u32,
+        _duration_ms: u64,
+    ) {
         // No-op
     }
 
