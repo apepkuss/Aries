@@ -6,7 +6,7 @@ use std::{
 
 use aries::{
     AppState, HEALTH_CHECK_INTERVAL, artifacts, capabilities, cli, config, config_api, error,
-    executor, handlers, info, mcp_handlers, memory, responses, skills, utils,
+    executor, handlers, info, mcp_handlers, memory, responses, skills, subagent, utils,
 };
 use axum::{
     body::Body,
@@ -198,6 +198,9 @@ async fn main() -> ServerResult<()> {
 
     // Save artifacts config before moving config into AppState
     let artifacts_config = config.artifacts.clone();
+
+    // Save subagent config before moving config into AppState
+    let subagent_config = config.subagent.clone();
 
     // Save config API settings before moving config into AppState
     let config_api_settings = config.config_api.clone();
@@ -509,6 +512,35 @@ async fn main() -> ServerResult<()> {
     if let Some(artifacts_router) = artifacts_router {
         app = app.merge(artifacts_router);
     }
+
+    // Create and merge subagent router if enabled
+    let subagent_manager = if let Some(ref config) = subagent_config
+        && config.enabled
+    {
+        aries::dual_info!("Sub-Agent system is enabled");
+        let manager = Arc::new(subagent::SubAgentManager::new(config.clone()));
+
+        // Start timeout monitor
+        manager.start_timeout_monitor(std::time::Duration::from_secs(30));
+
+        // Create and merge the router
+        let subagent_router = subagent::subagent_router(Arc::clone(&manager));
+        app = app.merge(subagent_router);
+
+        aries::dual_info!(
+            "Sub-Agent API endpoints enabled (max concurrent: {}, max depth: {})",
+            config.max_concurrent,
+            config.max_nesting_depth
+        );
+
+        Some(manager)
+    } else {
+        aries::dual_info!("Sub-Agent system is disabled or not configured");
+        None
+    };
+
+    // Keep subagent_manager alive for the lifetime of the server
+    let _subagent_manager = subagent_manager;
 
     let app =
         app.layer(cors)

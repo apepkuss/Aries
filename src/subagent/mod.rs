@@ -52,8 +52,8 @@ pub mod tools;
 // 阶段三：通信通道
 pub mod channel;
 
-// TODO: 阶段四完成后取消注释
-// pub mod handlers;
+// 阶段四：HTTP API
+pub mod handlers;
 
 // 通信通道
 pub use channel::{
@@ -69,6 +69,7 @@ pub use executor::{
     SubAgentExecutor, execute_cancel_sub_agent, execute_get_sub_agent_result,
     execute_spawn_sub_agent,
 };
+pub use handlers::{SubAgentApiState, subagent_router};
 pub use manager::{SubAgentManager, SubAgentStats};
 pub use reflector::{ReflectionAction, SubAgentReflector};
 pub use tools::{
