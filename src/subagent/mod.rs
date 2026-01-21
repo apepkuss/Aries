@@ -40,10 +40,8 @@
 
 // 阶段一：核心类型与配置
 pub mod config;
+pub mod manager;
 pub mod types;
-
-// TODO: 阶段一 Week 2 完成后取消注释
-// pub mod manager;
 
 // TODO: 阶段二完成后取消注释
 // pub mod executor;
@@ -58,7 +56,5 @@ pub mod types;
 
 // 公开导出
 pub use config::*;
+pub use manager::{SubAgentManager, SubAgentStats};
 pub use types::*;
-
-// TODO: 阶段一 Week 2 完成后取消注释
-// pub use manager::SubAgentManager;

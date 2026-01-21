@@ -57,6 +57,26 @@ pub enum ServerError {
     },
     #[error("Plan time budget exhausted after {elapsed_secs} seconds")]
     TimeBudgetExhausted { elapsed_secs: u64 },
+
+    // Sub-Agent errors
+    #[error("Sub-Agent feature is disabled")]
+    SubAgentDisabled,
+    #[error("Sub-Agent not found: {0}")]
+    SubAgentNotFound(String),
+    #[error("Sub-Agent concurrent limit exceeded: max {max} allowed")]
+    SubAgentLimitExceeded { max: usize },
+    #[error(
+        "Sub-Agent max nesting depth exceeded: max depth {max_depth}, current depth {current_depth}"
+    )]
+    SubAgentMaxDepthExceeded { max_depth: u32, current_depth: u32 },
+    #[error("Sub-Agent spawn failed: {0}")]
+    SubAgentSpawnFailed(String),
+    #[error("Sub-Agent execution failed: {id} - {message}")]
+    SubAgentExecutionFailed { id: String, message: String },
+    #[error("Sub-Agent timeout: {id} after {timeout_secs} seconds")]
+    SubAgentTimeout { id: String, timeout_secs: u64 },
+    #[error("Sub-Agent already in terminal state: {id} is {state}")]
+    SubAgentAlreadyTerminal { id: String, state: String },
 }
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
@@ -185,6 +205,68 @@ impl IntoResponse for ServerError {
                 "timeout_error".into(),
                 Some("plan_timeout_secs".into()),
                 Some("time_budget_exhausted".into()),
+            ),
+            // Sub-Agent errors
+            ServerError::SubAgentDisabled => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Sub-Agent feature is disabled".into(),
+                "service_unavailable".into(),
+                Some("subagent".into()),
+                Some("subagent_disabled".into()),
+            ),
+            ServerError::SubAgentNotFound(id) => (
+                StatusCode::NOT_FOUND,
+                format!("Sub-Agent not found: {id}"),
+                "not_found".into(),
+                Some("subagent_id".into()),
+                Some("subagent_not_found".into()),
+            ),
+            ServerError::SubAgentLimitExceeded { max } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("Sub-Agent concurrent limit exceeded: max {max} allowed"),
+                "rate_limit_error".into(),
+                Some("max_concurrent".into()),
+                Some("subagent_limit_exceeded".into()),
+            ),
+            ServerError::SubAgentMaxDepthExceeded {
+                max_depth,
+                current_depth,
+            } => (
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Sub-Agent max nesting depth exceeded: max depth {max_depth}, current depth {current_depth}"
+                ),
+                "invalid_request_error".into(),
+                Some("max_nesting_depth".into()),
+                Some("subagent_max_depth_exceeded".into()),
+            ),
+            ServerError::SubAgentSpawnFailed(reason) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Sub-Agent spawn failed: {reason}"),
+                "internal_error".into(),
+                Some("subagent".into()),
+                Some("subagent_spawn_failed".into()),
+            ),
+            ServerError::SubAgentExecutionFailed { id, message } => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Sub-Agent execution failed: {id} - {message}"),
+                "internal_error".into(),
+                Some("subagent".into()),
+                Some("subagent_execution_failed".into()),
+            ),
+            ServerError::SubAgentTimeout { id, timeout_secs } => (
+                StatusCode::GATEWAY_TIMEOUT,
+                format!("Sub-Agent timeout: {id} after {timeout_secs} seconds"),
+                "timeout_error".into(),
+                Some("subagent_timeout_secs".into()),
+                Some("subagent_timeout".into()),
+            ),
+            ServerError::SubAgentAlreadyTerminal { id, state } => (
+                StatusCode::CONFLICT,
+                format!("Sub-Agent already in terminal state: {id} is {state}"),
+                "conflict_error".into(),
+                Some("subagent_state".into()),
+                Some("subagent_already_terminal".into()),
             ),
         };
 
