@@ -12,10 +12,12 @@ import {
   Clock,
   Circle,
   ListTodo,
+  Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UIToolCall, ExecutionEvent, UITaskPlan } from '@/api/types';
+import type { UIToolCall, ExecutionEvent, UITaskPlan, UISubAgent } from '@/api/types';
 import type { ExecutionStatus } from '@/stores';
+import { SubAgentList } from './SubAgentCard';
 
 interface ThinkingProcessProps {
   thinking?: string;
@@ -28,6 +30,10 @@ interface ThinkingProcessProps {
   isStreaming?: boolean;
   /** Force expanded state (overrides auto-collapse) */
   forceExpanded?: boolean;
+  /** Root-level Sub-Agents to display */
+  subAgents?: UISubAgent[];
+  /** Get a Sub-Agent by ID (for nested Sub-Agents) */
+  getSubAgent?: (id: string) => UISubAgent | undefined;
 }
 
 const phaseConfig: Record<
@@ -69,6 +75,8 @@ export function ThinkingProcess({
   executionStatus,
   isStreaming,
   forceExpanded,
+  subAgents,
+  getSubAgent,
 }: ThinkingProcessProps) {
   // Auto-expanded during streaming, collapsed when done
   const [isExpanded, setIsExpanded] = useState(true);
@@ -102,8 +110,9 @@ export function ThinkingProcess({
   const hasTaskPlan = taskPlan && taskPlan.subtasks.length > 0;
   const hasExecutionStatus =
     executionStatus && executionStatus.phase !== 'idle';
+  const hasSubAgents = subAgents && subAgents.length > 0;
 
-  if (!hasThinking && !hasToolCalls && !hasExecutionEvents && !hasTaskPlan && !hasExecutionStatus) {
+  if (!hasThinking && !hasToolCalls && !hasExecutionEvents && !hasTaskPlan && !hasExecutionStatus && !hasSubAgents) {
     return null;
   }
 
@@ -181,6 +190,12 @@ export function ThinkingProcess({
                 {hasErrors && (
                   <AlertCircle className="h-3 w-3 text-destructive" />
                 )}
+              </span>
+            )}
+            {hasSubAgents && (
+              <span className="flex items-center gap-1 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 px-1.5 py-0.5 rounded">
+                <Users className="h-3 w-3" />
+                {subAgents!.filter((a) => a.state === 'completed').length}/{subAgents!.length} Sub-Agent
               </span>
             )}
             {hasThinking && (
@@ -288,6 +303,14 @@ export function ThinkingProcess({
                 </div>
               )}
             </>
+          )}
+
+          {/* Sub-Agents */}
+          {hasSubAgents && getSubAgent && (
+            <SubAgentList
+              agents={subAgents!}
+              getSubAgent={getSubAgent}
+            />
           )}
         </div>
       )}

@@ -499,4 +499,95 @@ export type EnhancedStreamEvent =
   | { type: 'tool_call'; data: ToolCallEvent }
   | { type: 'tool_result'; data: ToolResultEvent }
   | { type: 'text'; data: TextEvent }
-  | { type: 'finish'; data: FinishEvent };
+  | { type: 'finish'; data: FinishEvent }
+  | { type: 'subagent_spawned'; data: SubAgentSpawnedEvent }
+  | { type: 'subagent_started'; data: SubAgentStartedEvent }
+  | { type: 'subagent_progress'; data: SubAgentProgressEvent }
+  | { type: 'subagent_completed'; data: SubAgentCompletedEvent }
+  | { type: 'subagent_failed'; data: SubAgentFailedEvent };
+
+// ============================================================================
+// Sub-Agent Event Types
+// ============================================================================
+
+/** Sub-Agent state enum */
+export type SubAgentState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+/** Base event data for Sub-Agent events */
+interface SubAgentEventBase {
+  subagent_id: string;
+  name: string;
+  parent_id?: string;
+}
+
+/** Event emitted when a Sub-Agent is spawned */
+export interface SubAgentSpawnedEvent extends SubAgentEventBase {
+  task: string;
+  depth: number;
+}
+
+/** Event emitted when a Sub-Agent starts execution */
+export interface SubAgentStartedEvent extends SubAgentEventBase {
+  timestamp: number;
+}
+
+/** Event emitted for Sub-Agent progress updates */
+export interface SubAgentProgressEvent extends SubAgentEventBase {
+  iteration: number;
+  message?: string;
+  tool_name?: string;
+}
+
+/** Event emitted when a Sub-Agent completes successfully */
+export interface SubAgentCompletedEvent extends SubAgentEventBase {
+  output: string;
+  metrics: SubAgentMetrics;
+}
+
+/** Event emitted when a Sub-Agent fails */
+export interface SubAgentFailedEvent extends SubAgentEventBase {
+  error: string;
+  metrics?: SubAgentMetrics;
+}
+
+/** Sub-Agent execution metrics */
+export interface SubAgentMetrics {
+  total_iterations: number;
+  tool_calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  duration_ms: number;
+}
+
+// ============================================================================
+// Sub-Agent UI Types
+// ============================================================================
+
+/** UI representation of a Sub-Agent */
+export interface UISubAgent {
+  id: string;
+  name: string;
+  task: string;
+  state: SubAgentState;
+  depth: number;
+  parentId?: string;
+  /** Child Sub-Agent IDs */
+  childIds: string[];
+  /** Progress information */
+  progress?: {
+    iteration: number;
+    message?: string;
+    lastToolName?: string;
+  };
+  /** Result when completed */
+  result?: {
+    output: string;
+    metrics: SubAgentMetrics;
+  };
+  /** Error message when failed */
+  error?: string;
+  /** Timestamps */
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+}
