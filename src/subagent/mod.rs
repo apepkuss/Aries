@@ -49,8 +49,9 @@ pub mod executor;
 pub mod reflector;
 pub mod tools;
 
-// 阶段三：通信通道
+// 阶段三：通信通道与限流
 pub mod channel;
+pub mod rate_limiter;
 
 // 阶段四：HTTP API
 pub mod handlers;
@@ -72,6 +73,7 @@ pub use executor::{
 };
 pub use handlers::{SubAgentApiState, subagent_router};
 pub use manager::{SubAgentManager, SubAgentStats};
+pub use rate_limiter::{RateLimiter, TokenBucket};
 pub use reflector::{ReflectionAction, SubAgentReflector};
 pub use tools::{
     CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL, GetSubAgentResultArgs,

@@ -42,7 +42,7 @@ use crate::{
     AppState,
     chat::{
         gen_chat_id,
-        planner::{SubTask, TaskPlan, TaskPlanner, ToolDescription},
+        planner::{SubTask, SubTaskStatus, TaskPlan, TaskPlanner, ToolDescription},
         trace::{
             PlanTrace, ReplanEvent, SubtaskReflectionSummary, SubtaskTrace, TokenUsage, TraceStatus,
         },
@@ -66,9 +66,9 @@ use crate::{
     },
     subagent::{
         self, CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL,
-        GetSubAgentResultArgs, SPAWN_SUB_AGENT_TOOL, SpawnSubAgentArgs, SubAgentContext,
-        SubAgentExecutor, SubAgentManager, SubAgentSpawnConfig, SubAgentSystemConfig,
-        SubAgentToolAccess, all_subagent_tool_descriptions, is_subagent_tool,
+        GetSubAgentResultArgs, RateLimiter, SPAWN_SUB_AGENT_TOOL, SpawnSubAgentArgs,
+        SubAgentContext, SubAgentExecutor, SubAgentManager, SubAgentSpawnConfig,
+        SubAgentSystemConfig, SubAgentToolAccess, all_subagent_tool_descriptions, is_subagent_tool,
         parse_subagent_tool_name,
     },
 };
@@ -4794,6 +4794,562 @@ fn build_subagent_system_prompt(
     }
 
     prompt
+}
+
+// ============================================================================
+// Parallel Execution Scheduler
+// ============================================================================
+
+/// A group of subtasks that can be executed in parallel.
+///
+/// All subtasks in the same group have their dependencies satisfied by
+/// previous groups, so they can safely run concurrently.
+#[derive(Debug, Clone)]
+pub struct ParallelGroup {
+    /// Indices of subtasks in this group
+    pub subtask_indices: Vec<usize>,
+}
+
+/// Analyze subtask dependencies and group them for parallel execution.
+///
+/// This function performs a topological sort of subtasks based on their
+/// dependencies, grouping subtasks that can be executed in parallel.
+///
+/// # Algorithm
+///
+/// 1. Start with all subtasks that have no dependencies (or all dependencies already complete)
+/// 2. Mark these subtasks as the first parallel group
+/// 3. Find all subtasks whose dependencies are in previous groups
+/// 4. Repeat until all subtasks are grouped
+///
+/// # Returns
+///
+/// A vector of `ParallelGroup`s, where each group contains subtask indices
+/// that can be executed concurrently.
+pub fn analyze_dependencies(
+    subtasks: &[SubTask],
+    completed_subtasks: &HashSet<usize>,
+) -> Vec<ParallelGroup> {
+    let mut groups = Vec::new();
+    let mut processed: HashSet<usize> = completed_subtasks.clone();
+    let remaining: Vec<_> = subtasks
+        .iter()
+        .filter(|s| !completed_subtasks.contains(&s.id) && s.status == SubTaskStatus::Pending)
+        .collect();
+
+    if remaining.is_empty() {
+        return groups;
+    }
+
+    // Keep grouping until all subtasks are processed
+    let mut remaining_set: HashSet<usize> = remaining.iter().map(|s| s.id).collect();
+
+    while !remaining_set.is_empty() {
+        let mut group_indices = Vec::new();
+
+        // Find all subtasks whose dependencies are satisfied
+        for subtask in &remaining {
+            if remaining_set.contains(&subtask.id) {
+                let deps_satisfied = subtask
+                    .dependencies
+                    .iter()
+                    .all(|dep| processed.contains(dep));
+
+                if deps_satisfied {
+                    group_indices.push(subtask.id);
+                }
+            }
+        }
+
+        // If no subtasks can be added, we have a cycle or all are done
+        if group_indices.is_empty() {
+            // Add remaining tasks as a single group (they may have circular deps)
+            let remaining_indices: Vec<usize> = remaining_set.iter().copied().collect();
+            if !remaining_indices.is_empty() {
+                groups.push(ParallelGroup {
+                    subtask_indices: remaining_indices,
+                });
+            }
+            break;
+        }
+
+        // Mark these as processed
+        for idx in &group_indices {
+            processed.insert(*idx);
+            remaining_set.remove(idx);
+        }
+
+        groups.push(ParallelGroup {
+            subtask_indices: group_indices,
+        });
+    }
+
+    groups
+}
+
+/// Context required for parallel execution of subtasks.
+#[derive(Clone)]
+pub struct ParallelExecutionContext {
+    pub state: Arc<AppState>,
+    pub chat_server: crate::server::TargetServerInfo,
+    pub headers: HeaderMap,
+    pub available_tools: Vec<ToolDescription>,
+    pub skills_summaries: Vec<SkillSummary>,
+    pub cancel_token: CancellationToken,
+    pub request_id: String,
+    pub model_name: String,
+    pub subagent_config: Option<SubAgentSystemConfig>,
+    pub rate_limiter: Option<Arc<RateLimiter>>,
+}
+
+/// Result of a single subtask execution.
+#[derive(Debug, Clone)]
+pub struct SubtaskExecutionResult {
+    pub subtask_id: usize,
+    pub result: Result<String, String>,
+    pub trace: SubtaskTrace,
+}
+
+/// Execute subtasks in parallel groups using Sub-Agent mode.
+///
+/// This function:
+/// 1. Analyzes dependencies to create parallel groups
+/// 2. Executes each group concurrently (respecting max_parallel limit)
+/// 3. Collects results and updates state
+/// 4. Proceeds to the next group only after the current group completes
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_subtasks_parallel(
+    ctx: &ParallelExecutionContext,
+    subtasks: &mut [SubTask],
+    subtask_results: &mut Vec<(usize, String)>,
+    completed_subtasks: &mut HashSet<usize>,
+    time_budget: &TimeBudget,
+    emitter: &dyn EventEmitter,
+    trace: &mut PlanTrace,
+    total_subtasks: usize,
+) -> ServerResult<()> {
+    let config = ctx.subagent_config.as_ref().ok_or_else(|| {
+        ServerError::Operation(
+            "Sub-Agent configuration required for parallel execution".to_string(),
+        )
+    })?;
+    let executor_config = &config.subtask_executor;
+    let max_parallel = executor_config.max_parallel;
+
+    dual_info!(
+        "🚀 Starting parallel execution with max_parallel={} - request_id: {}",
+        max_parallel,
+        ctx.request_id
+    );
+
+    // Analyze dependencies and create parallel groups
+    let groups = analyze_dependencies(subtasks, completed_subtasks);
+
+    dual_debug!(
+        "📊 Dependency analysis: {} parallel groups - request_id: {}",
+        groups.len(),
+        ctx.request_id
+    );
+
+    // Execute each group
+    for (group_idx, group) in groups.iter().enumerate() {
+        // Check time budget
+        if time_budget.is_exhausted() {
+            dual_warn!(
+                "Time budget exhausted during parallel execution - request_id: {}",
+                ctx.request_id
+            );
+            return Err(ServerError::TimeBudgetExhausted {
+                elapsed_secs: time_budget.elapsed().as_secs(),
+            });
+        }
+
+        // Check cancellation
+        if ctx.cancel_token.is_cancelled() {
+            return Err(ServerError::Operation(
+                "Request was cancelled by client".to_string(),
+            ));
+        }
+
+        dual_info!(
+            "▶️ Executing parallel group {}/{} with {} subtasks - request_id: {}",
+            group_idx + 1,
+            groups.len(),
+            group.subtask_indices.len(),
+            ctx.request_id
+        );
+
+        // Execute subtasks in this group concurrently
+        let group_results = execute_parallel_group(
+            ctx,
+            subtasks,
+            &group.subtask_indices,
+            subtask_results,
+            max_parallel,
+            time_budget,
+            emitter,
+        )
+        .await;
+
+        // Process results
+        for result in group_results {
+            let subtask_id = result.subtask_id;
+
+            // Add trace
+            trace.add_subtask_trace(result.trace);
+
+            match result.result {
+                Ok(output) => {
+                    // Update subtask status
+                    if let Some(subtask) = subtasks.iter_mut().find(|s| s.id == subtask_id) {
+                        subtask.complete(output.clone());
+                    }
+                    subtask_results.push((subtask_id, output.clone()));
+                    completed_subtasks.insert(subtask_id);
+
+                    // Emit completion event
+                    emitter
+                        .emit_status(
+                            ExecutionPhase::Executing,
+                            &format!("Completed subtask {}", subtask_id),
+                            Some(subtask_id),
+                            Some(completed_subtasks.len()),
+                            Some(total_subtasks),
+                        )
+                        .await;
+                }
+                Err(error) => {
+                    dual_error!(
+                        "❌ Subtask {} failed: {} - request_id: {}",
+                        subtask_id,
+                        error,
+                        ctx.request_id
+                    );
+
+                    // Update subtask status
+                    if let Some(subtask) = subtasks.iter_mut().find(|s| s.id == subtask_id) {
+                        subtask.fail(error.clone());
+                    }
+
+                    // Handle based on failure policy
+                    match executor_config.failure_policy {
+                        crate::subagent::FailurePolicy::FailFast
+                        | crate::subagent::FailurePolicy::Fail => {
+                            return Err(ServerError::Operation(format!(
+                                "Subtask {} failed: {}",
+                                subtask_id, error
+                            )));
+                        }
+                        crate::subagent::FailurePolicy::Skip
+                        | crate::subagent::FailurePolicy::Ignore => {
+                            // Skip this subtask, continue with others
+                            dual_warn!(
+                                "Skipping failed subtask {} due to failure policy - request_id: {}",
+                                subtask_id,
+                                ctx.request_id
+                            );
+                            completed_subtasks.insert(subtask_id); // Mark as "done" to unblock dependents
+                        }
+                        _ => {
+                            // For retry policies, we'd need more complex handling
+                            // For now, treat as skip
+                            completed_subtasks.insert(subtask_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        dual_info!(
+            "✅ Parallel group {}/{} completed - request_id: {}",
+            group_idx + 1,
+            groups.len(),
+            ctx.request_id
+        );
+    }
+
+    Ok(())
+}
+
+/// Execute a single parallel group of subtasks.
+///
+/// Uses a semaphore to limit concurrent executions to `max_parallel`.
+#[allow(clippy::too_many_arguments)]
+async fn execute_parallel_group(
+    ctx: &ParallelExecutionContext,
+    subtasks: &[SubTask],
+    subtask_indices: &[usize],
+    previous_results: &[(usize, String)],
+    max_parallel: usize,
+    time_budget: &TimeBudget,
+    _emitter: &dyn EventEmitter,
+) -> Vec<SubtaskExecutionResult> {
+    use tokio::sync::Semaphore;
+
+    let semaphore = Arc::new(Semaphore::new(max_parallel));
+    let mut handles = Vec::new();
+
+    // Calculate time budget for this group
+    let pending_count = subtask_indices.len();
+    let group_timeout = time_budget.allocate(pending_count);
+
+    for &subtask_idx in subtask_indices {
+        let subtask = match subtasks.iter().find(|s| s.id == subtask_idx) {
+            Some(s) => s.clone(),
+            None => continue,
+        };
+
+        let permit = match semaphore.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Clone context for the spawned task
+        let ctx = ctx.clone();
+        let previous_results = previous_results.to_vec();
+        let timeout = group_timeout;
+        let emitter_arc: Arc<dyn EventEmitter> = Arc::from(NoopEmitter);
+
+        let handle = tokio::spawn(async move {
+            let _permit = permit; // Hold until done
+
+            // Acquire rate limit if configured
+            if let Some(ref limiter) = ctx.rate_limiter
+                && !limiter.acquire_request(Duration::from_secs(30)).await
+            {
+                return SubtaskExecutionResult {
+                    subtask_id: subtask.id,
+                    result: Err("Rate limit exceeded".to_string()),
+                    trace: SubtaskTrace::new(subtask.id, subtask.description.clone()),
+                };
+            }
+
+            let mut subtask_trace = SubtaskTrace::new(subtask.id, subtask.description.clone());
+            subtask_trace.start();
+
+            let result = execute_subtask_via_subagent(
+                &ctx.state,
+                &ctx.chat_server,
+                &ctx.headers,
+                &subtask,
+                &previous_results,
+                &ctx.available_tools,
+                Some(&ctx.skills_summaries),
+                timeout,
+                &ctx.cancel_token,
+                &ctx.request_id,
+                &mut subtask_trace,
+                &ctx.model_name,
+                emitter_arc.as_ref(),
+                ctx.subagent_config.as_ref(),
+            )
+            .await;
+
+            // Update trace based on result
+            match &result {
+                Ok(output) => subtask_trace.complete(output.clone()),
+                Err(e) => subtask_trace.fail(e.to_string()),
+            }
+
+            SubtaskExecutionResult {
+                subtask_id: subtask.id,
+                result: result.map_err(|e| e.to_string()),
+                trace: subtask_trace,
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all tasks in the group to complete
+    let mut results = Vec::new();
+    for handle in handles {
+        match handle.await {
+            Ok(result) => results.push(result),
+            Err(e) => {
+                dual_error!("Task join error: {:?}", e);
+            }
+        }
+    }
+
+    results
+}
+
+/// A no-op event emitter for use in spawned tasks.
+///
+/// Since we can't easily clone the real emitter, we use this for parallel tasks.
+/// Events are emitted at the group level instead.
+struct NoopEmitter;
+
+#[async_trait::async_trait]
+impl EventEmitter for NoopEmitter {
+    async fn emit_thought(
+        &self,
+        _content: &str,
+        _status: ThoughtStatus,
+        _subtask_id: Option<usize>,
+        _iteration: Option<u32>,
+    ) {
+    }
+
+    async fn emit_tool_call(
+        &self,
+        _call_id: &str,
+        _tool_name: &str,
+        _args: &serde_json::Value,
+        _server_name: Option<&str>,
+        _subtask_id: Option<usize>,
+    ) {
+    }
+
+    async fn emit_tool_result(
+        &self,
+        _call_id: &str,
+        _result: &str,
+        _is_error: bool,
+        _duration: Option<Duration>,
+        _subtask_id: Option<usize>,
+    ) {
+    }
+
+    async fn emit_status(
+        &self,
+        _phase: ExecutionPhase,
+        _message: &str,
+        _subtask_id: Option<usize>,
+        _subtask_current: Option<usize>,
+        _subtask_total: Option<usize>,
+    ) {
+    }
+
+    async fn emit_text(&self, _content: &str) {}
+
+    async fn emit_finish(
+        &self,
+        _usage: &TokenUsage,
+        _stop_reason: &str,
+        _error: Option<&str>,
+        _summary: Option<ExecutionSummary>,
+    ) {
+    }
+
+    async fn emit_artifact_created(
+        &self,
+        _artifact_id: &str,
+        _title: &str,
+        _artifact_type: &serde_json::Value,
+        _content: &str,
+        _size: u64,
+        _url: &str,
+        _subtask_id: Option<usize>,
+    ) {
+    }
+
+    async fn emit_artifact_updated(
+        &self,
+        _artifact_id: &str,
+        _version: i32,
+        _content: &str,
+        _change_description: Option<&str>,
+        _subtask_id: Option<usize>,
+    ) {
+    }
+
+    async fn emit_artifact_deleted(&self, _artifact_id: &str, _subtask_id: Option<usize>) {}
+
+    async fn emit_subagent_spawned(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _task: &str,
+        _parent_id: Option<&str>,
+        _depth: u32,
+    ) {
+    }
+
+    async fn emit_subagent_started(&self, _subagent_id: &str, _name: &str) {}
+
+    async fn emit_subagent_progress(
+        &self,
+        _subagent_id: &str,
+        _iteration: u32,
+        _max_iterations: Option<u32>,
+        _message: Option<&str>,
+    ) {
+    }
+
+    async fn emit_subagent_thought(
+        &self,
+        _subagent_id: &str,
+        _content: &str,
+        _iteration: Option<u32>,
+        _status: ThoughtStatus,
+    ) {
+    }
+
+    async fn emit_subagent_tool_call(
+        &self,
+        _subagent_id: &str,
+        _tool_call_id: &str,
+        _tool_name: &str,
+        _args: &serde_json::Value,
+        _iteration: Option<u32>,
+    ) {
+    }
+
+    async fn emit_subagent_completed(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _output: &str,
+        _iterations: u32,
+        _duration_ms: u64,
+    ) {
+    }
+
+    async fn emit_subagent_failed(
+        &self,
+        _subagent_id: &str,
+        _name: &str,
+        _error: &str,
+        _iterations: u32,
+        _duration_ms: u64,
+    ) {
+    }
+
+    fn is_active(&self) -> bool {
+        false
+    }
+}
+
+/// Check if parallel execution should be used based on configuration.
+pub fn should_use_parallel_execution(
+    subagent_config: Option<&SubAgentSystemConfig>,
+    subtask_count: usize,
+) -> bool {
+    if let Some(config) = subagent_config {
+        if !config.is_subagent_mode() {
+            return false;
+        }
+
+        let executor_config = &config.subtask_executor;
+
+        match executor_config.parallel_mode.as_str() {
+            "auto" => {
+                // Auto mode: use parallel if there are multiple subtasks
+                // and max_parallel > 1
+                subtask_count > 1 && executor_config.max_parallel > 1
+            }
+            "sequential" => false,
+            "manual" => {
+                // Manual mode: use parallel if max_parallel > 1
+                executor_config.max_parallel > 1
+            }
+            _ => false,
+        }
+    } else {
+        false
+    }
 }
 
 // ============================================================================
