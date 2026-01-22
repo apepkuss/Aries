@@ -220,11 +220,11 @@ default_allowed_tools = []            # Empty means no explicit allow list (use 
 default_blocked_tools = ["spawn_sub_agent"]  # Prevent infinite nesting by default
 
 # Failure handling policy
-# - "Fail": Stop execution on first failure and propagate error to main Agent
-# - "Notify": Notify main Agent and let it decide how to handle
-# - "Retry": Automatically retry failed Sub-Agents (up to retry_attempts times)
-# - "Ignore": Ignore failures and continue execution
-failure_policy = "Notify"
+# - "fail": Stop execution on first failure and propagate error to main Agent
+# - "notify": Notify main Agent and let it decide how to handle
+# - "retry": Automatically retry failed Sub-Agents (up to retry_attempts times)
+# - "ignore": Ignore failures and continue execution
+failure_policy = "notify"
 retry_attempts = 2                    # Retry count when using "Retry" policy
 
 # Total token limit across all Sub-Agents (0 = unlimited)
