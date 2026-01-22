@@ -193,6 +193,53 @@ hot_reload_audit = false              # Log all hot-reload changes for auditing
 
 
 # ============================================================================
+# SECTION 1.9: SUB-AGENT CONFIGURATION
+# ============================================================================
+# Sub-Agents are autonomous child agents spawned by the main agent to handle
+# specific subtasks independently. They have their own execution context,
+# tool access controls, and lifecycle management.
+#
+# Use cases:
+# - Parallel task execution (e.g., searching multiple sources simultaneously)
+# - Specialized tasks requiring different tool sets
+# - Complex workflows with hierarchical task decomposition
+
+[subagent]
+enabled = false                       # Enable Sub-Agent functionality (default: false)
+max_nesting_depth = 2                 # Maximum nesting depth (0 = no nesting, 1 = main -> sub, etc.)
+max_concurrent = 5                    # Maximum concurrent Sub-Agents
+default_timeout_secs = 300            # Default timeout per Sub-Agent in seconds (5 minutes)
+default_max_iterations = 10           # Maximum iterations per Sub-Agent
+allow_full_tool_access = false        # Whether Sub-Agents can access all tools by default
+
+# Tool access control
+# - default_allowed_tools: Tools explicitly allowed for Sub-Agents (empty = allow all unless blocked)
+# - default_blocked_tools: Tools explicitly blocked for Sub-Agents
+# Note: blocked_tools takes precedence over allowed_tools
+default_allowed_tools = []            # Empty means no explicit allow list (use blocked list instead)
+default_blocked_tools = ["spawn_sub_agent"]  # Prevent infinite nesting by default
+
+# Failure handling policy
+# - "Abort": Stop execution on first failure
+# - "Continue": Continue with remaining Sub-Agents
+# - "Retry": Retry failed Sub-Agents (up to retry_attempts times)
+failure_policy = "Continue"
+retry_attempts = 2                    # Retry count when using "Retry" policy
+
+# Total token limit across all Sub-Agents (0 = unlimited)
+max_total_tokens = 0
+
+# Sub-Agent reflection (self-correction) configuration
+[subagent.reflection]
+enabled = false                       # Enable reflection for Sub-Agents
+confidence_threshold = 0.7            # Minimum confidence to accept result (0.0-1.0)
+max_retries = 2                       # Maximum reflection retries
+reflect_on_tool_error = true          # Trigger reflection when a tool call fails
+reflect_interval = 5                  # Reflect every N iterations (0 = disabled)
+reflect_on_completion = true          # Reflect when Sub-Agent completes
+
+
+# ============================================================================
 # SECTION 2: AI SERVICE CONFIGURATION
 # ============================================================================
 # This section contains configuration for AI services including chat and
