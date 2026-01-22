@@ -564,6 +564,144 @@ impl SubAgentManager {
         self.global_completion_tokens.store(0, Ordering::SeqCst);
     }
 
+    // ============================================================================
+    // Graceful Exit Methods
+    // ============================================================================
+
+    /// Cancel a Sub-Agent with a grace period for completion.
+    ///
+    /// This method provides graceful cancellation:
+    /// 1. Sends a cancellation signal to the Sub-Agent
+    /// 2. Waits for the grace period to allow completion
+    /// 3. If not completed, forcefully terminates and returns partial result
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The Sub-Agent ID to cancel
+    /// * `grace_period` - Time to wait for graceful completion
+    ///
+    /// # Returns
+    ///
+    /// Returns the result if the Sub-Agent completed within the grace period,
+    /// or a partial result if forcefully terminated.
+    pub async fn cancel_with_grace_period(
+        &self,
+        id: &SubAgentId,
+        grace_period: Duration,
+    ) -> ServerResult<Option<SubAgentResult>> {
+        info!(subagent_id = %id, grace_period_ms = grace_period.as_millis(), "Cancelling Sub-Agent with grace period");
+
+        // 1. Send cancellation signal
+        self.cancel(id).await?;
+
+        // 2. Wait for graceful completion during grace period
+        let deadline = Instant::now() + grace_period;
+        let poll_interval = Duration::from_millis(100);
+
+        loop {
+            // Check if the Sub-Agent has completed
+            if let Some(result) = self.get_result(id).await? {
+                info!(subagent_id = %id, "Sub-Agent completed gracefully during grace period");
+                return Ok(Some(result));
+            }
+
+            // Check state
+            let state = self.get_state(id).await?;
+            if state.is_terminal() {
+                // Already terminated, try to get result one more time
+                return self.get_result(id).await;
+            }
+
+            // Check deadline
+            if Instant::now() >= deadline {
+                break;
+            }
+
+            // Wait before next poll
+            tokio::time::sleep(poll_interval).await;
+        }
+
+        // 3. Grace period expired, force terminate
+        warn!(subagent_id = %id, "Grace period expired, forcing termination");
+        self.force_terminate(id).await?;
+
+        // 4. Return partial result if available
+        self.get_partial_result(id).await
+    }
+
+    /// Forcefully terminate a Sub-Agent.
+    ///
+    /// This method forcefully stops the Sub-Agent without waiting for completion.
+    /// It marks the Sub-Agent as failed with a termination message.
+    pub async fn force_terminate(&self, id: &SubAgentId) -> ServerResult<()> {
+        let mut agents = self.agents.write().await;
+        let agent = agents
+            .get_mut(id)
+            .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+
+        // If already terminal, nothing to do
+        if agent.state.is_terminal() {
+            return Ok(());
+        }
+
+        let was_running = agent.state == SubAgentState::Running;
+
+        // Mark as failed with termination reason
+        agent.fail("Forcefully terminated due to timeout".to_string());
+
+        if was_running {
+            self.running_count.fetch_sub(1, Ordering::SeqCst);
+        }
+
+        // Clean up
+        {
+            let mut start_times = self.start_times.write().await;
+            start_times.remove(id);
+        }
+
+        warn!(subagent_id = %id, "Sub-Agent forcefully terminated");
+        Ok(())
+    }
+
+    /// Get partial result from a Sub-Agent.
+    ///
+    /// This method attempts to retrieve any partial output that the Sub-Agent
+    /// may have produced before termination. Returns None if no partial result
+    /// is available.
+    pub async fn get_partial_result(
+        &self,
+        id: &SubAgentId,
+    ) -> ServerResult<Option<SubAgentResult>> {
+        let agents = self.agents.read().await;
+        let agent = agents
+            .get(id)
+            .ok_or_else(|| ServerError::SubAgentNotFound(id.to_string()))?;
+
+        // If there's already a result, return it
+        if let Some(result) = &agent.result {
+            return Ok(Some(result.clone()));
+        }
+
+        // If no result but agent has accumulated some output in context,
+        // create a partial result
+        if agent.state.is_terminal() {
+            // Create a partial result from available information
+            let partial_output = format!(
+                "[Partial result: Sub-Agent '{}' was terminated. Iterations completed: {}]",
+                agent.name, agent.metrics.total_iterations
+            );
+
+            Ok(Some(SubAgentResult {
+                output: partial_output,
+                artifacts: Vec::new(),
+                metrics: agent.metrics.clone(),
+                error: Some("Terminated before completion".to_string()),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// 异步启动 Sub-Agent 执行
     ///
     /// 此方法会在后台 spawn 一个任务来执行 Sub-Agent。

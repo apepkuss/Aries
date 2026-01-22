@@ -4706,6 +4706,412 @@ async fn execute_subtask_via_subagent(
     }
 }
 
+// ============================================================================
+// Retry and Graceful Exit
+// ============================================================================
+
+/// Result of a subtask execution with retry information.
+#[derive(Debug, Clone)]
+pub struct RetryableSubtaskResult {
+    /// The output of the subtask
+    pub output: String,
+    /// Number of retry attempts made
+    pub retry_count: u32,
+    /// Whether the execution was successful
+    pub success: bool,
+    /// Error message if failed
+    pub error: Option<String>,
+}
+
+/// Execute a subtask with retry support using the respawn strategy.
+///
+/// This function wraps `execute_subtask_via_subagent` with retry logic:
+/// - On failure, respawns a new Sub-Agent with failure context injected
+/// - Uses exponential backoff between retries
+/// - Respects the configured failure policy
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_subtask_with_retry(
+    state: &Arc<AppState>,
+    chat_server: &crate::server::TargetServerInfo,
+    headers: &HeaderMap,
+    subtask: &SubTask,
+    previous_results: &[(usize, String)],
+    available_tools: &[ToolDescription],
+    skills_summaries: Option<&[SkillSummary]>,
+    timeout: Duration,
+    cancel_token: &CancellationToken,
+    request_id: &str,
+    subtask_trace: &mut SubtaskTrace,
+    model: &str,
+    emitter: &dyn EventEmitter,
+    subagent_config: Option<&SubAgentSystemConfig>,
+) -> ServerResult<RetryableSubtaskResult> {
+    let config = subagent_config.ok_or_else(|| {
+        ServerError::Operation("Sub-Agent configuration required for retry execution".to_string())
+    })?;
+    let executor_config = &config.subtask_executor;
+
+    // Check if retry mode is "respawn"
+    let use_respawn = executor_config.is_respawn_retry();
+    let max_retries = executor_config.max_retries;
+    let retry_delay_ms = executor_config.retry_delay_ms;
+    let inject_failure_context = executor_config.inject_failure_context;
+
+    let mut last_error: Option<String> = None;
+    let mut retry_count = 0u32;
+
+    while retry_count <= max_retries {
+        // Check cancellation before each attempt
+        if cancel_token.is_cancelled() {
+            return Err(ServerError::Operation(
+                "Request cancelled during retry".to_string(),
+            ));
+        }
+
+        // Build failure context for retry attempts
+        let failure_context = if retry_count > 0 && inject_failure_context {
+            last_error.as_ref().map(|err| {
+                format!(
+                    "\n\n## Previous Attempt Failed (Attempt {}/{})\n\n**Error:** {}\n\n**Note:** Please try a different approach to avoid the same error.",
+                    retry_count,
+                    max_retries + 1,
+                    err
+                )
+            })
+        } else {
+            None
+        };
+
+        // Log retry attempt
+        if retry_count > 0 {
+            dual_info!(
+                "🔄 Retrying subtask {} via respawn (attempt {}/{}) - request_id: {}",
+                subtask.id,
+                retry_count + 1,
+                max_retries + 1,
+                request_id
+            );
+
+            // Emit status event for retry
+            emitter
+                .emit_status(
+                    ExecutionPhase::Executing,
+                    &format!(
+                        "Retrying subtask {} (attempt {}/{})",
+                        subtask.id,
+                        retry_count + 1,
+                        max_retries + 1
+                    ),
+                    Some(subtask.id),
+                    None,
+                    None,
+                )
+                .await;
+        }
+
+        // Execute with optional failure context
+        let result = execute_subtask_via_subagent_with_context(
+            state,
+            chat_server,
+            headers,
+            subtask,
+            previous_results,
+            available_tools,
+            skills_summaries,
+            timeout,
+            cancel_token,
+            request_id,
+            subtask_trace,
+            model,
+            emitter,
+            subagent_config,
+            failure_context.as_deref(),
+        )
+        .await;
+
+        match result {
+            Ok(output) => {
+                // Success
+                if retry_count > 0 {
+                    dual_info!(
+                        "✅ Subtask {} succeeded after {} retries - request_id: {}",
+                        subtask.id,
+                        retry_count,
+                        request_id
+                    );
+                }
+                return Ok(RetryableSubtaskResult {
+                    output,
+                    retry_count,
+                    success: true,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                last_error = Some(error_msg.clone());
+                retry_count += 1;
+
+                // Check if we should retry
+                if retry_count <= max_retries && use_respawn {
+                    // Calculate exponential backoff delay
+                    let delay = Duration::from_millis(retry_delay_ms * (1 << (retry_count - 1)));
+                    dual_debug!(
+                        "Waiting {:?} before retry attempt {} - request_id: {}",
+                        delay,
+                        retry_count + 1,
+                        request_id
+                    );
+                    tokio::time::sleep(delay).await;
+                } else {
+                    // No more retries
+                    break;
+                }
+            }
+        }
+    }
+
+    // All retries exhausted, handle based on failure policy
+    let error_msg = last_error.unwrap_or_else(|| "Unknown error".to_string());
+
+    dual_warn!(
+        "⚠️ Subtask {} failed after {} retries: {} - request_id: {}",
+        subtask.id,
+        retry_count.saturating_sub(1),
+        error_msg,
+        request_id
+    );
+
+    // Determine action based on failure policy
+    let failure_policy = &executor_config.failure_policy;
+
+    if failure_policy.should_skip_after_retry() {
+        // Skip: return a placeholder result
+        Ok(RetryableSubtaskResult {
+            output: format!(
+                "[Subtask {} skipped after {} retries due to error: {}]",
+                subtask.id,
+                retry_count.saturating_sub(1),
+                error_msg
+            ),
+            retry_count: retry_count.saturating_sub(1),
+            success: false,
+            error: Some(error_msg),
+        })
+    } else {
+        // Fail: propagate the error
+        Err(ServerError::Operation(format!(
+            "Subtask {} failed after {} retries: {}",
+            subtask.id,
+            retry_count.saturating_sub(1),
+            error_msg
+        )))
+    }
+}
+
+/// Execute a subtask via Sub-Agent with optional failure context injection.
+///
+/// This is a wrapper around `execute_subtask_via_subagent` that allows injecting
+/// additional context about previous failures for retry attempts.
+#[allow(clippy::too_many_arguments)]
+async fn execute_subtask_via_subagent_with_context(
+    state: &Arc<AppState>,
+    chat_server: &crate::server::TargetServerInfo,
+    headers: &HeaderMap,
+    subtask: &SubTask,
+    previous_results: &[(usize, String)],
+    available_tools: &[ToolDescription],
+    skills_summaries: Option<&[SkillSummary]>,
+    timeout: Duration,
+    cancel_token: &CancellationToken,
+    request_id: &str,
+    subtask_trace: &mut SubtaskTrace,
+    model: &str,
+    emitter: &dyn EventEmitter,
+    subagent_config: Option<&SubAgentSystemConfig>,
+    failure_context: Option<&str>,
+) -> ServerResult<String> {
+    let config = subagent_config.ok_or_else(|| {
+        ServerError::Operation(
+            "Sub-Agent configuration not found for subagent execution mode".to_string(),
+        )
+    })?;
+    let executor_config = &config.subtask_executor;
+    let context_config = &config.context;
+
+    dual_info!(
+        "🤖 Executing subtask {} via Sub-Agent{} - request_id: {}",
+        subtask.id,
+        if failure_context.is_some() {
+            " (with failure context)"
+        } else {
+            ""
+        },
+        request_id
+    );
+
+    // 1. Build context from previous results
+    let mut context =
+        build_subtask_context(subtask, previous_results, context_config, skills_summaries);
+
+    // 1.5. Inject failure context if provided
+    if let Some(failure_ctx) = failure_context {
+        context.push_str(failure_ctx);
+    }
+
+    // 2. Calculate effective timeout
+    let effective_timeout = if executor_config.inherit_remaining_time {
+        timeout.min(Duration::from_secs(executor_config.timeout_secs))
+    } else {
+        Duration::from_secs(executor_config.timeout_secs)
+    };
+
+    // 3. Filter tools based on inheritance and blacklist
+    let filtered_tools = if executor_config.inherit_tools {
+        available_tools
+            .iter()
+            .filter(|t| !executor_config.blocked_tools.contains(&t.name))
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        available_tools
+            .iter()
+            .filter(|t| subtask.required_tools.contains(&t.name))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    // 4. Create Sub-Agent manager with configuration
+    let subagent_manager = Arc::new(SubAgentManager::new(config.clone()));
+
+    // 5. Build spawn configuration
+    let spawn_config = SubAgentSpawnConfig {
+        timeout_secs: Some(effective_timeout.as_secs()),
+        max_iterations: Some(config.default_max_iterations),
+        tool_access: SubAgentToolAccess {
+            allowed_tools: None,
+            blocked_tools: executor_config.blocked_tools.iter().cloned().collect(),
+            inherit_from_parent: true,
+        },
+        wait_for_completion: true,
+    };
+
+    // 6. Build system prompt for the Sub-Agent
+    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
+
+    // 7. Spawn the Sub-Agent
+    let subagent_id = subagent_manager
+        .spawn(
+            format!("subtask-{}", subtask.id),
+            system_prompt.clone(),
+            context.clone(),
+            Some(spawn_config),
+            None,
+        )
+        .await?;
+
+    let subagent_name = format!("Subtask-{}", subtask.id);
+    let start_time = std::time::Instant::now();
+
+    // 8. Emit spawn event
+    emitter
+        .emit_subagent_spawned(
+            subagent_id.as_ref(),
+            &subagent_name,
+            &subtask.description,
+            None,
+            0,
+        )
+        .await;
+
+    // 9. Create executor and run
+    let executor = SubAgentExecutor::new(
+        state.clone(),
+        chat_server.clone(),
+        headers.clone(),
+        subagent_manager.clone(),
+        filtered_tools,
+        model.to_string(),
+    );
+
+    let subagent_context = SubAgentContext::new(
+        subagent_id.clone(),
+        subagent_name.clone(),
+        system_prompt.clone(),
+        context,
+    );
+
+    let result = executor
+        .execute(
+            &subagent_id,
+            subagent_context,
+            effective_timeout,
+            config.default_max_iterations,
+            cancel_token,
+            emitter,
+        )
+        .await;
+
+    // 10. Handle result
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(subagent_result) => {
+            let metrics = &subagent_result.metrics;
+            let iterations = metrics.total_iterations;
+
+            dual_debug!(
+                "Sub-Agent metrics: iterations={}, prompt_tokens={}, completion_tokens={} - request_id: {}",
+                metrics.total_iterations,
+                metrics.prompt_tokens,
+                metrics.completion_tokens,
+                request_id
+            );
+
+            emitter
+                .emit_subagent_completed(
+                    subagent_id.as_ref(),
+                    &subagent_name,
+                    &subagent_result.output,
+                    iterations,
+                    duration_ms,
+                )
+                .await;
+
+            // Update trace retry count
+            subtask_trace.retry_count = 0; // Will be updated by caller
+
+            dual_info!(
+                "✅ Subtask {} completed via Sub-Agent - request_id: {}",
+                subtask.id,
+                request_id
+            );
+
+            Ok(subagent_result.output)
+        }
+        Err(e) => {
+            dual_error!(
+                "❌ Subtask {} failed via Sub-Agent: {} - request_id: {}",
+                subtask.id,
+                e,
+                request_id
+            );
+
+            emitter
+                .emit_subagent_failed(
+                    subagent_id.as_ref(),
+                    &subagent_name,
+                    &e.to_string(),
+                    0,
+                    duration_ms,
+                )
+                .await;
+
+            Err(e)
+        }
+    }
+}
+
 /// Build context for a subtask from previous results.
 ///
 /// This function constructs the context string that will be passed to the Sub-Agent,
