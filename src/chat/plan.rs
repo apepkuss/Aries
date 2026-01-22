@@ -66,8 +66,9 @@ use crate::{
     },
     subagent::{
         self, CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL,
-        GetSubAgentResultArgs, SPAWN_SUB_AGENT_TOOL, SpawnSubAgentArgs, SubAgentManager,
-        SubAgentSystemConfig, all_subagent_tool_descriptions, is_subagent_tool,
+        GetSubAgentResultArgs, SPAWN_SUB_AGENT_TOOL, SpawnSubAgentArgs, SubAgentContext,
+        SubAgentExecutor, SubAgentManager, SubAgentSpawnConfig, SubAgentSystemConfig,
+        SubAgentToolAccess, all_subagent_tool_descriptions, is_subagent_tool,
         parse_subagent_tool_name,
     },
 };
@@ -162,6 +163,7 @@ pub(crate) async fn chat(
         tool_call_max_retries,
         tool_call_retry_delay_ms,
         reflection_config,
+        subagent_config,
     ) = {
         let config = state.config.read().await;
         (
@@ -174,8 +176,15 @@ pub(crate) async fn chat(
             config.server.tool_call_max_retries,
             config.server.tool_call_retry_delay_ms,
             config.reflection.clone().unwrap_or_default(),
+            config.subagent.clone(),
         )
     };
+
+    // Determine execution mode for subtasks
+    let use_subagent_execution = subagent_config
+        .as_ref()
+        .map(|c| c.is_subagent_mode())
+        .unwrap_or(false);
 
     // Initialize time budget for the entire plan
     let time_budget = TimeBudget::new(plan_timeout_secs);
@@ -568,27 +577,50 @@ pub(crate) async fn chat(
                     );
                 }
 
-                let result = execute_subtask_with_react(
-                    &state,
-                    &chat_server,
-                    &headers,
-                    subtask,
-                    &subtask_results,
-                    &available_tools,
-                    Some(&skills_summaries),
-                    conv_id.as_deref(),
-                    attempt_timeout,
-                    subtask_react_max_iterations,
-                    max_tools_per_iteration,
-                    tool_call_max_retries,
-                    tool_call_retry_delay_ms,
-                    &cancel_token,
-                    request_id,
-                    &mut subtask_trace,
-                    &model_name,
-                    emitter.as_ref(),
-                )
-                .await;
+                // Execute subtask using configured execution mode
+                let result = if use_subagent_execution {
+                    // Sub-Agent execution mode
+                    execute_subtask_via_subagent(
+                        &state,
+                        &chat_server,
+                        &headers,
+                        subtask,
+                        &subtask_results,
+                        &available_tools,
+                        Some(&skills_summaries),
+                        attempt_timeout,
+                        &cancel_token,
+                        request_id,
+                        &mut subtask_trace,
+                        &model_name,
+                        emitter.as_ref(),
+                        subagent_config.as_ref(),
+                    )
+                    .await
+                } else {
+                    // Direct execution mode (React loop)
+                    execute_subtask_with_react(
+                        &state,
+                        &chat_server,
+                        &headers,
+                        subtask,
+                        &subtask_results,
+                        &available_tools,
+                        Some(&skills_summaries),
+                        conv_id.as_deref(),
+                        attempt_timeout,
+                        subtask_react_max_iterations,
+                        max_tools_per_iteration,
+                        tool_call_max_retries,
+                        tool_call_retry_delay_ms,
+                        &cancel_token,
+                        request_id,
+                        &mut subtask_trace,
+                        &model_name,
+                        emitter.as_ref(),
+                    )
+                    .await
+                };
 
                 match result {
                     Ok(result_text) => {
@@ -1187,6 +1219,7 @@ async fn execute_chat_plan_realtime(
         max_tools_per_iteration,
         tool_call_max_retries,
         tool_call_retry_delay_ms,
+        subagent_config,
     ) = {
         let config = state.config.read().await;
         (
@@ -1197,8 +1230,15 @@ async fn execute_chat_plan_realtime(
             config.server.max_tools_per_iteration,
             config.server.tool_call_max_retries,
             config.server.tool_call_retry_delay_ms,
+            config.subagent.clone(),
         )
     };
+
+    // Determine execution mode for subtasks
+    let use_subagent_execution = subagent_config
+        .as_ref()
+        .map(|c| c.is_subagent_mode())
+        .unwrap_or(false);
 
     // Disable streaming for internal LLM calls
     request.stream = Some(false);
@@ -1594,27 +1634,50 @@ async fn execute_chat_plan_realtime(
                     );
                 }
 
-                let result = execute_subtask_with_react(
-                    &state,
-                    &chat_server,
-                    &headers,
-                    subtask,
-                    &subtask_results,
-                    &available_tools,
-                    Some(&skills_summaries),
-                    conv_id.as_deref(),
-                    attempt_timeout,
-                    subtask_react_max_iterations,
-                    max_tools_per_iteration,
-                    tool_call_max_retries,
-                    tool_call_retry_delay_ms,
-                    &cancel_token,
-                    &request_id,
-                    &mut subtask_trace,
-                    &model_name,
-                    emitter.as_ref(),
-                )
-                .await;
+                // Execute subtask using configured execution mode
+                let result = if use_subagent_execution {
+                    // Sub-Agent execution mode
+                    execute_subtask_via_subagent(
+                        &state,
+                        &chat_server,
+                        &headers,
+                        subtask,
+                        &subtask_results,
+                        &available_tools,
+                        Some(&skills_summaries),
+                        attempt_timeout,
+                        &cancel_token,
+                        &request_id,
+                        &mut subtask_trace,
+                        &model_name,
+                        emitter.as_ref(),
+                        subagent_config.as_ref(),
+                    )
+                    .await
+                } else {
+                    // Direct execution mode (React loop)
+                    execute_subtask_with_react(
+                        &state,
+                        &chat_server,
+                        &headers,
+                        subtask,
+                        &subtask_results,
+                        &available_tools,
+                        Some(&skills_summaries),
+                        conv_id.as_deref(),
+                        attempt_timeout,
+                        subtask_react_max_iterations,
+                        max_tools_per_iteration,
+                        tool_call_max_retries,
+                        tool_call_retry_delay_ms,
+                        &cancel_token,
+                        &request_id,
+                        &mut subtask_trace,
+                        &model_name,
+                        emitter.as_ref(),
+                    )
+                    .await
+                };
 
                 match result {
                     Ok(result_text) => {
@@ -4438,6 +4501,299 @@ fn apply_new_plan(
         current_plan.subtasks.len(),
         request_id
     );
+}
+
+// ============================================================================
+// Sub-Agent Execution Mode
+// ============================================================================
+
+/// Execute a subtask using a Sub-Agent.
+///
+/// This function creates a Sub-Agent to execute the subtask, with support for:
+/// - Context injection from previous subtask results
+/// - Tool inheritance with blacklist filtering
+/// - Timeout management with graceful exit
+/// - Progress tracking and event emission
+#[allow(clippy::too_many_arguments)]
+async fn execute_subtask_via_subagent(
+    state: &Arc<AppState>,
+    chat_server: &crate::server::TargetServerInfo,
+    headers: &HeaderMap,
+    subtask: &SubTask,
+    previous_results: &[(usize, String)],
+    available_tools: &[ToolDescription],
+    skills_summaries: Option<&[SkillSummary]>,
+    timeout: Duration,
+    cancel_token: &CancellationToken,
+    request_id: &str,
+    _subtask_trace: &mut SubtaskTrace,
+    model: &str,
+    emitter: &dyn EventEmitter,
+    subagent_config: Option<&SubAgentSystemConfig>,
+) -> ServerResult<String> {
+    let config = subagent_config.ok_or_else(|| {
+        ServerError::Operation(
+            "Sub-Agent configuration not found for subagent execution mode".to_string(),
+        )
+    })?;
+    let executor_config = &config.subtask_executor;
+    let context_config = &config.context;
+
+    dual_info!(
+        "🤖 Executing subtask {} via Sub-Agent - request_id: {}",
+        subtask.id,
+        request_id
+    );
+
+    // 1. Build context from previous results
+    let context =
+        build_subtask_context(subtask, previous_results, context_config, skills_summaries);
+
+    // 2. Calculate effective timeout
+    let effective_timeout = if executor_config.inherit_remaining_time {
+        timeout.min(Duration::from_secs(executor_config.timeout_secs))
+    } else {
+        Duration::from_secs(executor_config.timeout_secs)
+    };
+
+    // 3. Filter tools based on inheritance and blacklist
+    let filtered_tools = if executor_config.inherit_tools {
+        available_tools
+            .iter()
+            .filter(|t| !executor_config.blocked_tools.contains(&t.name))
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        // Only allow explicitly required tools
+        available_tools
+            .iter()
+            .filter(|t| subtask.required_tools.contains(&t.name))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    // 4. Create Sub-Agent manager with configuration
+    let subagent_manager = Arc::new(SubAgentManager::new(config.clone()));
+
+    // 5. Build spawn configuration
+    let spawn_config = SubAgentSpawnConfig {
+        timeout_secs: Some(effective_timeout.as_secs()),
+        max_iterations: Some(config.default_max_iterations),
+        tool_access: SubAgentToolAccess {
+            allowed_tools: None, // Inherit all
+            blocked_tools: executor_config.blocked_tools.iter().cloned().collect(),
+            inherit_from_parent: true,
+        },
+        wait_for_completion: true,
+    };
+
+    // 6. Build system prompt for the Sub-Agent
+    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
+
+    // 7. Spawn the Sub-Agent
+    let subagent_id = subagent_manager
+        .spawn(
+            format!("subtask-{}", subtask.id),
+            system_prompt.clone(),
+            context.clone(),
+            Some(spawn_config),
+            None, // No parent
+        )
+        .await?;
+
+    let subagent_name = format!("Subtask-{}", subtask.id);
+    let start_time = std::time::Instant::now();
+
+    // 8. Emit spawn event
+    emitter
+        .emit_subagent_spawned(
+            subagent_id.as_ref(),
+            &subagent_name,
+            &subtask.description,
+            None, // No parent
+            0,    // Depth 0
+        )
+        .await;
+
+    // 9. Create executor and run
+    let executor = SubAgentExecutor::new(
+        state.clone(),
+        chat_server.clone(),
+        headers.clone(),
+        subagent_manager.clone(),
+        filtered_tools,
+        model.to_string(),
+    );
+
+    let subagent_context = SubAgentContext::new(
+        subagent_id.clone(),
+        subagent_name.clone(),
+        system_prompt.clone(),
+        context,
+    );
+
+    let result = executor
+        .execute(
+            &subagent_id,
+            subagent_context,
+            effective_timeout,
+            config.default_max_iterations,
+            cancel_token,
+            emitter,
+        )
+        .await;
+
+    // 10. Handle result
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(subagent_result) => {
+            // Update trace metrics
+            let metrics = &subagent_result.metrics;
+            let iterations = metrics.total_iterations;
+
+            // Note: SubtaskTrace doesn't have direct fields for these metrics.
+            // The metrics are recorded in react_iterations for React mode.
+            // For Sub-Agent mode, we log them but don't have a direct mapping yet.
+            dual_debug!(
+                "Sub-Agent metrics: iterations={}, prompt_tokens={}, completion_tokens={} - request_id: {}",
+                metrics.total_iterations,
+                metrics.prompt_tokens,
+                metrics.completion_tokens,
+                request_id
+            );
+
+            // Emit completion event
+            emitter
+                .emit_subagent_completed(
+                    subagent_id.as_ref(),
+                    &subagent_name,
+                    &subagent_result.output,
+                    iterations,
+                    duration_ms,
+                )
+                .await;
+
+            dual_info!(
+                "✅ Subtask {} completed via Sub-Agent - request_id: {}",
+                subtask.id,
+                request_id
+            );
+
+            Ok(subagent_result.output)
+        }
+        Err(e) => {
+            dual_error!(
+                "❌ Subtask {} failed via Sub-Agent: {} - request_id: {}",
+                subtask.id,
+                e,
+                request_id
+            );
+
+            // Emit failure event
+            emitter
+                .emit_subagent_failed(
+                    subagent_id.as_ref(),
+                    &subagent_name,
+                    &e.to_string(),
+                    0, // Unknown iterations on failure
+                    duration_ms,
+                )
+                .await;
+
+            Err(e)
+        }
+    }
+}
+
+/// Build context for a subtask from previous results.
+///
+/// This function constructs the context string that will be passed to the Sub-Agent,
+/// including results from dependent subtasks and the current task description.
+fn build_subtask_context(
+    subtask: &SubTask,
+    previous_results: &[(usize, String)],
+    context_config: &crate::subagent::SubAgentContextConfig,
+    skills_summaries: Option<&[SkillSummary]>,
+) -> String {
+    let mut context = String::new();
+
+    // Inject previous results if configured
+    if context_config.is_inject_mode() && !previous_results.is_empty() {
+        context.push_str("## Previous Subtask Results\n\n");
+
+        for (id, result) in previous_results {
+            // Check if this subtask depends on the result
+            if subtask.dependencies.contains(id) {
+                let result_text = if context_config.use_summary
+                    && result.len() > context_config.max_inject_tokens * 4
+                {
+                    // Truncate long results (TODO: implement proper summarization)
+                    let truncated =
+                        &result[..result.len().min(context_config.max_inject_tokens * 4)];
+                    format!("{truncated}\n\n[Result truncated due to length]")
+                } else {
+                    result.clone()
+                };
+                context.push_str(&format!("### Subtask {} Result\n{}\n\n", id, result_text));
+            }
+        }
+    }
+
+    // Add current task description
+    context.push_str("## Your Task\n\n");
+    context.push_str(&subtask.description);
+    context.push('\n');
+
+    // Add recommended skill hint if available
+    if let Some(skill) = &subtask.recommended_skill {
+        context.push_str(&format!("\n**Recommended Skill**: {}\n", skill));
+
+        // Add skill description if available
+        if let Some(summaries) = skills_summaries
+            && let Some(summary) = summaries.iter().find(|s| &s.name == skill)
+        {
+            context.push_str(&format!("*{}*\n", summary.description));
+        }
+    }
+
+    // Add required tools hint
+    if !subtask.required_tools.is_empty() {
+        context.push_str(&format!(
+            "\n**Required Tools**: {}\n",
+            subtask.required_tools.join(", ")
+        ));
+    }
+
+    context
+}
+
+/// Build system prompt for a Sub-Agent executing a subtask.
+fn build_subagent_system_prompt(
+    subtask: &SubTask,
+    skills_summaries: Option<&[SkillSummary]>,
+) -> String {
+    let mut prompt = String::new();
+
+    prompt
+        .push_str("You are a specialized Sub-Agent tasked with completing a specific subtask.\n\n");
+
+    prompt.push_str("## Guidelines\n\n");
+    prompt.push_str("1. Focus on completing the assigned task efficiently\n");
+    prompt.push_str("2. Use the available tools when necessary\n");
+    prompt.push_str("3. Provide a clear, concise result when done\n");
+    prompt.push_str("4. If you encounter errors, try alternative approaches\n\n");
+
+    // Add skill context if recommended
+    if let Some(skill) = &subtask.recommended_skill
+        && let Some(summaries) = skills_summaries
+        && let Some(summary) = summaries.iter().find(|s| &s.name == skill)
+    {
+        prompt.push_str(&format!("## Recommended Skill: {}\n", skill));
+        prompt.push_str(&format!("{}\n\n", summary.description));
+    }
+
+    prompt
 }
 
 // ============================================================================

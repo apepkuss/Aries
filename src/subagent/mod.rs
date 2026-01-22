@@ -61,8 +61,9 @@ pub use channel::{
 };
 // 公开导出
 pub use config::{
-    ConfigValidationError, FailurePolicy, SubAgentReflectionConfig, SubAgentSpawnConfig,
-    SubAgentSystemConfig, SubAgentToolAccess,
+    ConfigValidationError, FailurePolicy, SubAgentContextConfig, SubAgentRateLimitConfig,
+    SubAgentReflectionConfig, SubAgentSpawnConfig, SubAgentSystemConfig, SubAgentToolAccess,
+    SubtaskExecutorConfig,
 };
 pub use context::SubAgentContext;
 pub use executor::{
