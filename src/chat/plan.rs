@@ -3590,6 +3590,18 @@ pub(crate) async fn build_context_for_react(
 <thought>I need to read the configuration file as structured data</thought>
 <action>{{"name": "internal__skill_load_asset", "arguments": {{"asset_name": "config.json", "parse_as": "json"}}}}</action>
 
+### Example 5: Spawn a Sub-Agent for Parallel Task Execution
+<thought>I need to perform multiple independent searches in parallel. I'll spawn Sub-Agents for each search.</thought>
+<action>{{"name": "internal__spawn_sub_agent", "arguments": {{"name": "WebSearcher", "role": "You are a research assistant specialized in web searching.", "task": "Search for the latest news about AI developments in 2024", "wait_for_completion": false}}}}</action>
+
+### Example 6: Get Sub-Agent Result
+<thought>I need to check the result from the Sub-Agent I spawned earlier.</thought>
+<action>{{"name": "internal__get_sub_agent_result", "arguments": {{"subagent_id": "subagent_abc123", "wait": true, "timeout_secs": 60}}}}</action>
+
+### Example 7: Cancel a Sub-Agent
+<thought>The Sub-Agent is taking too long, I need to cancel it.</thought>
+<action>{{"name": "internal__cancel_sub_agent", "arguments": {{"subagent_id": "subagent_abc123", "reason": "Task no longer needed"}}}}</action>
+
 **Important**: When using internal tools:
 - `internal__skill_run_script`:
   - `script_name`: Just the filename (e.g., "convert.py"), not the full path
@@ -3598,6 +3610,26 @@ pub(crate) async fn build_context_for_react(
   - `asset_name`: Just the filename in the assets/ directory
   - `variables`: Object with key-value pairs to replace {{key}} in the template
   - `parse_as`: Optional format ("json", "yaml", "markdown") for structured parsing
+- `internal__spawn_sub_agent` (for parallel task execution):
+  - `name`: A descriptive name for the Sub-Agent (e.g., "DataAnalyst", "WebSearcher")
+  - `role`: System prompt describing the Sub-Agent's expertise and behavior
+  - `task`: The specific task for the Sub-Agent to complete
+  - `wait_for_completion`: Set to `true` to wait for result, `false` for async execution
+  - `allowed_tools`: Optional list of tools the Sub-Agent can use
+  - `timeout_secs`: Optional timeout in seconds
+- `internal__get_sub_agent_result`:
+  - `subagent_id`: The ID returned from spawn_sub_agent
+  - `wait`: Set to `true` to wait for completion if still running
+  - `timeout_secs`: Optional wait timeout in seconds
+- `internal__cancel_sub_agent`:
+  - `subagent_id`: The ID of the Sub-Agent to cancel
+  - `reason`: Optional reason for cancellation
+
+**When to use Sub-Agents**:
+- Use Sub-Agents when you need to perform multiple independent tasks in parallel
+- Examples: searching multiple sources simultaneously, analyzing different data sets
+- Spawn multiple Sub-Agents with `wait_for_completion: false`, then collect results with `get_sub_agent_result`
+- Each Sub-Agent runs independently with its own context and tools
 
 After receiving the observation, provide your final answer:
 <thought>I received the result</thought>
@@ -3636,10 +3668,24 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
   <action>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</action>
 - When done, use <final_answer></final_answer> tags for your final response
 
-## Tool Call Example
-When you need to call a tool, output like this:
+## Tool Call Examples
+
+### Example 1: MCP Tool Call
 <thought>I need to search for information</thought>
 <action>{{"name": "mcp__search__query", "arguments": {{"query": "example search"}}}}</action>
+
+### Example 2: Spawn a Sub-Agent for Parallel Task Execution
+<thought>I need to perform multiple independent searches in parallel. I'll spawn Sub-Agents for each search.</thought>
+<action>{{"name": "internal__spawn_sub_agent", "arguments": {{"name": "WebSearcher", "role": "You are a research assistant specialized in web searching.", "task": "Search for the latest news about AI developments", "wait_for_completion": false}}}}</action>
+
+### Example 3: Get Sub-Agent Result
+<thought>I need to check the result from the Sub-Agent I spawned earlier.</thought>
+<action>{{"name": "internal__get_sub_agent_result", "arguments": {{"subagent_id": "subagent_abc123", "wait": true}}}}</action>
+
+**When to use Sub-Agents**:
+- Use Sub-Agents when you need to perform multiple independent tasks in parallel
+- Examples: searching multiple sources simultaneously, analyzing different data sets
+- Spawn multiple Sub-Agents with `wait_for_completion: false`, then collect results with `get_sub_agent_result`
 
 Remember: Focus only on this specific subtask. Use the context from previous results if needed."#,
             subtask.description, skills_section, tools_desc
