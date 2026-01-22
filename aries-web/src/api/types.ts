@@ -392,6 +392,30 @@ export interface UISubtask {
   id: number;
   description: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+
+  // Sub-Agent association (for subagent execution mode)
+  subAgentId?: string;
+
+  // Execution progress details
+  progress?: {
+    iteration: number;
+    maxIterations: number;
+    lastToolName?: string;
+    message?: string;
+  };
+
+  // Result when completed
+  result?: {
+    output: string;
+    metrics?: SubAgentMetrics;
+  };
+
+  // Error information
+  error?: string;
+  retryCount?: number;
+
+  // UI state
+  expanded?: boolean;
 }
 
 export interface UIToolCall {

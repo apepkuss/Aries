@@ -72,6 +72,28 @@ const initialExecutionStatus: ExecutionStatus = {
   message: '',
 };
 
+// Helper function to extract subtask ID from Sub-Agent name
+// Format: "subtask-1", "Subtask-1", etc.
+function extractSubtaskIdFromName(name: string): number | null {
+  const match = name.match(/^[Ss]ubtask-(\d+)$/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+// Helper function to update a subtask in a task plan
+function updateSubtaskInPlan(
+  taskPlan: UITaskPlan | undefined,
+  subtaskId: number,
+  update: Partial<UISubtask>
+): UITaskPlan | undefined {
+  if (!taskPlan) return undefined;
+  return {
+    ...taskPlan,
+    subtasks: taskPlan.subtasks.map((s) =>
+      s.id === subtaskId ? { ...s, ...update } : s
+    ),
+  };
+}
+
 export const useChatStore = create<ChatState>((set, get) => ({
   // Initial state
   messages: [],
@@ -322,6 +344,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 childIds: [],
                 createdAt: Date.now(),
               };
+
+              // Check if this Sub-Agent is associated with a Subtask
+              const subtaskId = extractSubtaskIdFromName(name);
+
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 newSubAgents.set(subagent_id, newSubAgent);
@@ -333,7 +359,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     childIds: [...parent.childIds, subagent_id],
                   });
                 }
-                return { subAgents: newSubAgents };
+
+                // If associated with a Subtask, update the task plan
+                let updatedMessages = state.messages;
+                if (subtaskId !== null && taskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                    subAgentId: subagent_id,
+                  });
+                  if (updatedTaskPlan) {
+                    taskPlan = updatedTaskPlan;
+                    updatedMessages = state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: updatedTaskPlan }
+                        : msg
+                    );
+                  }
+                }
+
+                return { subAgents: newSubAgents, messages: updatedMessages };
               });
             }
             break;
@@ -364,6 +407,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
+
+                // Find associated subtask ID from the agent name
+                const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
+
                 if (agent) {
                   newSubAgents.set(subagent_id, {
                     ...agent,
@@ -374,7 +421,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     },
                   });
                 }
-                return { subAgents: newSubAgents };
+
+                // Update task plan if associated with a subtask
+                let updatedMessages = state.messages;
+                if (subtaskId !== null && taskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                    progress: {
+                      iteration,
+                      maxIterations: 20, // TODO: get from config
+                      lastToolName: tool_name,
+                      message,
+                    },
+                  });
+                  if (updatedTaskPlan) {
+                    taskPlan = updatedTaskPlan;
+                    updatedMessages = state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: updatedTaskPlan }
+                        : msg
+                    );
+                  }
+                }
+
+                return { subAgents: newSubAgents, messages: updatedMessages };
               });
             }
             break;
@@ -386,6 +455,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
+
+                // Find associated subtask ID from the agent name
+                const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
+
                 if (agent) {
                   newSubAgents.set(subagent_id, {
                     ...agent,
@@ -394,7 +467,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     result: { output, metrics },
                   });
                 }
-                return { subAgents: newSubAgents };
+
+                // Update task plan if associated with a subtask
+                let updatedMessages = state.messages;
+                if (subtaskId !== null && taskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                    status: 'completed',
+                    result: { output, metrics },
+                    progress: undefined, // Clear progress when completed
+                  });
+                  if (updatedTaskPlan) {
+                    taskPlan = updatedTaskPlan;
+                    updatedMessages = state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: updatedTaskPlan }
+                        : msg
+                    );
+                  }
+                }
+
+                return { subAgents: newSubAgents, messages: updatedMessages };
               });
             }
             break;
@@ -406,6 +498,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
+
+                // Find associated subtask ID from the agent name
+                const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
+
                 if (agent) {
                   newSubAgents.set(subagent_id, {
                     ...agent,
@@ -415,7 +511,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     result: metrics ? { output: '', metrics } : undefined,
                   });
                 }
-                return { subAgents: newSubAgents };
+
+                // Update task plan if associated with a subtask
+                let updatedMessages = state.messages;
+                if (subtaskId !== null && taskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                    status: 'failed',
+                    error: errorMsg,
+                    result: metrics ? { output: '', metrics } : undefined,
+                    progress: undefined, // Clear progress when failed
+                  });
+                  if (updatedTaskPlan) {
+                    taskPlan = updatedTaskPlan;
+                    updatedMessages = state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: updatedTaskPlan }
+                        : msg
+                    );
+                  }
+                }
+
+                return { subAgents: newSubAgents, messages: updatedMessages };
               });
             }
             break;

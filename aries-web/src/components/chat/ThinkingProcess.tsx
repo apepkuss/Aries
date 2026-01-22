@@ -15,7 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UIToolCall, ExecutionEvent, UITaskPlan, UISubAgent } from '@/api/types';
+import type { UIToolCall, ExecutionEvent, UITaskPlan, UISubAgent, UISubtask, SubAgentMetrics } from '@/api/types';
 import type { ExecutionStatus } from '@/stores';
 import { SubAgentList } from './SubAgentCard';
 
@@ -336,44 +336,206 @@ function ThoughtItem({ content }: ThoughtItemProps) {
 }
 
 interface SubtaskItemProps {
-  subtask: {
-    id: number;
-    description: string;
-    status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
-  };
+  subtask: UISubtask;
+  /** Callback to toggle expanded state */
+  onToggleExpand?: (id: number) => void;
 }
 
-function SubtaskItem({ subtask }: SubtaskItemProps) {
+function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
+  // Local expanded state if no callback provided
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isExpanded = subtask.expanded ?? localExpanded;
+
+  // Determine if the subtask is expandable (has progress, error, or result)
+  const hasDetails = !!(subtask.progress || subtask.error || subtask.result || subtask.subAgentId);
+  const isExpandable = hasDetails && (subtask.status === 'in_progress' || subtask.status === 'failed' || subtask.status === 'completed');
+
+  // Auto-expand when in_progress or failed
+  useEffect(() => {
+    if ((subtask.status === 'in_progress' || subtask.status === 'failed') && hasDetails) {
+      if (onToggleExpand) {
+        onToggleExpand(subtask.id);
+      } else {
+        setLocalExpanded(true);
+      }
+    }
+  }, [subtask.status, hasDetails, subtask.id, onToggleExpand]);
+
+  const handleToggle = () => {
+    if (isExpandable) {
+      if (onToggleExpand) {
+        onToggleExpand(subtask.id);
+      } else {
+        setLocalExpanded(!localExpanded);
+      }
+    }
+  };
+
   return (
-    <div className="flex items-start gap-2 px-2 py-1 text-sm">
-      {/* Status indicator */}
-      {subtask.status === 'pending' && (
-        <Circle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-      )}
-      {subtask.status === 'in_progress' && (
-        <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0 mt-0.5" />
-      )}
-      {subtask.status === 'completed' && (
-        <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
-      )}
-      {subtask.status === 'failed' && (
-        <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-      )}
-      {subtask.status === 'skipped' && (
-        <Circle className="h-4 w-4 text-muted-foreground/50 shrink-0 mt-0.5" />
-      )}
-      {/* Description */}
-      <span
+    <div className="text-sm">
+      {/* Header row - always visible */}
+      <div
         className={cn(
-          'text-xs',
-          subtask.status === 'completed' && 'text-muted-foreground line-through',
-          subtask.status === 'skipped' && 'text-muted-foreground/50 line-through',
-          subtask.status === 'failed' && 'text-destructive',
-          subtask.status === 'in_progress' && 'text-foreground font-medium',
-          subtask.status === 'pending' && 'text-muted-foreground'
+          'flex items-start gap-2 px-2 py-1',
+          isExpandable && 'cursor-pointer hover:bg-muted/50 rounded-md transition-colors'
         )}
+        onClick={handleToggle}
       >
-        {subtask.description}
+        {/* Expand/collapse indicator for expandable items */}
+        {isExpandable ? (
+          isExpanded ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          )
+        ) : (
+          /* Status indicator for non-expandable items */
+          <>
+            {subtask.status === 'pending' && (
+              <Circle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'in_progress' && (
+              <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'completed' && (
+              <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'failed' && (
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'skipped' && (
+              <Circle className="h-4 w-4 text-muted-foreground/50 shrink-0 mt-0.5" />
+            )}
+          </>
+        )}
+
+        {/* Status icon for expandable items */}
+        {isExpandable && (
+          <>
+            {subtask.status === 'pending' && (
+              <Circle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'in_progress' && (
+              <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'completed' && (
+              <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'failed' && (
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+            )}
+            {subtask.status === 'skipped' && (
+              <Circle className="h-4 w-4 text-muted-foreground/50 shrink-0 mt-0.5" />
+            )}
+          </>
+        )}
+
+        {/* Description */}
+        <span
+          className={cn(
+            'text-xs flex-1',
+            subtask.status === 'completed' && 'text-muted-foreground line-through',
+            subtask.status === 'skipped' && 'text-muted-foreground/50 line-through',
+            subtask.status === 'failed' && 'text-destructive',
+            subtask.status === 'in_progress' && 'text-foreground font-medium',
+            subtask.status === 'pending' && 'text-muted-foreground'
+          )}
+        >
+          {subtask.description}
+        </span>
+
+        {/* Progress indicator */}
+        {subtask.progress && subtask.status === 'in_progress' && (
+          <span className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+            {subtask.progress.iteration}/{subtask.progress.maxIterations}
+          </span>
+        )}
+
+        {/* Retry count indicator */}
+        {subtask.retryCount !== undefined && subtask.retryCount > 0 && (
+          <span className="text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">
+            重试 {subtask.retryCount}
+          </span>
+        )}
+      </div>
+
+      {/* Expanded details */}
+      {isExpanded && (
+        <div className="ml-8 mt-1 space-y-2 pb-2">
+          {/* Progress details */}
+          {subtask.progress && (
+            <div className="text-xs bg-blue-500/5 border border-blue-500/20 rounded-lg p-2">
+              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                <Cog className="h-3 w-3 animate-spin" />
+                <span>
+                  迭代 {subtask.progress.iteration}/{subtask.progress.maxIterations}
+                </span>
+              </div>
+              {subtask.progress.lastToolName && (
+                <div className="mt-1 text-muted-foreground flex items-center gap-1.5">
+                  <Cog className="h-3 w-3" />
+                  <span>工具: {subtask.progress.lastToolName}</span>
+                </div>
+              )}
+              {subtask.progress.message && (
+                <div className="mt-1 text-muted-foreground">
+                  {subtask.progress.message}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Error message */}
+          {subtask.error && (
+            <div className="text-xs bg-destructive/5 border border-destructive/20 rounded-lg p-2 text-destructive">
+              <div className="flex items-center gap-1.5 font-medium mb-1">
+                <AlertCircle className="h-3 w-3" />
+                <span>错误</span>
+              </div>
+              <div>{subtask.error}</div>
+            </div>
+          )}
+
+          {/* Result summary */}
+          {subtask.result && (
+            <div className="text-xs bg-green-500/5 border border-green-500/20 rounded-lg p-2">
+              <div className="flex items-center gap-1.5 text-green-600 dark:text-green-400 font-medium mb-1">
+                <CheckCircle2 className="h-3 w-3" />
+                <span>完成</span>
+              </div>
+              {subtask.result.metrics && (
+                <SubAgentMetricsSummary metrics={subtask.result.metrics} />
+              )}
+              {subtask.result.output && (
+                <div className="mt-1 text-muted-foreground max-h-20 overflow-y-auto">
+                  {subtask.result.output.length > 200
+                    ? subtask.result.output.slice(0, 200) + '...'
+                    : subtask.result.output}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact metrics summary display */
+function SubAgentMetricsSummary({ metrics }: { metrics: SubAgentMetrics }) {
+  return (
+    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+      <span className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
+        <RefreshCw className="h-2.5 w-2.5" />
+        {metrics.total_iterations} 迭代
+      </span>
+      <span className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
+        <Cog className="h-2.5 w-2.5" />
+        {metrics.tool_calls} 工具
+      </span>
+      <span className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
+        <Clock className="h-2.5 w-2.5" />
+        {(metrics.duration_ms / 1000).toFixed(1)}s
       </span>
     </div>
   );
