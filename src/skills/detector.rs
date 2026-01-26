@@ -135,7 +135,7 @@ impl SkillDetector {
             .collect();
 
         // Sort by priority descending (higher priority first)
-        skills_with_priority.sort_by(|a, b| b.1.cmp(&a.1));
+        skills_with_priority.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         skills_with_priority
             .into_iter()

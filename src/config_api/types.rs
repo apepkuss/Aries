@@ -478,6 +478,7 @@ mod tests {
             mcp: None,
             skill: None,
             artifacts: None,
+            subagent: None,
             updatable_fields: vec!["server.max_tools_per_iteration".to_string()],
         };
 

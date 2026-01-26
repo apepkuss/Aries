@@ -382,6 +382,7 @@ mod tests {
             embedding: None,
             memory: None,
             rag: Some(RagConfigUpdate { enable: Some(true) }),
+            subagent: None,
         };
 
         let result = validate_config_update(&request);
