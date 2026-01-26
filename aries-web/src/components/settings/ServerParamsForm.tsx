@@ -5,11 +5,18 @@ import { useConfigStore } from '@/stores';
 export function ServerParamsForm() {
   const { config, pendingChanges, setPendingChange } = useConfigStore();
 
-  // Helper to get current value
+  // Helper to get current server value
   const getValue = (field: keyof NonNullable<typeof config>['server']) => {
     const pending = pendingChanges.server?.[field as keyof typeof pendingChanges.server];
     if (pending !== undefined) return pending;
     return config?.server?.[field] ?? '';
+  };
+
+  // Helper to get current execution mode
+  const getExecutionMode = (): 'direct' | 'subagent' => {
+    const pending = pendingChanges.subagent?.execution_mode;
+    if (pending !== undefined) return pending;
+    return config?.subagent?.execution_mode ?? 'direct';
   };
 
   const fields = [
@@ -72,29 +79,58 @@ export function ServerParamsForm() {
   ] as const;
 
   return (
-    <div className="space-y-4">
-      <h4 className="font-medium">Server Parameters</h4>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        {fields.map((field) => (
-          <div key={field.id} className="space-y-2">
-            <Label htmlFor={field.id}>{field.label}</Label>
-            <Input
-              id={field.id}
-              type="number"
-              min={field.min}
-              max={field.max}
-              value={getValue(field.id)}
+    <div className="space-y-6">
+      {/* Execution Mode Selection */}
+      {config?.subagent && (
+        <div className="space-y-4">
+          <h4 className="font-medium">Execution Mode</h4>
+          <div className="space-y-2">
+            <Label htmlFor="execution_mode">Task Execution Mode</Label>
+            <select
+              id="execution_mode"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              value={getExecutionMode()}
               onChange={(e) => {
-                const value = parseInt(e.target.value, 10);
-                if (!isNaN(value)) {
-                  setPendingChange('server', field.id, value);
-                }
+                setPendingChange('subagent', 'execution_mode', e.target.value as 'direct' | 'subagent');
               }}
-            />
-            <p className="text-xs text-muted-foreground">{field.description}</p>
+            >
+              <option value="direct">Plan Mode (Direct Execution)</option>
+              <option value="subagent">Sub-Agent Mode (Parallel Execution)</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {getExecutionMode() === 'direct'
+                ? 'Tasks are executed sequentially in a single ReAct loop'
+                : 'Tasks are delegated to Sub-Agents for parallel autonomous execution'}
+            </p>
           </div>
-        ))}
+        </div>
+      )}
+
+      {/* Server Parameters */}
+      <div className="space-y-4">
+        <h4 className="font-medium">Server Parameters</h4>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {fields.map((field) => (
+            <div key={field.id} className="space-y-2">
+              <Label htmlFor={field.id}>{field.label}</Label>
+              <Input
+                id={field.id}
+                type="number"
+                min={field.min}
+                max={field.max}
+                value={getValue(field.id)}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value, 10);
+                  if (!isNaN(value)) {
+                    setPendingChange('server', field.id, value);
+                  }
+                }}
+              />
+              <p className="text-xs text-muted-foreground">{field.description}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

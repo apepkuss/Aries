@@ -109,6 +109,7 @@ export interface SanitizedConfig {
   mcp?: SanitizedMcpConfig;
   skill?: SanitizedSkillConfig;
   artifacts?: SanitizedArtifactsConfig;
+  subagent?: SanitizedSubagentConfig;
   updatable_fields: string[];
 }
 
@@ -188,6 +189,14 @@ export interface SanitizedArtifactsConfig {
   enable_cleanup: boolean;
 }
 
+export interface SanitizedSubagentConfig {
+  enabled: boolean;
+  execution_mode: 'direct' | 'subagent';
+  max_concurrent: number;
+  default_timeout_secs: number;
+  default_max_iterations: number;
+}
+
 // Config Update
 export interface ConfigUpdateRequest {
   server?: ServerConfigUpdate;
@@ -195,6 +204,7 @@ export interface ConfigUpdateRequest {
   embedding?: EmbeddingConfigUpdate;
   memory?: MemoryConfigUpdate;
   rag?: RagConfigUpdate;
+  subagent?: SubagentConfigUpdate;
 }
 
 export interface ServerConfigUpdate {
@@ -228,6 +238,10 @@ export interface MemoryConfigUpdate {
 
 export interface RagConfigUpdate {
   enable?: boolean;
+}
+
+export interface SubagentConfigUpdate {
+  execution_mode?: 'direct' | 'subagent';
 }
 
 export interface ConfigUpdateResponse {
