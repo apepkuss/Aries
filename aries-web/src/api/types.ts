@@ -404,6 +404,9 @@ export interface UISubtask {
     message?: string;
   };
 
+  // Tool calls made during execution
+  toolCalls?: SubAgentToolCall[];
+
   // Result when completed
   result?: {
     output: string;
@@ -416,6 +419,14 @@ export interface UISubtask {
 
   // UI state
   expanded?: boolean;
+}
+
+/** Tool call made by a Sub-Agent */
+export interface SubAgentToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  iteration?: number;
 }
 
 export interface UIToolCall {
@@ -527,6 +538,7 @@ export type EnhancedStreamEvent =
   | { type: 'subagent_spawned'; data: SubAgentSpawnedEvent }
   | { type: 'subagent_started'; data: SubAgentStartedEvent }
   | { type: 'subagent_progress'; data: SubAgentProgressEvent }
+  | { type: 'subagent_tool_call'; data: SubAgentToolCallEvent }
   | { type: 'subagent_completed'; data: SubAgentCompletedEvent }
   | { type: 'subagent_failed'; data: SubAgentFailedEvent };
 
@@ -560,6 +572,15 @@ export interface SubAgentProgressEvent extends SubAgentEventBase {
   iteration: number;
   message?: string;
   tool_name?: string;
+}
+
+/** Event emitted when a Sub-Agent makes a tool call */
+export interface SubAgentToolCallEvent {
+  subagent_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  args: Record<string, unknown>;
+  iteration?: number;
 }
 
 /** Event emitted when a Sub-Agent completes successfully */

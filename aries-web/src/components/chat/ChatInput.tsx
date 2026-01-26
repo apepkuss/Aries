@@ -14,6 +14,17 @@ export function ChatInput() {
     textareaRef.current?.focus();
   }, []);
 
+  // Re-focus when streaming ends (answer received)
+  useEffect(() => {
+    if (!isStreaming) {
+      // Small delay to ensure UI updates are complete
+      const timer = setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming]);
+
   // Auto-resize textarea
   useEffect(() => {
     const textarea = textareaRef.current;

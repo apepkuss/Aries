@@ -15,6 +15,7 @@ import type {
   SubAgentSpawnedEvent,
   SubAgentStartedEvent,
   SubAgentProgressEvent,
+  SubAgentToolCallEvent,
   SubAgentCompletedEvent,
   SubAgentFailedEvent,
 } from './types';
@@ -258,6 +259,8 @@ function parseEnhancedEvent(
       return { type: 'subagent_started', data: data as SubAgentStartedEvent };
     case 'subagent_progress':
       return { type: 'subagent_progress', data: data as SubAgentProgressEvent };
+    case 'subagent_tool_call':
+      return { type: 'subagent_tool_call', data: data as SubAgentToolCallEvent };
     case 'subagent_completed':
       return { type: 'subagent_completed', data: data as SubAgentCompletedEvent };
     case 'subagent_failed':

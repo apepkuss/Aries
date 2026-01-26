@@ -251,7 +251,7 @@ export function MessageItem({ message, executionStatus, isStreaming }: MessageIt
               {message.isStreaming && !message.content && (
                 <div className="flex items-center gap-2.5 text-muted-foreground py-1">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span className="text-sm font-medium animate-pulse">正在从知识库中检索并思考...</span>
+                  <span className="text-sm font-medium animate-pulse">正在思考中...</span>
                 </div>
               )}
             </div>

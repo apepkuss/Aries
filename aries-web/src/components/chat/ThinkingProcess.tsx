@@ -15,7 +15,7 @@ import {
   Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UIToolCall, ExecutionEvent, UITaskPlan, UISubAgent, UISubtask, SubAgentMetrics } from '@/api/types';
+import type { UIToolCall, ExecutionEvent, UITaskPlan, UISubAgent, UISubtask, SubAgentMetrics, SubAgentToolCall } from '@/api/types';
 import type { ExecutionStatus } from '@/stores';
 import { SubAgentList } from './SubAgentCard';
 
@@ -346,8 +346,9 @@ function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
   const [localExpanded, setLocalExpanded] = useState(false);
   const isExpanded = subtask.expanded ?? localExpanded;
 
-  // Determine if the subtask is expandable (has progress, error, or result)
-  const hasDetails = !!(subtask.progress || subtask.error || subtask.result || subtask.subAgentId);
+  // Determine if the subtask is expandable (has progress, error, result, or tool calls)
+  const hasToolCalls = subtask.toolCalls && subtask.toolCalls.length > 0;
+  const hasDetails = !!(subtask.progress || subtask.error || subtask.result || subtask.subAgentId || hasToolCalls);
   const isExpandable = hasDetails && (subtask.status === 'in_progress' || subtask.status === 'failed' || subtask.status === 'completed');
 
   // Auto-expand when in_progress or failed
@@ -434,7 +435,7 @@ function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
         <span
           className={cn(
             'text-xs flex-1',
-            subtask.status === 'completed' && 'text-muted-foreground line-through',
+            subtask.status === 'completed' && 'text-muted-foreground',
             subtask.status === 'skipped' && 'text-muted-foreground/50 line-through',
             subtask.status === 'failed' && 'text-destructive',
             subtask.status === 'in_progress' && 'text-foreground font-medium',
@@ -444,10 +445,22 @@ function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
           {subtask.description}
         </span>
 
+        {/* Status label for completed/failed subtasks */}
+        {subtask.status === 'completed' && !isExpandable && (
+          <span className="text-[10px] text-green-600 dark:text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">
+            完成
+          </span>
+        )}
+        {subtask.status === 'failed' && !isExpandable && (
+          <span className="text-[10px] text-destructive bg-destructive/10 px-1.5 py-0.5 rounded">
+            失败
+          </span>
+        )}
+
         {/* Progress indicator */}
         {subtask.progress && subtask.status === 'in_progress' && (
-          <span className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
-            {subtask.progress.iteration}/{subtask.progress.maxIterations}
+          <span className="text-[10px] text-blue-600 dark:text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded animate-pulse">
+            处理中
           </span>
         )}
 
@@ -467,14 +480,12 @@ function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
             <div className="text-xs bg-blue-500/5 border border-blue-500/20 rounded-lg p-2">
               <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
                 <Cog className="h-3 w-3 animate-spin" />
-                <span>
-                  迭代 {subtask.progress.iteration}/{subtask.progress.maxIterations}
-                </span>
+                <span>正在执行中...</span>
               </div>
               {subtask.progress.lastToolName && (
                 <div className="mt-1 text-muted-foreground flex items-center gap-1.5">
                   <Cog className="h-3 w-3" />
-                  <span>工具: {subtask.progress.lastToolName}</span>
+                  <span>调用工具: {subtask.progress.lastToolName}</span>
                 </div>
               )}
               {subtask.progress.message && (
@@ -482,6 +493,21 @@ function SubtaskItem({ subtask, onToggleExpand }: SubtaskItemProps) {
                   {subtask.progress.message}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Tool calls */}
+          {hasToolCalls && (
+            <div className="text-xs">
+              <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-medium mb-1.5">
+                <Cog className="h-3 w-3" />
+                <span>工具调用 ({subtask.toolCalls!.length})</span>
+              </div>
+              <div className="space-y-1">
+                {subtask.toolCalls!.map((tc) => (
+                  <SubAgentToolCallItem key={tc.id} toolCall={tc} />
+                ))}
+              </div>
             </div>
           )}
 
@@ -527,7 +553,7 @@ function SubAgentMetricsSummary({ metrics }: { metrics: SubAgentMetrics }) {
     <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
       <span className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
         <RefreshCw className="h-2.5 w-2.5" />
-        {metrics.total_iterations} 迭代
+        {metrics.total_iterations} 步
       </span>
       <span className="flex items-center gap-1 bg-muted/50 px-1.5 py-0.5 rounded">
         <Cog className="h-2.5 w-2.5" />
@@ -629,6 +655,47 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact tool call display for Sub-Agent executions */
+function SubAgentToolCallItem({ toolCall }: { toolCall: SubAgentToolCall }) {
+  const [showArgs, setShowArgs] = useState(false);
+  const hasArgs = toolCall.arguments && Object.keys(toolCall.arguments).length > 0;
+
+  return (
+    <div className="bg-muted/30 border border-border/50 rounded-md">
+      <button
+        onClick={() => hasArgs && setShowArgs(!showArgs)}
+        className={cn(
+          'w-full flex items-center gap-2 px-2 py-1.5 text-left',
+          hasArgs && 'cursor-pointer hover:bg-muted/50 transition-colors'
+        )}
+      >
+        <Check className="h-3 w-3 text-green-500 shrink-0" />
+        <span className="font-mono text-[11px] truncate flex-1">{toolCall.name}</span>
+        {toolCall.iteration !== undefined && (
+          <span className="text-[10px] text-muted-foreground bg-muted px-1 py-0.5 rounded">
+            #{toolCall.iteration}
+          </span>
+        )}
+        {hasArgs && (
+          <ChevronRight
+            className={cn(
+              'h-3 w-3 text-muted-foreground transition-transform shrink-0',
+              showArgs && 'rotate-90'
+            )}
+          />
+        )}
+      </button>
+      {showArgs && hasArgs && (
+        <div className="px-2 pb-2">
+          <pre className="text-[10px] bg-muted/50 p-2 rounded border border-border/30 max-h-32 overflow-auto font-mono leading-tight">
+            {JSON.stringify(toolCall.arguments, null, 2)}
+          </pre>
         </div>
       )}
     </div>

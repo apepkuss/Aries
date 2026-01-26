@@ -98,8 +98,8 @@ export function SubAgentCard({
 
         {/* Progress */}
         {agent.state === 'running' && agent.progress && (
-          <span className="text-xs text-muted-foreground bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded">
-            迭代 {agent.progress.iteration}
+          <span className="text-xs text-muted-foreground bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded animate-pulse">
+            处理中
           </span>
         )}
 
@@ -212,7 +212,7 @@ export function SubAgentCard({
                 {agent.result.metrics.tool_calls} 工具
               </span>
               <span className="bg-muted/50 px-1.5 py-0.5 rounded">
-                {agent.result.metrics.total_iterations} 迭代
+                {agent.result.metrics.total_iterations} 步
               </span>
               <span className="bg-muted/50 px-1.5 py-0.5 rounded">
                 {agent.result.metrics.prompt_tokens +

@@ -448,6 +448,60 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
             break;
 
+          case 'subagent_tool_call':
+            {
+              const { subagent_id, tool_call_id, tool_name, args, iteration } = event.data;
+              console.log('[Chat Store] Sub-Agent tool call:', subagent_id, tool_name, 'iteration:', iteration);
+              console.log('[Chat Store] Tool call args:', JSON.stringify(args).slice(0, 200));
+              set((state) => {
+                const newSubAgents = new Map(state.subAgents);
+                const agent = newSubAgents.get(subagent_id);
+                console.log('[Chat Store] Agent found:', !!agent, 'name:', agent?.name);
+
+                // Find associated subtask ID from the agent name
+                const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
+                console.log('[Chat Store] Extracted subtaskId:', subtaskId, 'taskPlan exists:', !!taskPlan);
+
+                // Update task plan if associated with a subtask
+                let updatedMessages = state.messages;
+                if (subtaskId !== null && taskPlan) {
+                  // Get existing tool calls or create new array
+                  const existingSubtask = taskPlan.subtasks.find((s) => s.id === subtaskId);
+                  const existingToolCalls = existingSubtask?.toolCalls || [];
+
+                  // Check if this tool call already exists (deduplication)
+                  const alreadyExists = existingToolCalls.some((tc) => tc.id === tool_call_id);
+                  if (alreadyExists) {
+                    console.log('[Chat Store] Tool call already exists, skipping:', tool_call_id);
+                    return { subAgents: newSubAgents, messages: updatedMessages };
+                  }
+
+                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                    toolCalls: [
+                      ...existingToolCalls,
+                      {
+                        id: tool_call_id,
+                        name: tool_name,
+                        arguments: args as Record<string, unknown>,
+                        iteration,
+                      },
+                    ],
+                  });
+                  if (updatedTaskPlan) {
+                    taskPlan = updatedTaskPlan;
+                    updatedMessages = state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: updatedTaskPlan }
+                        : msg
+                    );
+                  }
+                }
+
+                return { subAgents: newSubAgents, messages: updatedMessages };
+              });
+            }
+            break;
+
           case 'subagent_completed':
             {
               const { subagent_id, output, metrics } = event.data;
