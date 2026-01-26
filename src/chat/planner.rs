@@ -668,15 +668,42 @@ impl TaskPlanner {
 </subtask>
 ```
 
-示例2 - 必须串行任务（链式计算 23+32+33）：
+示例2 - 可结合操作的并行优化（计算 23+32+33+22）：
+
+⚠️ **错误的串行规划**（效率低）：
+```xml
+<subtask id="1"><description>计算 23 + 32</description><dependencies></dependencies></subtask>
+<subtask id="2"><description>将结果与 33 相加</description><dependencies>1</dependencies></subtask>
+<subtask id="3"><description>将结果与 22 相加</description><dependencies>2</dependencies></subtask>
+```
+这样规划会导致串行执行：((23+32)+33)+22，无法并行。
+
+✅ **正确的并行规划**（效率高）：
 ```xml
 <subtask id="1">
   <description>计算 23 + 32</description>
   <dependencies></dependencies>
 </subtask>
 <subtask id="2">
-  <description>将上一步结果与 33 相加</description>
-  <dependencies>1</dependencies>  <!-- 必须依赖任务1，因为需要其结果 -->
+  <description>计算 33 + 22</description>
+  <dependencies></dependencies>  <!-- 与任务1独立，可并行 -->
+</subtask>
+<subtask id="3">
+  <description>将任务1和任务2的结果相加</description>
+  <dependencies>1, 2</dependencies>  <!-- 依赖两个并行任务的结果 -->
+</subtask>
+```
+这样规划可以并行执行：(23+32) 和 (33+22) 同时计算，然后汇总。
+
+示例3 - 必须串行的任务（有状态依赖）：
+```xml
+<subtask id="1">
+  <description>读取文件 config.json</description>
+  <dependencies></dependencies>
+</subtask>
+<subtask id="2">
+  <description>根据配置内容修改数据库</description>
+  <dependencies>1</dependencies>  <!-- 必须依赖任务1，因为需要其内容 -->
 </subtask>
 ```
 
@@ -703,11 +730,16 @@ impl TaskPlanner {
    - **判断标准**：问自己"执行这个任务时，是否需要知道前面某个任务的结果？"
 4. **并行 vs 串行**：
    - **可并行**（无依赖）：独立的查询、搜索操作（如同时查询多个城市天气）
-   - **必须串行**（有依赖）：链式计算、需要前一步输出的操作（如累加 A+B+C）
-5. 依赖关系中的 ID 必须是已定义的子任务 ID
-6. 如果任务简单，可以只有一个子任务
-7. 子任务数量不应超过 {max_subtasks} 个
-8. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值
+   - **必须串行**（有依赖）：需要前一步**具体结果内容**才能执行的操作
+5. **⭐ 并行优化原则**（关键）：
+   - 对于**可结合操作**（加法、乘法、字符串拼接、集合合并等），应拆分为并行子任务
+   - 例如：`A+B+C+D` 应规划为 `(A+B)` 和 `(C+D)` 并行，然后汇总
+   - 例如：搜索4个关键词应规划为4个并行搜索任务，然后汇总结果
+   - **判断方法**：如果操作顺序不影响最终结果，就可以并行
+6. 依赖关系中的 ID 必须是已定义的子任务 ID
+7. 如果任务简单，可以只有一个子任务
+8. 子任务数量不应超过 {max_subtasks} 个
+9. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值
 
 **⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}"#,
             skills_section = skills_section,
