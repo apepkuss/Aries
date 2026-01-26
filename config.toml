@@ -206,6 +206,12 @@ hot_reload_audit = false              # Log all hot-reload changes for auditing
 
 [subagent]
 enabled = false                       # Enable Sub-Agent functionality (default: false)
+
+# Execution mode determines how Subtasks are executed:
+# - "direct": Traditional mode - Subtasks executed directly via React loop (default)
+# - "subagent": New mode - Subtasks delegated to Sub-Agents for autonomous execution
+execution_mode = "direct"
+
 max_nesting_depth = 2                 # Maximum nesting depth (0 = no nesting, 1 = main -> sub, etc.)
 max_concurrent = 5                    # Maximum concurrent Sub-Agents
 default_timeout_secs = 300            # Default timeout per Sub-Agent in seconds (5 minutes)
@@ -221,9 +227,12 @@ default_blocked_tools = ["spawn_sub_agent"]  # Prevent infinite nesting by defau
 
 # Failure handling policy
 # - "fail": Stop execution on first failure and propagate error to main Agent
+# - "fail_fast": Immediately stop entire execution flow
 # - "notify": Notify main Agent and let it decide how to handle
 # - "retry": Automatically retry failed Sub-Agents (up to retry_attempts times)
-# - "ignore": Ignore failures and continue execution
+# - "ignore" / "skip": Ignore failures and continue execution
+# - "retry_then_skip": Retry first, then skip if still failing
+# - "retry_then_fail": Retry first, then fail if still failing
 failure_policy = "notify"
 retry_attempts = 2                    # Retry count when using "Retry" policy
 
@@ -238,6 +247,57 @@ max_retries = 2                       # Maximum reflection retries
 reflect_on_tool_error = true          # Trigger reflection when a tool call fails
 reflect_interval = 5                  # Reflect every N iterations (0 = disabled)
 reflect_on_completion = true          # Reflect when Sub-Agent completes
+
+# Subtask Executor configuration (effective when execution_mode = "subagent")
+# Controls how Sub-Agents execute Subtasks
+[subagent.subtask_executor]
+# Parallel execution mode:
+# - "auto": Automatically determine parallel groups based on dependencies (default)
+# - "sequential": Execute all subtasks sequentially
+# - "manual": Use explicit parallel groups (requires plan annotations)
+parallel_mode = "auto"
+max_parallel = 3                      # Maximum number of parallel Sub-Agents
+
+# Tool inheritance from parent
+inherit_tools = true                  # Inherit tools from main Agent
+inherit_skills = true                 # Inherit skills from main Agent
+blocked_tools = ["spawn_sub_agent"]   # Tools blocked for Subtask execution
+
+# Spawn configuration
+allow_nested_spawn = false            # Whether Sub-Agents can spawn child Sub-Agents
+
+# Timeout configuration
+timeout_secs = 120                    # Timeout per Subtask in seconds
+inherit_remaining_time = true         # Inherit remaining time from parent timeout
+grace_period_secs = 10                # Grace period for graceful shutdown
+
+# Retry configuration (for "subagent" mode)
+# - "internal": Sub-Agent handles retries internally
+# - "respawn": Respawn a new Sub-Agent for retry (injects failure context)
+retry_mode = "respawn"
+max_retries = 2                       # Maximum retries per Subtask
+retry_delay_ms = 1000                 # Delay between retries in milliseconds
+inject_failure_context = true         # Inject previous failure info on retry
+
+# Context passing configuration
+# Controls how context is shared between main Agent and Sub-Agents
+[subagent.context]
+# Context mode:
+# - "inject": Inject relevant context into Sub-Agent's initial prompt (default)
+# - "shared": Use shared memory/artifact storage
+# - "hybrid": Combine inject and shared modes
+mode = "inject"
+max_inject_tokens = 2000              # Maximum tokens to inject into Sub-Agent context
+use_summary = true                    # Summarize context if exceeding max_inject_tokens
+artifact_storage = false              # Enable artifact storage for context sharing
+
+# API rate limiting configuration
+# Prevents overwhelming the LLM API with concurrent requests
+[subagent.rate_limit]
+requests_per_minute = 60              # Maximum API requests per minute
+tokens_per_minute = 100000            # Maximum tokens per minute (0 = unlimited)
+retry_max_attempts = 3                # Maximum retry attempts when rate limited
+retry_base_delay_ms = 1000            # Base delay for exponential backoff (ms)
 
 
 # ============================================================================

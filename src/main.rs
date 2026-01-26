@@ -517,7 +517,10 @@ async fn main() -> ServerResult<()> {
     let subagent_manager = if let Some(ref config) = subagent_config
         && config.enabled
     {
-        aries::dual_info!("Sub-Agent system is enabled");
+        aries::dual_info!(
+            "Sub-Agent system enabled (execution_mode: {})",
+            config.execution_mode
+        );
         let manager = Arc::new(subagent::SubAgentManager::new(config.clone()));
 
         // Start timeout monitor

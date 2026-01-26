@@ -366,12 +366,17 @@ impl LlmProvider for ChatLlmProvider {
 // ============================================================================
 
 /// Tool description for the planner prompt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ToolDescription {
     /// Name of the tool.
+    #[serde(default)]
     pub name: String,
     /// Description of what the tool does.
+    #[serde(default)]
     pub description: String,
+    /// Input parameters JSON Schema (optional).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parameters: Option<serde_json::Value>,
 }
 
 /// The main task planner that generates execution plans from user requests.
@@ -645,6 +650,36 @@ impl TaskPlanner {
   </subtasks>
 </task_plan>
 
+**依赖关系示例**：
+
+示例1 - 可并行任务（查询多个城市天气）：
+```xml
+<subtask id="1">
+  <description>查询北京天气</description>
+  <dependencies></dependencies>
+</subtask>
+<subtask id="2">
+  <description>查询上海天气</description>
+  <dependencies></dependencies>  <!-- 与任务1互不依赖，可并行 -->
+</subtask>
+<subtask id="3">
+  <description>汇总两地天气信息</description>
+  <dependencies>1, 2</dependencies>  <!-- 依赖任务1和2的结果 -->
+</subtask>
+```
+
+示例2 - 必须串行任务（链式计算 23+32+33）：
+```xml
+<subtask id="1">
+  <description>计算 23 + 32</description>
+  <dependencies></dependencies>
+</subtask>
+<subtask id="2">
+  <description>将上一步结果与 33 相加</description>
+  <dependencies>1</dependencies>  <!-- 必须依赖任务1，因为需要其结果 -->
+</subtask>
+```
+
 ## 判断原则
 
 1. **优先直接回答**：如果问题可以基于通用知识直接回答且不需要工具，使用 `<direct_answer>`
@@ -662,11 +697,19 @@ impl TaskPlanner {
 
 1. 每个子任务应该是原子性的、可独立执行的
 2. 每个子任务对应一次工具调用（细粒度规划）
-3. 明确标注子任务之间的依赖关系
-4. 依赖关系中的 ID 必须是已定义的子任务 ID
-5. 如果任务简单，可以只有一个子任务
-6. 子任务数量不应超过 {max_subtasks} 个
-7. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值{skill_rule}"#,
+3. **依赖关系判断**（关键）：
+   - 如果子任务 B 需要使用子任务 A 的**执行结果**作为输入，则 B 必须在 `<dependencies>` 中标注 A 的 ID
+   - 如果子任务之间相互独立，则 `<dependencies>` 留空
+   - **判断标准**：问自己"执行这个任务时，是否需要知道前面某个任务的结果？"
+4. **并行 vs 串行**：
+   - **可并行**（无依赖）：独立的查询、搜索操作（如同时查询多个城市天气）
+   - **必须串行**（有依赖）：链式计算、需要前一步输出的操作（如累加 A+B+C）
+5. 依赖关系中的 ID 必须是已定义的子任务 ID
+6. 如果任务简单，可以只有一个子任务
+7. 子任务数量不应超过 {max_subtasks} 个
+8. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值
+
+**⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}"#,
             skills_section = skills_section,
             tools_desc = tools_desc,
             recommended_skill_tag = recommended_skill_tag,

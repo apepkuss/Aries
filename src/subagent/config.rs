@@ -348,6 +348,9 @@ fn default_subtask_blocked_tools() -> Vec<String> {
         "internal__file_write".to_string(),
         "internal__file_delete".to_string(),
         "internal__shell_exec".to_string(),
+        "internal__spawn_sub_agent".to_string(),
+        "internal__get_sub_agent_result".to_string(),
+        "internal__cancel_sub_agent".to_string(),
     ]
 }
 

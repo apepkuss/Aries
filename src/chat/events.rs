@@ -732,6 +732,9 @@ pub struct SubAgentProgressEvent {
     /// Optional progress message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Name of the tool being called (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
 impl SubAgentProgressEvent {
@@ -742,6 +745,7 @@ impl SubAgentProgressEvent {
             iteration,
             max_iterations: None,
             message: None,
+            tool_name: None,
         }
     }
 
@@ -754,6 +758,12 @@ impl SubAgentProgressEvent {
     /// Sets the progress message.
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
+        self
+    }
+
+    /// Sets the tool name.
+    pub fn with_tool_name(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_name = Some(tool_name.into());
         self
     }
 }

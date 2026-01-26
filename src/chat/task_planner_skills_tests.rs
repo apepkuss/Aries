@@ -124,14 +124,17 @@ fn get_test_tools() -> Vec<ToolDescription> {
         ToolDescription {
             name: "weather".to_string(),
             description: "Get weather information".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "read_file".to_string(),
             description: "Read file contents".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "search".to_string(),
             description: "Search for information".to_string(),
+            ..Default::default()
         },
     ]
 }

@@ -182,6 +182,8 @@ impl SubAgentExecutor {
         let task_description = context.task_description().to_string();
         // 工具调用历史（用于反思上下文）
         let mut tool_history: Vec<String> = Vec::new();
+        // 跟踪最后一次成功的工具调用结果（用于强制终止）
+        let mut last_successful_tool_result: Option<String> = None;
 
         loop {
             // 检查迭代限制
@@ -217,6 +219,16 @@ impl SubAgentExecutor {
             let tool_calls = &message.tool_calls;
             let content = message.content.as_ref();
 
+            // Debug: 打印 LLM 响应
+            debug!(
+                "Sub-Agent LLM response: tool_calls={}, has_content={}, content_preview={}",
+                tool_calls.len(),
+                content.is_some(),
+                content
+                    .map(|c| if c.len() > 100 { &c[..100] } else { c })
+                    .unwrap_or("(none)")
+            );
+
             // 更新 token 使用量
             let prompt_tokens = chat_completion.usage.prompt_tokens;
             let completion_tokens = chat_completion.usage.completion_tokens;
@@ -242,6 +254,16 @@ impl SubAgentExecutor {
 
             // 检查是否有工具调用
             if !tool_calls.is_empty() {
+                // 如果之前已经有成功的工具调用，强制使用那个结果作为最终答案
+                // 这防止 LLM 在收到工具结果后仍然调用更多工具
+                if let Some(previous_result) = &last_successful_tool_result {
+                    debug!(
+                        "Sub-Agent attempted additional tool call after successful result. \
+                         Forcing completion with previous result."
+                    );
+                    return Ok(previous_result.clone());
+                }
+
                 // 处理工具调用
                 for tool_call in tool_calls {
                     // 提取思考内容
@@ -253,18 +275,30 @@ impl SubAgentExecutor {
                             .await;
                     }
 
-                    // 发射工具调用事件
+                    // 发射 Sub-Agent 工具调用事件（而非主 Agent 的 tool_call）
                     let tool_args: serde_json::Value =
                         serde_json::from_str(&tool_call.function.arguments)
                             .unwrap_or(serde_json::json!({}));
 
+                    // 发送 Sub-Agent 专用的工具调用事件
                     emitter
-                        .emit_tool_call(
+                        .emit_subagent_tool_call(
+                            id.as_ref(),
                             &tool_call.id,
                             &tool_call.function.name,
                             &tool_args,
-                            None,
-                            None,
+                            Some(iteration),
+                        )
+                        .await;
+
+                    // 发送进度事件（包含工具名，用于前端显示）
+                    emitter
+                        .emit_subagent_progress(
+                            id.as_ref(),
+                            iteration,
+                            Some(max_iterations),
+                            Some(&format!("Calling tool: {}", tool_call.function.name)),
+                            Some(&tool_call.function.name),
                         )
                         .await;
 
@@ -282,31 +316,13 @@ impl SubAgentExecutor {
                         tool_call.function.name, tool_args, tool_duration
                     );
 
-                    // 发射工具结果事件并处理错误反思
+                    // 处理工具结果（不再发送 tool_result 事件到主事件流）
                     match &tool_result {
-                        Ok(result) => {
-                            emitter
-                                .emit_tool_result(
-                                    &tool_call.id,
-                                    result,
-                                    false,
-                                    Some(tool_duration),
-                                    None,
-                                )
-                                .await;
+                        Ok(_result) => {
                             tool_history.push(format!("{} | Result: OK", tool_record));
                         }
                         Err(e) => {
                             let error_msg = e.to_string();
-                            emitter
-                                .emit_tool_result(
-                                    &tool_call.id,
-                                    &error_msg,
-                                    true,
-                                    Some(tool_duration),
-                                    None,
-                                )
-                                .await;
                             tool_history.push(format!("{} | Error: {}", tool_record, error_msg));
 
                             // 工具错误后的反思
@@ -335,13 +351,24 @@ impl SubAgentExecutor {
 
                     let tool_result = tool_result?;
 
+                    // 保存成功的工具结果，用于防止重复调用
+                    last_successful_tool_result = Some(tool_result.clone());
+
                     // 添加助手消息和工具结果到上下文
                     context.add_assistant_message(
                         message.content.clone(),
                         Some(vec![tool_call.clone()]),
                     );
 
-                    let observation = format!("<observation>{}</observation>", tool_result);
+                    // 添加工具结果，并强调必须立即给出最终答案
+                    let observation = format!(
+                        "<observation>{}</observation>\n\n\
+                        **IMPORTANT**: You have received the tool result above. \
+                        You MUST now provide your final answer using `<final_answer>` tags. \
+                        Do NOT call any more tools. Respond with:\n\
+                        <final_answer>\nYour answer based on the tool result\n</final_answer>",
+                        tool_result
+                    );
                     context.add_tool_result(&observation, &tool_call.id);
                 }
 
@@ -496,13 +523,30 @@ impl SubAgentExecutor {
         // 构建工具 JSON
         let tools_json = build_tools_json(available_tools);
 
+        // Debug: 打印工具列表
+        debug!(
+            "Sub-Agent LLM request: {} tools available, tool names: {:?}",
+            available_tools.len(),
+            available_tools.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+
         // 构建请求
-        let request_json = serde_json::json!({
-            "model": self.model,
-            "messages": context.messages(),
-            "tools": tools_json,
-            "stream": false
-        });
+        // 如果有工具可用，设置 tool_choice 为 "auto" 以鼓励模型使用工具
+        let request_json = if available_tools.is_empty() {
+            serde_json::json!({
+                "model": self.model,
+                "messages": context.messages(),
+                "stream": false
+            })
+        } else {
+            serde_json::json!({
+                "model": self.model,
+                "messages": context.messages(),
+                "tools": tools_json,
+                "tool_choice": "auto",
+                "stream": false
+            })
+        };
 
         // 发送请求（支持取消）
         let response = select! {
@@ -592,25 +636,27 @@ impl SubAgentExecutor {
 // ============================================================================
 
 /// 构建工具 JSON
+///
+/// 使用工具的实际参数架构（如果有），否则使用空的对象架构
 fn build_tools_json(tools: &[ToolDescription]) -> serde_json::Value {
     let tools_json: Vec<serde_json::Value> = tools
         .iter()
         .map(|tool| {
+            // 使用工具的实际参数架构，或者默认的空对象架构
+            let parameters = tool.parameters.clone().unwrap_or_else(|| {
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                })
+            });
+
             serde_json::json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The query or input for the tool"
-                            }
-                        },
-                        "required": ["query"]
-                    }
+                    "parameters": parameters
                 }
             })
         })
@@ -913,6 +959,7 @@ mod tests {
         let tools = vec![ToolDescription {
             name: "mcp__server__tool".to_string(),
             description: "A test tool".to_string(),
+            ..Default::default()
         }];
 
         let json = build_tools_json(&tools);

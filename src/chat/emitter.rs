@@ -24,7 +24,7 @@
 //! emitter.emit_tool_call("call_123", "search", &args).await;
 //! ```
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -154,6 +154,7 @@ pub trait EventEmitter: Send + Sync {
         iteration: u32,
         max_iterations: Option<u32>,
         message: Option<&str>,
+        tool_name: Option<&str>,
     );
 
     /// Emits a Sub-Agent thought event.
@@ -467,6 +468,7 @@ impl EventEmitter for SseEventEmitter {
         iteration: u32,
         max_iterations: Option<u32>,
         message: Option<&str>,
+        tool_name: Option<&str>,
     ) {
         if !self.config.should_emit_subagent_events() {
             return;
@@ -478,6 +480,9 @@ impl EventEmitter for SseEventEmitter {
         }
         if let Some(msg) = message {
             event = event.with_message(msg);
+        }
+        if let Some(name) = tool_name {
+            event = event.with_tool_name(name);
         }
 
         self.send_event(StreamEvent::SubAgentProgress(event)).await;
@@ -690,6 +695,7 @@ impl EventEmitter for NoopEventEmitter {
         _iteration: u32,
         _max_iterations: Option<u32>,
         _message: Option<&str>,
+        _tool_name: Option<&str>,
     ) {
         // No-op
     }
@@ -751,16 +757,18 @@ impl EventEmitter for NoopEventEmitter {
 /// Returns a tuple of (emitter, optional receiver).
 /// - If enhanced streaming is enabled, returns an `SseEventEmitter` with a receiver
 /// - If disabled, returns a `NoopEventEmitter` with no receiver
+///
+/// The emitter is wrapped in `Arc` to allow sharing across parallel subtask executions.
 pub fn create_emitter(
     config: &EnhancedStreamConfig,
     channel_capacity: usize,
-) -> (Box<dyn EventEmitter>, Option<mpsc::Receiver<String>>) {
+) -> (Arc<dyn EventEmitter>, Option<mpsc::Receiver<String>>) {
     if config.enabled {
         let (tx, rx) = mpsc::channel(channel_capacity);
-        let emitter = Box::new(SseEventEmitter::new(tx, config.clone()));
+        let emitter = Arc::new(SseEventEmitter::new(tx, config.clone()));
         (emitter, Some(rx))
     } else {
-        (Box::new(NoopEventEmitter::new()), None)
+        (Arc::new(NoopEventEmitter::new()), None)
     }
 }
 

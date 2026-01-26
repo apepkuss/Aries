@@ -1160,10 +1160,12 @@ async fn test_tse_001_initial_context_contains_skills_summaries() {
         ToolDescription {
             name: "weather".to_string(),
             description: "Get weather information".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "search".to_string(),
             description: "Search the web".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1258,10 +1260,12 @@ async fn test_tse_002_active_skill_context_contains_full_content() {
         ToolDescription {
             name: "weather".to_string(),
             description: "Get weather information".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "WebFetch".to_string(),
             description: "Fetch web content".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1346,6 +1350,7 @@ async fn test_tse_005_dependent_subtask_results_passed() {
     let tools = vec![ToolDescription {
         name: "analyze".to_string(),
         description: "Analyze data".to_string(),
+        ..Default::default()
     }];
 
     // Previous results from subtask 1
@@ -1454,6 +1459,7 @@ async fn test_tse_005_multiple_dependencies() {
     let tools = vec![ToolDescription {
         name: "combine".to_string(),
         description: "Combine multiple data sources".to_string(),
+        ..Default::default()
     }];
 
     // Multiple previous results
@@ -1517,6 +1523,7 @@ async fn test_tse_phase_transition_from_1_to_2() {
     let tools = vec![ToolDescription {
         name: "weather".to_string(),
         description: "Get weather data".to_string(),
+        ..Default::default()
     }];
 
     // Phase 1: Get context without active skill

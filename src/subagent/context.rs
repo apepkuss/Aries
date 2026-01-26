@@ -128,10 +128,20 @@ impl SubAgentContext {
         content.push_str(&format!("- **Depth Level**: {}\n", self.depth));
         content.push_str("\n### Important Instructions:\n");
         content.push_str("1. Focus solely on the assigned task.\n");
-        content.push_str("2. Use available tools efficiently to complete the task.\n");
-        content.push_str("3. Provide a clear, concise final answer when the task is complete.\n");
+        content.push_str(
+            "2. Use available tools efficiently - typically ONE tool call is sufficient.\n",
+        );
+        content.push_str("3. **CRITICAL**: After receiving a tool result, IMMEDIATELY provide your final answer using `<final_answer>` tags. Do NOT call additional tools unless the first result was insufficient.\n");
         content.push_str("4. If you cannot complete the task, explain the blockers clearly.\n");
         content.push_str("5. Do not attempt tasks outside your assigned scope.\n");
+        content.push_str(
+            "6. Do NOT call the same tool multiple times - if you got a result, use it.\n",
+        );
+        content.push_str("\n### Response Format:\n");
+        content.push_str("After getting a tool result, respond with:\n");
+        content.push_str(
+            "```\n<final_answer>\nYour answer based on the tool result\n</final_answer>\n```\n",
+        );
 
         content
     }
@@ -140,7 +150,7 @@ impl SubAgentContext {
     fn build_user_message(&self) -> String {
         format!(
             "## Task\n\n{}\n\nPlease complete this task step by step, using available tools as needed. \
-             When you have completed the task, provide your final answer clearly.",
+             When you have completed the task, wrap your final answer in `<final_answer>` tags.",
             self.task
         )
     }

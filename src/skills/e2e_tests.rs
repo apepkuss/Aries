@@ -1495,10 +1495,12 @@ async fn test_te2e_001_complete_workflow_planning_to_phase2() {
         ToolDescription {
             name: "WebFetch".to_string(),
             description: "Fetch content from URLs".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "WebSearch".to_string(),
             description: "Search the web".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1637,10 +1639,12 @@ async fn test_te2e_003_skill_activation_during_execution() {
         ToolDescription {
             name: "Read".to_string(),
             description: "Read file contents".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "Write".to_string(),
             description: "Write file contents".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1731,18 +1735,22 @@ async fn test_te2e_004_tool_calls_after_skill_activation() {
         ToolDescription {
             name: "Read".to_string(),
             description: "Read file contents".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "Write".to_string(),
             description: "Write file contents".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "Bash".to_string(),
             description: "Execute bash commands".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "WebFetch".to_string(),
             description: "Fetch from URLs".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1821,10 +1829,12 @@ async fn test_tms_001_dependent_subtasks_different_skills() {
         ToolDescription {
             name: "WebFetch".to_string(),
             description: "Fetch from URLs".to_string(),
+            ..Default::default()
         },
         ToolDescription {
             name: "Write".to_string(),
             description: "Write files".to_string(),
+            ..Default::default()
         },
     ];
 
@@ -1958,6 +1968,7 @@ async fn test_tms_002_parallel_subtasks_different_skills() {
     let tools = vec![ToolDescription {
         name: "WebFetch".to_string(),
         description: "Fetch from URLs".to_string(),
+        ..Default::default()
     }];
 
     // Create 3 independent subtasks (no dependencies)
@@ -2057,6 +2068,7 @@ async fn test_tms_003_skill_results_passed_to_next_subtask() {
     let tools = vec![ToolDescription {
         name: "Read".to_string(),
         description: "Read files".to_string(),
+        ..Default::default()
     }];
 
     // Subtask 1 completes with a result
@@ -2157,6 +2169,7 @@ async fn test_ter_003_recommended_skill_not_found() {
     let tools = vec![ToolDescription {
         name: "WebFetch".to_string(),
         description: "Fetch from URLs".to_string(),
+        ..Default::default()
     }];
 
     // Attempt to get the recommended skill
