@@ -6,11 +6,13 @@ use std::collections::HashMap;
 
 use super::types::{
     ChatConfigUpdate, ConfigUpdateRequest, ConfigUpdateResponse, EmbeddingConfigUpdate,
-    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, SubagentConfigUpdate,
-    SIDE_EFFECT_FIELDS,
+    MemoryConfigUpdate, RagConfigUpdate, SIDE_EFFECT_FIELDS, ServerConfigUpdate,
+    SubagentConfigUpdate,
 };
-use crate::config::{ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig};
-use crate::subagent::SubAgentSystemConfig;
+use crate::{
+    config::{ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig},
+    subagent::SubAgentSystemConfig,
+};
 
 /// Result of applying a configuration update
 pub struct UpdateResult {

@@ -9,11 +9,13 @@ use super::types::{
     SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig, SanitizedSkillConfig,
     SanitizedSubagentConfig, UPDATABLE_FIELDS,
 };
-use crate::config::{
-    ArtifactsConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, McpServerConfig,
-    McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SkillConfig,
+use crate::{
+    config::{
+        ArtifactsConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, McpServerConfig,
+        McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SkillConfig,
+    },
+    subagent::SubAgentSystemConfig,
 };
-use crate::subagent::SubAgentSystemConfig;
 
 /// Trait for converting sensitive configuration to sanitized version
 pub trait Sanitize {
