@@ -7,12 +7,13 @@ use super::types::{
     SanitizedArtifactsConfig, SanitizedChatConfig, SanitizedConfig, SanitizedEmbeddingConfig,
     SanitizedMcpConfig, SanitizedMcpServerConfig, SanitizedMcpToolServerConfig,
     SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig, SanitizedSkillConfig,
-    UPDATABLE_FIELDS,
+    SanitizedSubagentConfig, UPDATABLE_FIELDS,
 };
 use crate::config::{
     ArtifactsConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, McpServerConfig,
     McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SkillConfig,
 };
+use crate::subagent::SubAgentSystemConfig;
 
 /// Trait for converting sensitive configuration to sanitized version
 pub trait Sanitize {
@@ -36,6 +37,7 @@ impl Sanitize for Config {
             mcp: self.mcp.as_ref().map(|m| m.sanitize()),
             skill: self.skill.as_ref().map(|s| s.sanitize()),
             artifacts: self.artifacts.as_ref().map(|a| a.sanitize()),
+            subagent: self.subagent.as_ref().map(|s| s.sanitize()),
             updatable_fields: UPDATABLE_FIELDS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -178,6 +180,20 @@ impl Sanitize for ArtifactsConfig {
             cleanup_interval_secs: self.cleanup_interval_secs,
             soft_delete_retention_days: self.soft_delete_retention_days,
             enable_cleanup: self.enable_cleanup,
+        }
+    }
+}
+
+impl Sanitize for SubAgentSystemConfig {
+    type Output = SanitizedSubagentConfig;
+
+    fn sanitize(&self) -> SanitizedSubagentConfig {
+        SanitizedSubagentConfig {
+            enabled: self.enabled,
+            execution_mode: self.execution_mode.clone(),
+            max_concurrent: self.max_concurrent,
+            default_timeout_secs: self.default_timeout_secs,
+            default_max_iterations: self.default_max_iterations,
         }
     }
 }

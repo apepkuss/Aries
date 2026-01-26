@@ -36,6 +36,8 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "memory.max_stored_messages",
     // RAG config - simple hot update
     "rag.enable",
+    // Subagent config - simple hot update
+    "subagent.execution_mode",
 ];
 
 /// Fields that require service reload after update
@@ -86,6 +88,10 @@ pub struct SanitizedConfig {
     /// Artifacts configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<SanitizedArtifactsConfig>,
+
+    /// Sub-Agent configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SanitizedSubagentConfig>,
 
     /// List of fields that can be updated at runtime
     pub updatable_fields: Vec<String>,
@@ -198,6 +204,21 @@ pub struct SanitizedArtifactsConfig {
     pub enable_cleanup: bool,
 }
 
+/// Sanitized Sub-Agent configuration
+#[derive(Debug, Clone, Serialize)]
+pub struct SanitizedSubagentConfig {
+    /// Whether Sub-Agent functionality is enabled
+    pub enabled: bool,
+    /// Execution mode: "direct" (Plan mode) or "subagent" (Sub-Agent mode)
+    pub execution_mode: String,
+    /// Maximum concurrent Sub-Agents
+    pub max_concurrent: usize,
+    /// Default timeout per Sub-Agent in seconds
+    pub default_timeout_secs: u64,
+    /// Default maximum iterations per Sub-Agent
+    pub default_max_iterations: u32,
+}
+
 // ============================================================================
 // Config Update Request Types
 // ============================================================================
@@ -225,6 +246,10 @@ pub struct ConfigUpdateRequest {
     /// RAG configuration updates
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rag: Option<RagConfigUpdate>,
+
+    /// Sub-Agent configuration updates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent: Option<SubagentConfigUpdate>,
 }
 
 /// Server configuration updatable fields
@@ -272,6 +297,14 @@ pub struct MemoryConfigUpdate {
 #[derive(Debug, Clone, Deserialize)]
 pub struct RagConfigUpdate {
     pub enable: Option<bool>,
+}
+
+/// Sub-Agent configuration updatable fields
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SubagentConfigUpdate {
+    /// Execution mode: "direct" (Plan mode) or "subagent" (Sub-Agent mode)
+    pub execution_mode: Option<String>,
 }
 
 // ============================================================================

@@ -6,9 +6,11 @@ use std::collections::HashMap;
 
 use super::types::{
     ChatConfigUpdate, ConfigUpdateRequest, ConfigUpdateResponse, EmbeddingConfigUpdate,
-    MemoryConfigUpdate, RagConfigUpdate, SIDE_EFFECT_FIELDS, ServerConfigUpdate,
+    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, SubagentConfigUpdate,
+    SIDE_EFFECT_FIELDS,
 };
 use crate::config::{ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig};
+use crate::subagent::SubAgentSystemConfig;
 
 /// Result of applying a configuration update
 pub struct UpdateResult {
@@ -121,6 +123,16 @@ pub fn apply_config_update(
     // Apply rag config updates
     if let Some(ref rag_update) = request.rag {
         apply_rag_config_update(&mut config.rag, rag_update, validated_fields, &mut result);
+    }
+
+    // Apply subagent config updates
+    if let Some(ref subagent_update) = request.subagent {
+        apply_subagent_config_update(
+            &mut config.subagent,
+            subagent_update,
+            validated_fields,
+            &mut result,
+        );
     }
 
     result
@@ -366,6 +378,41 @@ fn apply_rag_config_update(
         if validated_fields.contains(&field.to_string()) {
             rag_config.enable = val;
             result.add_updated(field);
+        }
+    }
+}
+
+/// Apply Sub-Agent configuration updates
+fn apply_subagent_config_update(
+    subagent: &mut Option<SubAgentSystemConfig>,
+    update: &SubagentConfigUpdate,
+    validated_fields: &[String],
+    result: &mut UpdateResult,
+) {
+    // Sub-Agent config must exist to be updated
+    let Some(subagent_config) = subagent.as_mut() else {
+        if update.execution_mode.is_some() {
+            result.add_failed(
+                "subagent.execution_mode",
+                "Sub-Agent configuration not initialized",
+            );
+        }
+        return;
+    };
+
+    if let Some(ref mode) = update.execution_mode {
+        let field = "subagent.execution_mode";
+        if validated_fields.contains(&field.to_string()) {
+            // Validate execution_mode value
+            if mode == "direct" || mode == "subagent" {
+                subagent_config.execution_mode = mode.clone();
+                result.add_updated(field);
+            } else {
+                result.add_failed(
+                    field,
+                    "Invalid execution_mode. Must be 'direct' or 'subagent'",
+                );
+            }
         }
     }
 }
