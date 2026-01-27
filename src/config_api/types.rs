@@ -38,6 +38,11 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "rag.enable",
     // Subagent config - simple hot update
     "subagent.execution_mode",
+    // HITL config - simple hot update
+    "hitl.enabled",
+    "hitl.default_timeout_secs",
+    "hitl.default_timeout_behavior",
+    "hitl.confirmation_threshold",
 ];
 
 /// Fields that require service reload after update
@@ -92,6 +97,10 @@ pub struct SanitizedConfig {
     /// Sub-Agent configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SanitizedSubagentConfig>,
+
+    /// HITL (Human-in-the-Loop) configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hitl: Option<SanitizedHitlConfig>,
 
     /// List of fields that can be updated at runtime
     pub updatable_fields: Vec<String>,
@@ -219,6 +228,23 @@ pub struct SanitizedSubagentConfig {
     pub default_max_iterations: u32,
 }
 
+/// Sanitized HITL (Human-in-the-Loop) configuration
+#[derive(Debug, Clone, Serialize)]
+pub struct SanitizedHitlConfig {
+    /// Whether HITL is enabled
+    pub enabled: bool,
+    /// Default timeout in seconds
+    pub default_timeout_secs: u64,
+    /// Default timeout behavior
+    pub default_timeout_behavior: String,
+    /// Minimum risk level that requires confirmation
+    pub confirmation_threshold: String,
+    /// Number of tool overrides configured
+    pub tool_overrides_count: usize,
+    /// Whether runtime learning is enabled
+    pub runtime_learning_enabled: bool,
+}
+
 // ============================================================================
 // Config Update Request Types
 // ============================================================================
@@ -250,6 +276,10 @@ pub struct ConfigUpdateRequest {
     /// Sub-Agent configuration updates
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SubagentConfigUpdate>,
+
+    /// HITL configuration updates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hitl: Option<HitlConfigUpdate>,
 }
 
 /// Server configuration updatable fields
@@ -305,6 +335,20 @@ pub struct RagConfigUpdate {
 pub struct SubagentConfigUpdate {
     /// Execution mode: "direct" (Plan mode) or "subagent" (Sub-Agent mode)
     pub execution_mode: Option<String>,
+}
+
+/// HITL configuration updatable fields
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct HitlConfigUpdate {
+    /// Whether HITL is enabled
+    pub enabled: Option<bool>,
+    /// Default timeout in seconds
+    pub default_timeout_secs: Option<u64>,
+    /// Default timeout behavior (reject, approve, skip, abort, wait)
+    pub default_timeout_behavior: Option<String>,
+    /// Minimum risk level that requires confirmation (low, medium, high, critical)
+    pub confirmation_threshold: Option<String>,
 }
 
 // ============================================================================

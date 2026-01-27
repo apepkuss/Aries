@@ -5,15 +5,16 @@
 
 use super::types::{
     SanitizedArtifactsConfig, SanitizedChatConfig, SanitizedConfig, SanitizedEmbeddingConfig,
-    SanitizedMcpConfig, SanitizedMcpServerConfig, SanitizedMcpToolServerConfig,
-    SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig, SanitizedSkillConfig,
-    SanitizedSubagentConfig, UPDATABLE_FIELDS,
+    SanitizedHitlConfig, SanitizedMcpConfig, SanitizedMcpServerConfig,
+    SanitizedMcpToolServerConfig, SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig,
+    SanitizedSkillConfig, SanitizedSubagentConfig, UPDATABLE_FIELDS,
 };
 use crate::{
     config::{
         ArtifactsConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, McpServerConfig,
         McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SkillConfig,
     },
+    services::hitl::HitlConfig,
     subagent::SubAgentSystemConfig,
 };
 
@@ -40,6 +41,7 @@ impl Sanitize for Config {
             skill: self.skill.as_ref().map(|s| s.sanitize()),
             artifacts: self.artifacts.as_ref().map(|a| a.sanitize()),
             subagent: self.subagent.as_ref().map(|s| s.sanitize()),
+            hitl: self.hitl.as_ref().map(|h| h.sanitize()),
             updatable_fields: UPDATABLE_FIELDS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -196,6 +198,21 @@ impl Sanitize for SubAgentSystemConfig {
             max_concurrent: self.max_concurrent,
             default_timeout_secs: self.default_timeout_secs,
             default_max_iterations: self.default_max_iterations,
+        }
+    }
+}
+
+impl Sanitize for HitlConfig {
+    type Output = SanitizedHitlConfig;
+
+    fn sanitize(&self) -> SanitizedHitlConfig {
+        SanitizedHitlConfig {
+            enabled: self.enabled,
+            default_timeout_secs: self.default_timeout_secs,
+            default_timeout_behavior: format!("{:?}", self.default_timeout_behavior).to_lowercase(),
+            confirmation_threshold: format!("{:?}", self.confirmation_threshold).to_lowercase(),
+            tool_overrides_count: self.tool_overrides.len(),
+            runtime_learning_enabled: self.runtime_learning.is_some(),
         }
     }
 }

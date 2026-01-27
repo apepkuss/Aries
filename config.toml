@@ -301,6 +301,56 @@ retry_base_delay_ms = 1000            # Base delay for exponential backoff (ms)
 
 
 # ============================================================================
+# SECTION 1.10: HITL (HUMAN-IN-THE-LOOP) CONFIGURATION
+# ============================================================================
+# The HITL system provides human oversight for AI tool operations.
+# It uses a three-layer risk assessment mechanism:
+#   L1: Developer declaration (tool_overrides) - explicit risk configuration
+#   L2: System inference - automatic risk detection based on tool semantics
+#   L3: Runtime learning - adjust risk based on user approval history
+#
+# Risk levels: low, medium, high, critical
+#   - Operations at or above 'confirmation_threshold' require human approval
+#   - 'safe' level is only achievable through L3 runtime learning
+#
+# Timeout behaviors: reject, approve, skip, abort, wait
+#   - reject: Reject the operation (default)
+#   - approve: Auto-approve (only for low risk, forced to reject for high/critical)
+#   - skip: Skip this operation and continue
+#   - abort: Abort the entire task
+#   - wait: Wait indefinitely (no timeout)
+
+[hitl]
+enabled = false                       # Enable HITL system (default: true when section present)
+default_timeout_secs = 300            # Default timeout in seconds (5 minutes)
+default_timeout_behavior = "reject"   # Default behavior when timeout occurs
+confirmation_threshold = "medium"     # Minimum risk level that requires confirmation
+
+# L1: Developer-declared tool risk overrides
+# Use this to explicitly set risk levels for specific tools
+# Note: 'safe' level cannot be declared here (only achievable through L3 learning)
+#
+# Example:
+# [hitl.tool_overrides.dangerous_command]
+# risk_level = "critical"             # low, medium, high, critical
+# timeout_secs = 600                  # Optional: override timeout for this tool
+# timeout_behavior = "reject"         # Optional: override timeout behavior
+#
+# [hitl.tool_overrides.file_write]
+# risk_level = "high"
+# timeout_secs = 120
+
+# L3: Runtime learning configuration (optional)
+# When enabled, the system learns from user approval patterns and can
+# automatically reduce risk levels for frequently approved operations.
+#
+# [hitl.runtime_learning]
+# approvals_per_level = 3             # Consecutive approvals needed to reduce one risk level
+# trust_duration_secs = 604800        # Trust validity period in seconds (7 days, 0 = permanent)
+# min_level = "low"                   # Minimum level that can be reached through learning
+
+
+# ============================================================================
 # SECTION 2: AI SERVICE CONFIGURATION
 # ============================================================================
 # This section contains configuration for AI services including chat and

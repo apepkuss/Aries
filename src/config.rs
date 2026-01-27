@@ -71,6 +71,9 @@ pub struct Config {
     /// Sub-Agent system configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<crate::subagent::SubAgentSystemConfig>,
+    /// HITL (Human-in-the-Loop) configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hitl: Option<crate::services::hitl::HitlConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -132,6 +135,7 @@ impl Default for Config {
             artifacts: None,
             config_api: None,
             subagent: None,
+            hitl: None,
         }
     }
 }

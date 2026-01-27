@@ -3,8 +3,8 @@
 //! This module provides validation functions for configuration update requests.
 
 use super::types::{
-    ChatConfigUpdate, ConfigUpdateRequest, EmbeddingConfigUpdate, MemoryConfigUpdate,
-    RagConfigUpdate, ServerConfigUpdate, UPDATABLE_FIELDS,
+    ChatConfigUpdate, ConfigUpdateRequest, EmbeddingConfigUpdate, HitlConfigUpdate,
+    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, UPDATABLE_FIELDS,
 };
 
 /// Validation error for configuration updates
@@ -80,6 +80,11 @@ pub fn validate_config_update(request: &ConfigUpdateRequest) -> ValidationResult
     // Validate rag config updates
     if let Some(ref rag) = request.rag {
         validate_rag_config(rag, &mut result);
+    }
+
+    // Validate HITL config updates
+    if let Some(ref hitl) = request.hitl {
+        validate_hitl_config(hitl, &mut result);
     }
 
     result
@@ -241,6 +246,48 @@ fn validate_memory_config(memory: &MemoryConfigUpdate, result: &mut ValidationRe
 fn validate_rag_config(rag: &RagConfigUpdate, result: &mut ValidationResult) {
     if rag.enable.is_some() {
         result.add_valid("rag.enable");
+    }
+}
+
+/// Validate HITL configuration updates
+fn validate_hitl_config(hitl: &HitlConfigUpdate, result: &mut ValidationResult) {
+    // Validate enabled field
+    if hitl.enabled.is_some() {
+        result.add_valid("hitl.enabled");
+    }
+
+    // Validate default_timeout_secs
+    if let Some(val) = hitl.default_timeout_secs {
+        let field = "hitl.default_timeout_secs";
+        if val == 0 {
+            result.add_error(field, "timeout must be greater than 0");
+        } else if val > 3600 {
+            result.add_error(field, "timeout must not exceed 3600 seconds (1 hour)");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    // Validate default_timeout_behavior
+    if let Some(ref val) = hitl.default_timeout_behavior {
+        let field = "hitl.default_timeout_behavior";
+        let valid_behaviors = ["reject", "approve", "skip", "abort", "wait"];
+        if !valid_behaviors.contains(&val.to_lowercase().as_str()) {
+            result.add_error(field, "must be one of: reject, approve, skip, abort, wait");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    // Validate confirmation_threshold
+    if let Some(ref val) = hitl.confirmation_threshold {
+        let field = "hitl.confirmation_threshold";
+        let valid_levels = ["low", "medium", "high", "critical"];
+        if !valid_levels.contains(&val.to_lowercase().as_str()) {
+            result.add_error(field, "must be one of: low, medium, high, critical");
+        } else {
+            result.add_valid(field);
+        }
     }
 }
 
