@@ -18,6 +18,10 @@ import type {
   SubAgentToolCallEvent,
   SubAgentCompletedEvent,
   SubAgentFailedEvent,
+  // HITL event types
+  HitlRequestEvent,
+  HitlStatusEvent,
+  HitlTimeoutWarningEvent,
 } from './types';
 
 /**
@@ -265,6 +269,13 @@ function parseEnhancedEvent(
       return { type: 'subagent_completed', data: data as SubAgentCompletedEvent };
     case 'subagent_failed':
       return { type: 'subagent_failed', data: data as SubAgentFailedEvent };
+    // HITL events
+    case 'hitl_request':
+      return { type: 'hitl_request', data: data as HitlRequestEvent };
+    case 'hitl_status':
+      return { type: 'hitl_status', data: data as HitlStatusEvent };
+    case 'hitl_timeout_warning':
+      return { type: 'hitl_timeout_warning', data: data as HitlTimeoutWarningEvent };
     default:
       console.log('[Enhanced Stream] Unknown event type:', eventType);
       return null;

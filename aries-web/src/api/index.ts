@@ -4,3 +4,4 @@ export * from './client';
 export * from './config';
 export * from './chat';
 export * from './memory';
+export * from './hitl';

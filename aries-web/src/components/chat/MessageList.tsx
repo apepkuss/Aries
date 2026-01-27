@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageItem } from './MessageItem';
 import { useChatStore } from '@/stores';
+import { HitlOverlay } from '@/components/hitl';
 
 export function MessageList() {
   const { messages, executionStatus, isStreaming } = useChatStore();
@@ -43,6 +44,8 @@ export function MessageList() {
             isStreaming={index === lastStreamingIndex ? isStreaming : false}
           />
         ))}
+        {/* HITL overlay for pending requests */}
+        <HitlOverlay className="mt-4" />
         <div ref={bottomRef} />
       </div>
     </ScrollArea>

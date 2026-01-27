@@ -10,6 +10,7 @@ import type {
   UISubAgent,
 } from '@/api/types';
 import { useConfigStore } from './config';
+import { useHitlStore } from './hitl';
 
 // Execution status for task planning mode
 export interface ExecutionStatus {
@@ -588,6 +589,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 return { subAgents: newSubAgents, messages: updatedMessages };
               });
             }
+            break;
+
+          // HITL events - delegate to hitl store
+          case 'hitl_request':
+            console.log('[Chat Store] HITL request event:', event.data.request_id);
+            useHitlStore.getState().handleRequestEvent(event.data);
+            break;
+
+          case 'hitl_status':
+            console.log('[Chat Store] HITL status event:', event.data.request_id, event.data.new_status);
+            useHitlStore.getState().handleStatusEvent(event.data);
+            break;
+
+          case 'hitl_timeout_warning':
+            console.log('[Chat Store] HITL timeout warning:', event.data.request_id, event.data.remaining_seconds);
+            useHitlStore.getState().handleTimeoutWarning(event.data);
             break;
         }
       }

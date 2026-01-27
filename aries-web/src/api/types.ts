@@ -554,7 +554,10 @@ export type EnhancedStreamEvent =
   | { type: 'subagent_progress'; data: SubAgentProgressEvent }
   | { type: 'subagent_tool_call'; data: SubAgentToolCallEvent }
   | { type: 'subagent_completed'; data: SubAgentCompletedEvent }
-  | { type: 'subagent_failed'; data: SubAgentFailedEvent };
+  | { type: 'subagent_failed'; data: SubAgentFailedEvent }
+  | { type: 'hitl_request'; data: HitlRequestEvent }
+  | { type: 'hitl_status'; data: HitlStatusEvent }
+  | { type: 'hitl_timeout_warning'; data: HitlTimeoutWarningEvent };
 
 // ============================================================================
 // Sub-Agent Event Types
@@ -649,4 +652,215 @@ export interface UISubAgent {
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
+}
+
+// ============================================================================
+// HITL (Human-in-the-Loop) API Types
+// ============================================================================
+
+/** Risk level for HITL operations */
+export type HitlRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/** HITL request status */
+export type HitlRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'modified'
+  | 'expired'
+  | 'cancelled'
+  | 'completed';
+
+/** Timeout behavior for HITL requests */
+export type HitlTimeoutBehavior = 'approve' | 'reject' | 'skip' | 'wait';
+
+/** File operation type */
+export type FileOperationType = 'create' | 'modify' | 'delete' | 'move' | 'copy';
+
+/** Risk factor for HITL operations */
+export interface HitlRiskFactor {
+  category: string;
+  description: string;
+  severity: HitlRiskLevel;
+}
+
+/** File operation preview */
+export interface FileOperationPreview {
+  type: 'file';
+  operation: FileOperationType;
+  path: string;
+  content_preview?: string;
+  original_content?: string;
+  size_bytes?: number;
+  is_binary?: boolean;
+}
+
+/** Shell command preview */
+export interface ShellCommandPreview {
+  type: 'shell';
+  command: string;
+  working_directory?: string;
+  environment?: Record<string, string>;
+  estimated_impact?: string[];
+}
+
+/** HTTP request preview */
+export interface HttpRequestPreview {
+  type: 'http';
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body_preview?: string;
+}
+
+/** Generic operation preview */
+export interface GenericPreview {
+  type: 'generic';
+  title: string;
+  description: string;
+  details?: Record<string, string>;
+}
+
+/** Operation preview union type */
+export type HitlOperationPreview =
+  | FileOperationPreview
+  | ShellCommandPreview
+  | HttpRequestPreview
+  | GenericPreview;
+
+/** Confirmation request details */
+export interface HitlConfirmationRequest {
+  summary: string;
+  risk_level: HitlRiskLevel;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  preview: HitlOperationPreview;
+  risk_factors: HitlRiskFactor[];
+  allow_modification: boolean;
+  modifiable_fields: string[];
+}
+
+/** Clarification request details */
+export interface HitlClarificationRequest {
+  question: string;
+  context?: string;
+  options?: string[];
+  allow_free_input: boolean;
+}
+
+/** Feedback request details */
+export interface HitlFeedbackRequest {
+  summary: string;
+  context?: string;
+  rating_requested: boolean;
+  comment_requested: boolean;
+}
+
+/** Pause request details */
+export interface HitlPauseRequest {
+  reason: 'user_requested' | 'error_threshold' | 'checkpoint' | 'resource_limit';
+  current_state: string;
+  completed_steps: string[];
+  pending_steps: string[];
+}
+
+/** HITL request type union */
+export type HitlRequestType =
+  | { type: 'confirmation'; data: HitlConfirmationRequest }
+  | { type: 'clarification'; data: HitlClarificationRequest }
+  | { type: 'feedback'; data: HitlFeedbackRequest }
+  | { type: 'pause'; data: HitlPauseRequest };
+
+/** HITL request */
+export interface HitlRequest {
+  id: string;
+  conversation_id: string;
+  user_id: string;
+  request_type: HitlRequestType;
+  status: HitlRequestStatus;
+  created_at: string;
+  expires_at: string;
+  timeout_behavior: HitlTimeoutBehavior;
+  responded_at?: string;
+}
+
+/** HITL response types */
+export type HitlResponseAction =
+  | { action: 'approve' }
+  | { action: 'reject'; reason?: string }
+  | { action: 'modify'; modifications: Record<string, unknown> }
+  | { action: 'abort'; reason?: string }
+  | { action: 'clarify'; selected_option?: number; input?: string }
+  | { action: 'provide_feedback'; rating?: number; comment?: string }
+  | { action: 'resume' };
+
+/** Request to respond to a HITL request */
+export interface HitlRespondRequest {
+  response: HitlResponseAction;
+}
+
+/** Response from HITL respond endpoint */
+export interface HitlRespondResponse {
+  success: boolean;
+  request_id: string;
+  new_status: HitlRequestStatus;
+  message?: string;
+}
+
+/** Response from list pending HITL requests */
+export interface HitlPendingListResponse {
+  requests: HitlRequest[];
+  total: number;
+}
+
+/** Response from get HITL request history */
+export interface HitlHistoryResponse {
+  requests: HitlRequest[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// ============================================================================
+// HITL SSE Event Types
+// ============================================================================
+
+/** HITL request event - new request created */
+export interface HitlRequestEvent {
+  request_id: string;
+  request_type: string;
+  summary: string;
+  risk_level?: HitlRiskLevel;
+  tool_name?: string;
+  conversation_id: string;
+  expires_at: string;
+  timeout_behavior: HitlTimeoutBehavior;
+}
+
+/** HITL status event - request status changed */
+export interface HitlStatusEvent {
+  request_id: string;
+  old_status: HitlRequestStatus;
+  new_status: HitlRequestStatus;
+  reason?: string;
+}
+
+/** HITL timeout warning event */
+export interface HitlTimeoutWarningEvent {
+  request_id: string;
+  remaining_seconds: number;
+}
+
+// ============================================================================
+// HITL UI Types
+// ============================================================================
+
+/** UI representation of a HITL request */
+export interface UIHitlRequest extends HitlRequest {
+  /** Time remaining before expiration (seconds) */
+  remainingSeconds?: number;
+  /** Whether the request is expanded in UI */
+  expanded?: boolean;
+  /** Loading state for responding */
+  isResponding?: boolean;
 }
