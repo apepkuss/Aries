@@ -22,19 +22,35 @@
 //! - L1: 开发者在 SKILL.md / MCP 配置中显式声明（不允许 Safe）
 //! - L2: 基于工具名称关键词自动推断（兜底）
 //! - L3: 用户批准后积累信任，逐级降低风险
+//!
+//! # 集成层
+//!
+//! `integration` 模块提供了 HITL 机制与工具执行的集成支持：
+//! - `HitlToolCaller`: 工具调用器，自动检查风险并等待用户确认
+//! - `PreviewBuilder`: 操作预览构建器，生成用户友好的操作预览
 
 pub mod config;
+pub mod handlers;
+pub mod integration;
 pub mod manager;
+pub mod notifier;
 pub mod risk_assessor;
 pub mod risk_inference;
+pub mod security;
 pub mod store;
 pub mod trust_store;
 pub mod types;
 
 // Re-exports
 pub use config::{DeclaredRisk, HitlConfig, RuntimeLearningConfig};
+pub use integration::{
+    HitlToolCaller, HitlToolContext, HitlToolResult, McpHitlAdapter, McpServerHitlConfig,
+    McpToolCategory, PreviewBuilder, SkillHitlAdapter, SkillHitlConfig, SkillInternalToolConfig,
+};
 pub use manager::HitlManager;
+pub use notifier::{HitlEventBridge, HitlNotifier};
 pub use risk_assessor::{RiskAssessment, RiskAssessor};
+pub use security::SecurityValidator;
 pub use store::PendingStore;
 pub use trust_store::TrustStore;
 pub use types::*;

@@ -82,6 +82,12 @@ pub enum StreamEventType {
     SubAgentCompleted,
     /// Sub-Agent failed with error.
     SubAgentFailed,
+    /// HITL request created (awaiting user response).
+    HitlRequest,
+    /// HITL request status changed.
+    HitlStatus,
+    /// HITL timeout warning.
+    HitlTimeoutWarning,
 }
 
 impl fmt::Display for StreamEventType {
@@ -104,6 +110,9 @@ impl fmt::Display for StreamEventType {
             StreamEventType::SubAgentToolCall => write!(f, "subagent_tool_call"),
             StreamEventType::SubAgentCompleted => write!(f, "subagent_completed"),
             StreamEventType::SubAgentFailed => write!(f, "subagent_failed"),
+            StreamEventType::HitlRequest => write!(f, "hitl_request"),
+            StreamEventType::HitlStatus => write!(f, "hitl_status"),
+            StreamEventType::HitlTimeoutWarning => write!(f, "hitl_timeout_warning"),
         }
     }
 }
@@ -916,6 +925,142 @@ impl SubAgentFailedEvent {
 }
 
 // ============================================================================
+// HITL Events
+// ============================================================================
+
+/// Event payload when a HITL (Human-in-the-Loop) request is created.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlRequestEvent {
+    /// HITL request ID.
+    pub request_id: String,
+    /// Request type (confirmation, clarification, feedback, pause).
+    pub request_type: String,
+    /// Summary of what needs user attention.
+    pub summary: String,
+    /// Risk level (for confirmation requests).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<String>,
+    /// Tool name (for confirmation requests).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    /// Conversation ID.
+    pub conversation_id: String,
+    /// User ID.
+    pub user_id: String,
+    /// Expiration time (ISO 8601).
+    pub expires_at: String,
+    /// Remaining seconds until timeout.
+    pub remaining_seconds: i64,
+    /// Timeout behavior.
+    pub timeout_behavior: String,
+    /// Optional subtask ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
+    /// Optional Sub-Agent ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_id: Option<String>,
+}
+
+impl HitlRequestEvent {
+    /// Creates a new HitlRequestEvent.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        request_id: impl Into<String>,
+        request_type: impl Into<String>,
+        summary: impl Into<String>,
+        conversation_id: impl Into<String>,
+        user_id: impl Into<String>,
+        expires_at: impl Into<String>,
+        remaining_seconds: i64,
+        timeout_behavior: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: request_id.into(),
+            request_type: request_type.into(),
+            summary: summary.into(),
+            risk_level: None,
+            tool_name: None,
+            conversation_id: conversation_id.into(),
+            user_id: user_id.into(),
+            expires_at: expires_at.into(),
+            remaining_seconds,
+            timeout_behavior: timeout_behavior.into(),
+            subtask_id: None,
+            subagent_id: None,
+        }
+    }
+
+    /// Sets the risk level.
+    pub fn with_risk_level(mut self, risk_level: impl Into<String>) -> Self {
+        self.risk_level = Some(risk_level.into());
+        self
+    }
+
+    /// Sets the tool name.
+    pub fn with_tool_name(mut self, tool_name: impl Into<String>) -> Self {
+        self.tool_name = Some(tool_name.into());
+        self
+    }
+
+    /// Sets the subtask ID.
+    pub fn with_subtask_id(mut self, subtask_id: usize) -> Self {
+        self.subtask_id = Some(subtask_id);
+        self
+    }
+
+    /// Sets the Sub-Agent ID.
+    pub fn with_subagent_id(mut self, subagent_id: impl Into<String>) -> Self {
+        self.subagent_id = Some(subagent_id.into());
+        self
+    }
+}
+
+/// Event payload when a HITL request status changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlStatusEvent {
+    /// HITL request ID.
+    pub request_id: String,
+    /// New status (approved, rejected, modified, timed_out, cancelled, completed).
+    pub status: String,
+    /// Human-readable message.
+    pub message: String,
+}
+
+impl HitlStatusEvent {
+    /// Creates a new HitlStatusEvent.
+    pub fn new(
+        request_id: impl Into<String>,
+        status: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            request_id: request_id.into(),
+            status: status.into(),
+            message: message.into(),
+        }
+    }
+}
+
+/// Event payload when a HITL request is about to time out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HitlTimeoutWarningEvent {
+    /// HITL request ID.
+    pub request_id: String,
+    /// Remaining seconds until timeout.
+    pub remaining_seconds: u64,
+}
+
+impl HitlTimeoutWarningEvent {
+    /// Creates a new HitlTimeoutWarningEvent.
+    pub fn new(request_id: impl Into<String>, remaining_seconds: u64) -> Self {
+        Self {
+            request_id: request_id.into(),
+            remaining_seconds,
+        }
+    }
+}
+
+// ============================================================================
 // Unified Stream Event
 // ============================================================================
 
@@ -957,6 +1102,12 @@ pub enum StreamEvent {
     SubAgentCompleted(SubAgentCompletedEvent),
     /// Sub-Agent failed event.
     SubAgentFailed(SubAgentFailedEvent),
+    /// HITL request event.
+    HitlRequest(HitlRequestEvent),
+    /// HITL status change event.
+    HitlStatus(HitlStatusEvent),
+    /// HITL timeout warning event.
+    HitlTimeoutWarning(HitlTimeoutWarningEvent),
 }
 
 impl StreamEvent {
@@ -980,6 +1131,9 @@ impl StreamEvent {
             StreamEvent::SubAgentToolCall(_) => StreamEventType::SubAgentToolCall,
             StreamEvent::SubAgentCompleted(_) => StreamEventType::SubAgentCompleted,
             StreamEvent::SubAgentFailed(_) => StreamEventType::SubAgentFailed,
+            StreamEvent::HitlRequest(_) => StreamEventType::HitlRequest,
+            StreamEvent::HitlStatus(_) => StreamEventType::HitlStatus,
+            StreamEvent::HitlTimeoutWarning(_) => StreamEventType::HitlTimeoutWarning,
         }
     }
 }
@@ -1006,6 +1160,8 @@ pub struct EnhancedStreamConfig {
     pub include_artifacts: bool,
     /// Whether to include Sub-Agent events.
     pub include_subagents: bool,
+    /// Whether to include HITL events.
+    pub include_hitl: bool,
 }
 
 impl EnhancedStreamConfig {
@@ -1018,6 +1174,7 @@ impl EnhancedStreamConfig {
             include_status: true,
             include_artifacts: true,
             include_subagents: true,
+            include_hitl: true,
         }
     }
 
@@ -1061,6 +1218,7 @@ impl EnhancedStreamConfig {
             include_status: false,
             include_artifacts: false,
             include_subagents: false,
+            include_hitl: false,
         };
 
         for part in value.split(',') {
@@ -1070,12 +1228,14 @@ impl EnhancedStreamConfig {
                 "status" => config.include_status = true,
                 "artifacts" | "artifact" => config.include_artifacts = true,
                 "subagents" | "subagent" => config.include_subagents = true,
+                "hitl" => config.include_hitl = true,
                 "all" => {
                     config.include_thoughts = true;
                     config.include_tool_calls = true;
                     config.include_status = true;
                     config.include_artifacts = true;
                     config.include_subagents = true;
+                    config.include_hitl = true;
                 }
                 _ => {}
             }
@@ -1087,6 +1247,7 @@ impl EnhancedStreamConfig {
             && !config.include_status
             && !config.include_artifacts
             && !config.include_subagents
+            && !config.include_hitl
         {
             config = Self::all_enabled();
         }
@@ -1118,6 +1279,11 @@ impl EnhancedStreamConfig {
     /// Returns true if Sub-Agent events should be emitted.
     pub fn should_emit_subagent_events(&self) -> bool {
         self.enabled && self.include_subagents
+    }
+
+    /// Returns true if HITL events should be emitted.
+    pub fn should_emit_hitl(&self) -> bool {
+        self.enabled && self.include_hitl
     }
 }
 
@@ -1162,6 +1328,10 @@ pub fn format_stream_event(event: &StreamEvent) -> String {
         StreamEvent::SubAgentToolCall(e) => format_sse_event(&event_type, e),
         StreamEvent::SubAgentCompleted(e) => format_sse_event(&event_type, e),
         StreamEvent::SubAgentFailed(e) => format_sse_event(&event_type, e),
+        // HITL events
+        StreamEvent::HitlRequest(e) => format_sse_event(&event_type, e),
+        StreamEvent::HitlStatus(e) => format_sse_event(&event_type, e),
+        StreamEvent::HitlTimeoutWarning(e) => format_sse_event(&event_type, e),
     }
 }
 

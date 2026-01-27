@@ -32,10 +32,11 @@ use tokio::sync::mpsc;
 use super::{
     events::{
         ArtifactCreatedEvent, ArtifactDeletedEvent, ArtifactUpdatedEvent, EnhancedStreamConfig,
-        ExecutionPhase, ExecutionSummary, FinishEvent, StatusEvent, StreamEvent,
-        SubAgentCompletedEvent, SubAgentFailedEvent, SubAgentProgressEvent, SubAgentSpawnedEvent,
-        SubAgentStartedEvent, SubAgentThoughtEvent, SubAgentToolCallEvent, TextEvent, ThoughtEvent,
-        ThoughtStatus, ToolCallEvent, ToolResultEvent, format_stream_event,
+        ExecutionPhase, ExecutionSummary, FinishEvent, HitlRequestEvent, HitlStatusEvent,
+        HitlTimeoutWarningEvent, StatusEvent, StreamEvent, SubAgentCompletedEvent,
+        SubAgentFailedEvent, SubAgentProgressEvent, SubAgentSpawnedEvent, SubAgentStartedEvent,
+        SubAgentThoughtEvent, SubAgentToolCallEvent, TextEvent, ThoughtEvent, ThoughtStatus,
+        ToolCallEvent, ToolResultEvent, format_stream_event,
     },
     trace::TokenUsage,
 };
@@ -195,6 +196,34 @@ pub trait EventEmitter: Send + Sync {
         iterations: u32,
         duration_ms: u64,
     );
+
+    // ========================================================================
+    // HITL Events
+    // ========================================================================
+
+    /// Emits a HITL request event (awaiting user response).
+    #[allow(clippy::too_many_arguments)]
+    async fn emit_hitl_request(
+        &self,
+        request_id: &str,
+        request_type: &str,
+        summary: &str,
+        risk_level: Option<&str>,
+        tool_name: Option<&str>,
+        conversation_id: &str,
+        user_id: &str,
+        expires_at: &str,
+        remaining_seconds: i64,
+        timeout_behavior: &str,
+        subtask_id: Option<usize>,
+        subagent_id: Option<&str>,
+    );
+
+    /// Emits a HITL status change event.
+    async fn emit_hitl_status(&self, request_id: &str, status: &str, message: &str);
+
+    /// Emits a HITL timeout warning event.
+    async fn emit_hitl_timeout_warning(&self, request_id: &str, remaining_seconds: u64);
 
     /// Returns whether this emitter is active (will actually emit events).
     #[allow(dead_code)]
@@ -560,6 +589,71 @@ impl EventEmitter for SseEventEmitter {
         self.send_event(StreamEvent::SubAgentFailed(event)).await;
     }
 
+    async fn emit_hitl_request(
+        &self,
+        request_id: &str,
+        request_type: &str,
+        summary: &str,
+        risk_level: Option<&str>,
+        tool_name: Option<&str>,
+        conversation_id: &str,
+        user_id: &str,
+        expires_at: &str,
+        remaining_seconds: i64,
+        timeout_behavior: &str,
+        subtask_id: Option<usize>,
+        subagent_id: Option<&str>,
+    ) {
+        if !self.config.should_emit_hitl() {
+            return;
+        }
+
+        let mut event = HitlRequestEvent::new(
+            request_id,
+            request_type,
+            summary,
+            conversation_id,
+            user_id,
+            expires_at,
+            remaining_seconds,
+            timeout_behavior,
+        );
+
+        if let Some(level) = risk_level {
+            event = event.with_risk_level(level);
+        }
+        if let Some(tool) = tool_name {
+            event = event.with_tool_name(tool);
+        }
+        if let Some(id) = subtask_id {
+            event = event.with_subtask_id(id);
+        }
+        if let Some(agent_id) = subagent_id {
+            event = event.with_subagent_id(agent_id);
+        }
+
+        self.send_event(StreamEvent::HitlRequest(event)).await;
+    }
+
+    async fn emit_hitl_status(&self, request_id: &str, status: &str, message: &str) {
+        if !self.config.should_emit_hitl() {
+            return;
+        }
+
+        let event = HitlStatusEvent::new(request_id, status, message);
+        self.send_event(StreamEvent::HitlStatus(event)).await;
+    }
+
+    async fn emit_hitl_timeout_warning(&self, request_id: &str, remaining_seconds: u64) {
+        if !self.config.should_emit_hitl() {
+            return;
+        }
+
+        let event = HitlTimeoutWarningEvent::new(request_id, remaining_seconds);
+        self.send_event(StreamEvent::HitlTimeoutWarning(event))
+            .await;
+    }
+
     fn is_active(&self) -> bool {
         true
     }
@@ -740,6 +834,32 @@ impl EventEmitter for NoopEventEmitter {
         _iterations: u32,
         _duration_ms: u64,
     ) {
+        // No-op
+    }
+
+    async fn emit_hitl_request(
+        &self,
+        _request_id: &str,
+        _request_type: &str,
+        _summary: &str,
+        _risk_level: Option<&str>,
+        _tool_name: Option<&str>,
+        _conversation_id: &str,
+        _user_id: &str,
+        _expires_at: &str,
+        _remaining_seconds: i64,
+        _timeout_behavior: &str,
+        _subtask_id: Option<usize>,
+        _subagent_id: Option<&str>,
+    ) {
+        // No-op
+    }
+
+    async fn emit_hitl_status(&self, _request_id: &str, _status: &str, _message: &str) {
+        // No-op
+    }
+
+    async fn emit_hitl_timeout_warning(&self, _request_id: &str, _remaining_seconds: u64) {
         // No-op
     }
 

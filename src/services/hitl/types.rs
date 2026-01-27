@@ -292,7 +292,7 @@ pub struct FileOperationPreview {
     pub affected_files_count: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FileOperationType {
     Create,
