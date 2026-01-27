@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { useUIStore, useConversationsStore, useChatStore } from '@/stores';
+import { useUIStore, useConversationsStore, useChatStore, useConfigStore } from '@/stores';
 import { useEffect } from 'react';
 
 export function Sidebar() {
@@ -22,11 +22,17 @@ export function Sidebar() {
     deleteConversation: removeConversation,
   } = useConversationsStore();
   const { clearMessages, loadMessages, setConversationId } = useChatStore();
+  const { config } = useConfigStore();
 
-  // Fetch conversations on mount
+  // Check if memory feature is enabled
+  const memoryEnabled = config?.memory?.enable ?? false;
+
+  // Fetch conversations on mount (only if memory is enabled)
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    if (memoryEnabled) {
+      fetchConversations();
+    }
+  }, [fetchConversations, memoryEnabled]);
 
   const handleNewChat = () => {
     clearMessages();
@@ -65,7 +71,11 @@ export function Sidebar() {
       {/* Conversations list */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 py-2">
-          {isLoading ? (
+          {!memoryEnabled ? (
+            <div className="text-sm text-muted-foreground text-center py-8 px-2">
+              会话历史已禁用
+            </div>
+          ) : isLoading ? (
             <div className="text-sm text-muted-foreground text-center py-8">
               加载中...
             </div>

@@ -24,7 +24,6 @@ export function ConfigPanel() {
     isLoading,
     isSaving,
     error,
-    pendingChanges,
     fetchConfig,
     fetchSchema,
     saveChanges,
@@ -72,16 +71,10 @@ export function ConfigPanel() {
     setSettingsOpen(false);
   };
 
-  // Check if there are changes to chat service that will cause reconnection
-  const hasServiceChanges = !!(
-    pendingChanges.chat?.url ||
-    pendingChanges.chat?.api_key
-  );
-
   return (
     <Dialog open={settingsOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="max-w-2xl max-h-[85vh]">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
             Configure Aries server settings. Changes are applied immediately after saving.
@@ -102,7 +95,7 @@ export function ConfigPanel() {
           </div>
         ) : (
           <>
-            <ScrollArea className="max-h-[60vh]">
+            <ScrollArea className="flex-1 min-h-0 overflow-hidden">
               <Tabs defaultValue="service" className="w-full">
                 <TabsList className="w-full">
                   <TabsTrigger value="service" className="flex-1">
@@ -132,29 +125,21 @@ export function ConfigPanel() {
               </Tabs>
             </ScrollArea>
 
-            {/* Warning for service changes */}
-            {hasServiceChanges && (
-              <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-md">
-                <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                <p className="text-sm text-yellow-600 dark:text-yellow-400">
-                  Changing service URL or API key will reconnect the service.
-                </p>
-              </div>
-            )}
-
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="shrink-0 flex-col sm:flex-row gap-2 border-t pt-4">
               {hasPendingChanges() && (
-                <Badge variant="secondary" className="mr-auto">
+                <Badge variant="secondary" className="sm:mr-auto self-start">
                   Unsaved changes
                 </Badge>
               )}
-              <Button variant="outline" onClick={handleClose}>
-                Cancel
-              </Button>
-              <Button onClick={handleSave} disabled={!hasPendingChanges() || isSaving}>
-                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Changes
-              </Button>
+              <div className="flex gap-2 w-full sm:w-auto justify-end">
+                <Button variant="outline" onClick={handleClose}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSave} disabled={!hasPendingChanges() || isSaving}>
+                  {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save
+                </Button>
+              </div>
             </DialogFooter>
           </>
         )}
