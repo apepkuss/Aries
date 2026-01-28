@@ -523,6 +523,7 @@ mod tests {
             skill: None,
             artifacts: None,
             subagent: None,
+            hitl: None,
             updatable_fields: vec!["server.max_tools_per_iteration".to_string()],
         };
 

@@ -124,6 +124,33 @@ impl SubAgentManager {
         spawn_config: Option<SubAgentSpawnConfig>,
         parent_id: Option<SubAgentId>,
     ) -> ServerResult<SubAgentId> {
+        self.spawn_with_subtask_id(name, system_prompt, task, spawn_config, parent_id, None)
+            .await
+    }
+
+    /// 创建新的 Sub-Agent，并设置子任务 ID
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Sub-Agent 名称
+    /// * `system_prompt` - 系统提示词
+    /// * `task` - 任务描述
+    /// * `spawn_config` - 创建配置（可选）
+    /// * `parent_id` - 父 Sub-Agent ID（用于嵌套场景）
+    /// * `subtask_id` - 子任务 ID（1-based，用于 HITL 显示标识）
+    ///
+    /// # Returns
+    ///
+    /// 成功返回新创建的 SubAgentId，失败返回错误
+    pub async fn spawn_with_subtask_id(
+        &self,
+        name: impl Into<String>,
+        system_prompt: impl Into<String>,
+        task: impl Into<String>,
+        spawn_config: Option<SubAgentSpawnConfig>,
+        parent_id: Option<SubAgentId>,
+        subtask_id: Option<usize>,
+    ) -> ServerResult<SubAgentId> {
         // 检查是否启用
         if !self.config.enabled {
             return Err(ServerError::SubAgentDisabled);
@@ -163,6 +190,11 @@ impl SubAgentManager {
         // 设置父 Agent
         if let Some(pid) = parent_id {
             agent = agent.with_parent(pid, parent_depth);
+        }
+
+        // 设置子任务 ID（用于 HITL 显示标识）
+        if let Some(id) = subtask_id {
+            agent = agent.with_subtask_id(id);
         }
 
         // 应用工具访问配置

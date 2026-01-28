@@ -9,10 +9,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tokio::{
+    select,
     sync::{RwLock, broadcast, oneshot},
     task::JoinHandle,
     time::{Duration, interval},
 };
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -122,6 +124,7 @@ impl HitlManager {
     /// 创建确认请求
     ///
     /// 用于工具调用前的确认
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_confirmation_request(
         &self,
         tool_name: &str,
@@ -130,6 +133,8 @@ impl HitlManager {
         preview: OperationPreview,
         conversation_id: &str,
         user_id: &str,
+        subtask_id: Option<usize>,
+        subagent_id: Option<String>,
     ) -> Result<HitlRequest, HitlError> {
         let summary = format!("执行 {} 操作", tool_name);
 
@@ -154,11 +159,14 @@ impl HitlManager {
             timeout_secs,
             timeout_behavior,
             HashMap::new(),
+            subtask_id,
+            subagent_id,
         )
         .await
     }
 
     /// 创建 HITL 请求
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_request(
         &self,
         request_type: HitlRequestType,
@@ -167,6 +175,8 @@ impl HitlManager {
         timeout_secs: u64,
         timeout_behavior: TimeoutBehavior,
         metadata: HashMap<String, serde_json::Value>,
+        subtask_id: Option<usize>,
+        subagent_id: Option<String>,
     ) -> Result<HitlRequest, HitlError> {
         if !self.config.enabled {
             return Err(HitlError::ConfigError("HITL is disabled".to_string()));
@@ -185,6 +195,8 @@ impl HitlManager {
             timeout_behavior,
         );
         request.metadata = metadata;
+        request.subtask_id = subtask_id;
+        request.subagent_id = subagent_id;
 
         // 存储请求
         self.store
@@ -197,6 +209,7 @@ impl HitlManager {
         info!(
             request_id = %request.id,
             conversation_id = %conversation_id,
+            subtask_id = ?subtask_id,
             "HITL request created"
         );
 
@@ -207,6 +220,17 @@ impl HitlManager {
     ///
     /// 阻塞直到用户响应或超时
     pub async fn wait_for_response(&self, request_id: &str) -> Result<HitlResponse, HitlError> {
+        self.wait_for_response_with_cancel(request_id, None).await
+    }
+
+    /// 等待用户响应（支持取消）
+    ///
+    /// 阻塞直到用户响应、超时或被取消
+    pub async fn wait_for_response_with_cancel(
+        &self,
+        request_id: &str,
+        cancel_token: Option<&CancellationToken>,
+    ) -> Result<HitlResponse, HitlError> {
         let request = self
             .store
             .get(request_id)
@@ -231,10 +255,40 @@ impl HitlManager {
             waiters.insert(request_id.to_string(), tx);
         }
 
-        // 等待响应
-        match rx.await {
-            Ok(result) => result,
-            Err(_) => Err(HitlError::Internal("Waiter channel closed".to_string())),
+        // 等待响应或取消
+        if let Some(token) = cancel_token {
+            select! {
+                result = rx => {
+                    match result {
+                        Ok(r) => r,
+                        Err(_) => Err(HitlError::Internal("Waiter channel closed".to_string())),
+                    }
+                }
+                _ = token.cancelled() => {
+                    // 取消时，移除等待者
+                    let mut waiters = self.waiters.write().await;
+                    waiters.remove(request_id);
+
+                    // 更新请求状态为已取消
+                    let _ = self.store.update_status(request_id, HitlRequestStatus::Cancelled);
+
+                    // 发送 SSE 事件通知前端
+                    self.notify_status(request_id, HitlRequestStatus::Cancelled, "请求被其他子任务拒绝而取消");
+
+                    info!(
+                        request_id = %request_id,
+                        "HITL request cancelled by cancellation token"
+                    );
+
+                    Err(HitlError::Cancelled(request_id.to_string()))
+                }
+            }
+        } else {
+            // 没有取消令牌，直接等待
+            match rx.await {
+                Ok(result) => result,
+                Err(_) => Err(HitlError::Internal("Waiter channel closed".to_string())),
+            }
         }
     }
 
@@ -633,6 +687,8 @@ mod tests {
                 300,
                 TimeoutBehavior::Reject,
                 HashMap::new(),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -668,6 +724,8 @@ mod tests {
                 300,
                 TimeoutBehavior::Reject,
                 HashMap::new(),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -706,6 +764,8 @@ mod tests {
                 300,
                 TimeoutBehavior::Reject,
                 HashMap::new(),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -742,6 +802,8 @@ mod tests {
                 300,
                 TimeoutBehavior::Reject,
                 HashMap::new(),
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -833,6 +895,8 @@ mod tests {
                     300,
                     TimeoutBehavior::Reject,
                     HashMap::new(),
+                    None,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -864,6 +928,8 @@ mod tests {
                     }),
                     "conv1",
                     "user1",
+                    None,
+                    None,
                 )
                 .await
                 .unwrap();

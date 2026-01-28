@@ -148,7 +148,7 @@ impl HitlNotifier {
                         &request.user_id,
                         &request.expires_at.to_rfc3339(),
                         request.remaining_seconds(),
-                        &format!("{:?}", request.timeout_behavior),
+                        &format!("{:?}", request.timeout_behavior).to_lowercase(),
                         request.subtask_id,
                         request.subagent_id.as_deref(),
                     )
@@ -167,7 +167,7 @@ impl HitlNotifier {
                 message,
             } => {
                 emitter
-                    .emit_hitl_status(&request_id, &format!("{:?}", status), &message)
+                    .emit_hitl_status(&request_id, status.as_str(), &message)
                     .await;
 
                 debug!(

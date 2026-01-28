@@ -243,6 +243,9 @@ pub struct SubAgent {
     pub task: String,
     /// 当前状态
     pub state: SubAgentState,
+    /// 子任务 ID（1-based，用于 HITL 显示标识）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
     /// 父 Sub-Agent ID（如果是嵌套创建的）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SubAgentId>,
@@ -283,6 +286,7 @@ impl SubAgent {
             system_prompt: system_prompt.into(),
             task: task.into(),
             state: SubAgentState::Pending,
+            subtask_id: None,
             parent_id: None,
             depth: 0,
             allowed_tools: None,
@@ -299,6 +303,12 @@ impl SubAgent {
     pub fn with_parent(mut self, parent_id: SubAgentId, parent_depth: u32) -> Self {
         self.parent_id = Some(parent_id);
         self.depth = parent_depth + 1;
+        self
+    }
+
+    /// 设置子任务 ID（1-based，用于 HITL 显示标识）
+    pub fn with_subtask_id(mut self, subtask_id: usize) -> Self {
+        self.subtask_id = Some(subtask_id);
         self
     }
 

@@ -149,6 +149,12 @@ pub struct HitlRequestDetailResponse {
     /// 响应（如果有）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<HitlResponse>,
+    /// 子任务 ID（1-based）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subtask_id: Option<usize>,
+    /// Sub-Agent ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_id: Option<String>,
 }
 
 /// 请求详情
@@ -303,9 +309,11 @@ impl From<&HitlRequest> for HitlRequestDetailResponse {
             updated_at: request.updated_at.to_rfc3339(),
             expires_at: request.expires_at.to_rfc3339(),
             remaining_seconds: request.remaining_seconds(),
-            timeout_behavior: format!("{:?}", request.timeout_behavior),
+            timeout_behavior: format!("{:?}", request.timeout_behavior).to_lowercase(),
             metadata: request.metadata.clone(),
             response: request.response.clone(),
+            subtask_id: request.subtask_id,
+            subagent_id: request.subagent_id.clone(),
         }
     }
 }

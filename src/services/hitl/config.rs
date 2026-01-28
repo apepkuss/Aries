@@ -280,7 +280,7 @@ mod tests {
 
         assert!(config.enabled);
         assert_eq!(config.default_timeout_secs, 300);
-        assert_eq!(config.default_timeout_behavior, TimeoutBehavior::Reject);
+        assert_eq!(config.default_timeout_behavior, TimeoutBehavior::Wait);
         assert_eq!(config.confirmation_threshold, RiskLevel::Medium);
         assert!(config.tool_overrides.is_empty());
         assert!(config.runtime_learning.is_none());
@@ -297,7 +297,7 @@ mod tests {
         let risk = DeclaredRisk::new(RiskLevel::High);
         assert_eq!(risk.risk_level, RiskLevel::High);
         assert_eq!(risk.timeout_secs, 300);
-        assert_eq!(risk.timeout_behavior, TimeoutBehavior::Reject);
+        assert_eq!(risk.timeout_behavior, TimeoutBehavior::Wait);
     }
 
     #[test]

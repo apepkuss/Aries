@@ -430,6 +430,7 @@ mod tests {
             memory: None,
             rag: Some(RagConfigUpdate { enable: Some(true) }),
             subagent: None,
+            hitl: None,
         };
 
         let result = validate_config_update(&request);

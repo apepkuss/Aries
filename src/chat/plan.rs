@@ -915,6 +915,19 @@ pub(crate) async fn chat(
 
                 // Handle final result after retry loop
                 if let Some(error) = last_error {
+                    // Check if this is a user interruption - abort the entire plan immediately
+                    if matches!(error, ServerError::UserInterrupted(_)) {
+                        dual_warn!(
+                            "🛑 Plan execution aborted due to user interruption: {} - request_id: {}",
+                            error,
+                            request_id
+                        );
+                        subtask.fail(error.to_string());
+                        subtask_trace.fail(error.to_string());
+                        trace.add_subtask_trace(subtask_trace);
+                        return Err(error);
+                    }
+
                     // Check if we exhausted all retries
                     if subtask_trace.retry_count >= subtask_max_retries && subtask_max_retries > 0 {
                         let retry_exhausted_error = ServerError::SubtaskRetryExhausted {
@@ -1182,11 +1195,20 @@ async fn chat_realtime_stream(
         .await;
 
         if let Err(e) = result {
-            dual_error!(
-                "Realtime chat execution failed: {} - request_id: {}",
-                e,
-                request_id_clone
-            );
+            // Use WARN for user interruption, ERROR for other failures
+            if matches!(e, ServerError::UserInterrupted(_)) {
+                dual_warn!(
+                    "Realtime chat execution interrupted by user: {} - request_id: {}",
+                    e,
+                    request_id_clone
+                );
+            } else {
+                dual_error!(
+                    "Realtime chat execution failed: {} - request_id: {}",
+                    e,
+                    request_id_clone
+                );
+            }
         }
     });
 
@@ -1563,7 +1585,7 @@ async fn execute_chat_plan_realtime(
         };
 
         // Execute subtasks in parallel
-        execute_subtasks_parallel(
+        if let Err(e) = execute_subtasks_parallel(
             &parallel_ctx,
             &mut plan.subtasks,
             &mut subtask_results,
@@ -1573,7 +1595,32 @@ async fn execute_chat_plan_realtime(
             &mut trace,
             total_subtasks,
         )
-        .await?;
+        .await
+        {
+            // Check if this is a user interruption - send proper SSE events before returning
+            if matches!(e, ServerError::UserInterrupted(_)) {
+                dual_warn!(
+                    "🛑 Plan execution aborted due to user interruption (parallel mode): {} - request_id: {}",
+                    e,
+                    request_id
+                );
+                trace.finalize(TraceStatus::Error(e.to_string()));
+
+                // Send interruption event to frontend
+                let error_event = format_sse_event(
+                    "error",
+                    &serde_json::json!({
+                        "message": e.to_string(),
+                        "type": "user_interrupted"
+                    }),
+                );
+                let _ = event_sender.send(error_event).await;
+                let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
+                return Err(e);
+            }
+            // For other errors, propagate normally
+            return Err(e);
+        }
     } else {
         // Sequential execution (existing code)
         dual_info!(
@@ -2030,6 +2077,31 @@ async fn execute_chat_plan_realtime(
 
                 // Handle final result after retry loop
                 if let Some(error) = last_error {
+                    // Check if this is a user interruption - abort the entire plan immediately
+                    if matches!(error, ServerError::UserInterrupted(_)) {
+                        dual_warn!(
+                            "🛑 Plan execution aborted due to user interruption: {} - request_id: {}",
+                            error,
+                            request_id
+                        );
+                        subtask.fail(error.to_string());
+                        subtask_trace.fail(error.to_string());
+                        trace.add_subtask_trace(subtask_trace);
+                        trace.finalize(TraceStatus::Error(error.to_string()));
+
+                        // Send interruption event to frontend
+                        let error_event = format_sse_event(
+                            "error",
+                            &serde_json::json!({
+                                "message": error.to_string(),
+                                "type": "user_interrupted"
+                            }),
+                        );
+                        let _ = event_sender.send(error_event).await;
+                        let _ = event_sender.send("data: [DONE]\n\n".to_string()).await;
+                        return Err(error);
+                    }
+
                     // Check if we exhausted all retries
                     if subtask_trace.retry_count >= subtask_max_retries && subtask_max_retries > 0 {
                         let retry_exhausted_error = ServerError::SubtaskRetryExhausted {
@@ -4740,14 +4812,15 @@ async fn execute_subtask_via_subagent(
     // 6. Build system prompt for the Sub-Agent
     let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
 
-    // 7. Spawn the Sub-Agent
+    // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
-        .spawn(
+        .spawn_with_subtask_id(
             format!("subtask-{}", subtask.id),
             system_prompt.clone(),
             context.clone(),
             Some(spawn_config),
             None, // No parent
+            Some(subtask.id),
         )
         .await?;
 
@@ -4861,12 +4934,22 @@ async fn execute_subtask_via_subagent(
             Ok(subagent_result.output)
         }
         Err(e) => {
-            dual_error!(
-                "❌ Subtask {} failed via Sub-Agent: {} - request_id: {}",
-                subtask.id,
-                e,
-                request_id
-            );
+            // Use WARN for user interruption, ERROR for other failures
+            if matches!(e, ServerError::UserInterrupted(_)) {
+                dual_warn!(
+                    "🛑 Subtask {} interrupted by user via Sub-Agent: {} - request_id: {}",
+                    subtask.id,
+                    e,
+                    request_id
+                );
+            } else {
+                dual_error!(
+                    "❌ Subtask {} failed via Sub-Agent: {} - request_id: {}",
+                    subtask.id,
+                    e,
+                    request_id
+                );
+            }
 
             // Emit failure event
             emitter
@@ -5177,14 +5260,15 @@ async fn execute_subtask_via_subagent_with_context(
     // 6. Build system prompt for the Sub-Agent
     let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
 
-    // 7. Spawn the Sub-Agent
+    // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
-        .spawn(
+        .spawn_with_subtask_id(
             format!("subtask-{}", subtask.id),
             system_prompt.clone(),
             context.clone(),
             Some(spawn_config),
             None,
+            Some(subtask.id),
         )
         .await?;
 
@@ -5657,12 +5741,27 @@ pub async fn execute_subtasks_parallel(
                         .await;
                 }
                 Err(error) => {
-                    dual_error!(
-                        "❌ Subtask {} failed: {} - request_id: {}",
-                        subtask_id,
-                        error,
-                        ctx.request_id
-                    );
+                    // Check if this is a user interruption (not a real error)
+                    let is_user_interrupted = error.contains("User interrupted")
+                        || error.contains("rejected by user")
+                        || error.contains("Tool call rejected")
+                        || error.contains("cancelled due to another subtask");
+
+                    if is_user_interrupted {
+                        dual_warn!(
+                            "⚠️ Subtask {} interrupted by user: {} - request_id: {}",
+                            subtask_id,
+                            error,
+                            ctx.request_id
+                        );
+                    } else {
+                        dual_error!(
+                            "❌ Subtask {} failed: {} - request_id: {}",
+                            subtask_id,
+                            error,
+                            ctx.request_id
+                        );
+                    }
 
                     // Update subtask status
                     if let Some(subtask) = subtasks.iter_mut().find(|s| s.id == subtask_id) {
@@ -5673,6 +5772,13 @@ pub async fn execute_subtasks_parallel(
                     match executor_config.failure_policy {
                         crate::subagent::FailurePolicy::FailFast
                         | crate::subagent::FailurePolicy::Fail => {
+                            // Preserve UserInterrupted error type for proper handling upstream
+                            if is_user_interrupted {
+                                return Err(ServerError::UserInterrupted(format!(
+                                    "Subtask {} interrupted: {}",
+                                    subtask_id, error
+                                )));
+                            }
                             return Err(ServerError::Operation(format!(
                                 "Subtask {} failed: {}",
                                 subtask_id, error
@@ -5712,6 +5818,8 @@ pub async fn execute_subtasks_parallel(
 /// Execute a single parallel group of subtasks.
 ///
 /// Uses a semaphore to limit concurrent executions to `max_parallel`.
+/// Implements fail-fast: if any subtask is rejected by user (UserInterrupted),
+/// all other subtasks in the group are cancelled immediately.
 #[allow(clippy::too_many_arguments)]
 async fn execute_parallel_group(
     ctx: &ParallelExecutionContext,
@@ -5726,6 +5834,10 @@ async fn execute_parallel_group(
 
     let semaphore = Arc::new(Semaphore::new(max_parallel));
     let mut handles = Vec::new();
+
+    // Create a group-level cancellation token (child of the original)
+    // This allows us to cancel all subtasks in this group when one is rejected
+    let group_cancel_token = ctx.cancel_token.child_token();
 
     // Calculate time budget for this group
     let pending_count = subtask_indices.len();
@@ -5743,7 +5855,9 @@ async fn execute_parallel_group(
         };
 
         // Clone context for the spawned task
-        let ctx = ctx.clone();
+        let mut ctx = ctx.clone();
+        // Use the group-level cancel token instead of the original
+        ctx.cancel_token = group_cancel_token.clone();
         let previous_results = previous_results.to_vec();
         let timeout = group_timeout;
         // Use the emitter from context for streaming events
@@ -5800,15 +5914,41 @@ async fn execute_parallel_group(
         handles.push(handle);
     }
 
-    // Wait for all tasks in the group to complete
+    // Use select_all to process results as they complete
+    // This allows us to cancel other tasks immediately when one is rejected
     let mut results = Vec::new();
-    for handle in handles {
-        match handle.await {
-            Ok(result) => results.push(result),
+    let mut pending_handles = handles;
+
+    while !pending_handles.is_empty() {
+        let (result, _index, remaining) = futures_util::future::select_all(pending_handles).await;
+
+        match result {
+            Ok(subtask_result) => {
+                // Check if this is a user interruption (reject)
+                // Error message contains "User interrupted" or "rejected by user"
+                let is_user_rejected = subtask_result.result.as_ref().is_err_and(|e| {
+                    e.contains("User interrupted")
+                        || e.contains("rejected by user")
+                        || e.contains("Tool call rejected")
+                });
+
+                if is_user_rejected {
+                    dual_warn!(
+                        "⚠️ Subtask {} was rejected by user, cancelling other subtasks in group",
+                        subtask_result.subtask_id
+                    );
+                    // Cancel all other subtasks in this group
+                    group_cancel_token.cancel();
+                }
+
+                results.push(subtask_result);
+            }
             Err(e) => {
                 dual_error!("Task join error: {:?}", e);
             }
         }
+
+        pending_handles = remaining;
     }
 
     results

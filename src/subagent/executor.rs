@@ -29,7 +29,7 @@ use crate::{
     mcp::MCP_SERVICES,
     reflection::engine::LlmServerInfo,
     server::TargetServerInfo,
-    services::hitl::{self, HitlToolCaller, HitlToolContext, HitlToolResult},
+    services::hitl::{self, HitlError, HitlToolCaller, HitlToolContext, HitlToolResult},
 };
 
 // ============================================================================
@@ -87,6 +87,7 @@ impl SubAgentExecutor {
     }
 
     /// 创建带 HITL 上下文的执行器
+    #[allow(clippy::too_many_arguments)]
     pub fn with_hitl_context(
         state: Arc<AppState>,
         chat_server: TargetServerInfo,
@@ -341,7 +342,7 @@ impl SubAgentExecutor {
                     // 执行工具调用（带 HITL 检查）
                     let tool_start = Instant::now();
                     let tool_result = self
-                        .execute_tool_call(&tool_call.function.name, &tool_args, id)
+                        .execute_tool_call(&tool_call.function.name, &tool_args, id, cancel_token)
                         .await;
 
                     let tool_duration = tool_start.elapsed();
@@ -358,6 +359,11 @@ impl SubAgentExecutor {
                             tool_history.push(format!("{} | Result: OK", tool_record));
                         }
                         Err(e) => {
+                            // Check if this is a user interruption - terminate immediately without reflection
+                            if matches!(e, ServerError::UserInterrupted(_)) {
+                                return Err(e.clone());
+                            }
+
                             let error_msg = e.to_string();
                             tool_history.push(format!("{} | Error: {}", tool_record, error_msg));
 
@@ -607,6 +613,7 @@ impl SubAgentExecutor {
         tool_name: &str,
         args: &serde_json::Value,
         subagent_id: &SubAgentId,
+        cancel_token: &CancellationToken,
     ) -> ServerResult<String> {
         // 检查是否是 Sub-Agent 工具（不允许递归调用，除非配置允许）
         if is_subagent_tool(tool_name) {
@@ -617,8 +624,22 @@ impl SubAgentExecutor {
 
         // 如果启用了 HITL，使用 HitlToolCaller 进行检查
         if let Some(ref hitl_caller) = self.hitl_caller {
-            let context = HitlToolContext::new(&self.conversation_id, &self.user_id)
-                .with_subagent_id(subagent_id.to_string());
+            // 从 manager 获取 SubAgent 以获取 subtask_id
+            let subtask_id = self
+                .manager
+                .get(subagent_id)
+                .await
+                .ok()
+                .and_then(|sa| sa.subtask_id);
+
+            let mut context = HitlToolContext::new(&self.conversation_id, &self.user_id)
+                .with_subagent_id(subagent_id.to_string())
+                .with_cancel_token(cancel_token.clone());
+
+            // 如果有 subtask_id，添加到上下文
+            if let Some(id) = subtask_id {
+                context = context.with_subtask_id(id);
+            }
 
             let tool_name_clone = tool_name.to_string();
             let result = hitl_caller
@@ -635,13 +656,15 @@ impl SubAgentExecutor {
                     | HitlToolResult::Approved(r)
                     | HitlToolResult::HitlDisabled(r) => Ok(r),
                     HitlToolResult::Modified { result, .. } => Ok(result),
-                    HitlToolResult::Rejected { reason } => Err(ServerError::Operation(format!(
-                        "Tool call rejected by user: {}",
-                        reason.unwrap_or_else(|| "No reason provided".to_string())
-                    ))),
-                    HitlToolResult::Skipped { reason } => {
-                        Err(ServerError::Operation(format!("Tool call skipped: {}", reason)))
+                    HitlToolResult::Rejected { reason } => {
+                        Err(ServerError::UserInterrupted(reason.unwrap_or_else(|| {
+                            "Tool call rejected by user".to_string()
+                        })))
                     }
+                    HitlToolResult::Skipped { reason } => Err(ServerError::Operation(format!(
+                        "Tool call skipped: {}",
+                        reason
+                    ))),
                     HitlToolResult::Aborted { reason } => Err(ServerError::Operation(format!(
                         "Tool call aborted: {}",
                         reason.unwrap_or_else(|| "No reason provided".to_string())
@@ -651,7 +674,17 @@ impl SubAgentExecutor {
                         behavior
                     ))),
                 },
-                Err(e) => Err(ServerError::Operation(format!("HITL error: {}", e))),
+                Err(e) => {
+                    // Handle Cancelled error specially - treat it as user interruption
+                    // for fail-fast behavior to work correctly
+                    if matches!(e, HitlError::Cancelled(_)) {
+                        Err(ServerError::UserInterrupted(
+                            "HITL request cancelled due to another subtask rejection".to_string(),
+                        ))
+                    } else {
+                        Err(ServerError::Operation(format!("HITL error: {}", e)))
+                    }
+                }
             }
         } else {
             // 没有 HITL，直接执行

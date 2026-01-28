@@ -323,7 +323,7 @@ retry_base_delay_ms = 1000            # Base delay for exponential backoff (ms)
 [hitl]
 enabled = true                       # Enable HITL system (default: true when section present)
 default_timeout_secs = 300            # Default timeout in seconds (5 minutes)
-default_timeout_behavior = "reject"   # Default behavior when timeout occurs
+default_timeout_behavior = "wait"     # Default behavior: wait indefinitely for user response
 confirmation_threshold = "medium"     # Minimum risk level that requires confirmation
 
 # L1: Developer-declared tool risk overrides

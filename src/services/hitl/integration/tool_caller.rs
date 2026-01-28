@@ -17,6 +17,7 @@
 
 use std::{future::Future, sync::Arc};
 
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::preview::PreviewBuilder;
@@ -136,6 +137,8 @@ pub struct HitlToolContext {
     pub subtask_id: Option<usize>,
     /// Sub-Agent ID（可选）
     pub subagent_id: Option<String>,
+    /// 取消令牌（可选，用于取消等待中的 HITL 请求）
+    pub cancel_token: Option<CancellationToken>,
 }
 
 impl HitlToolContext {
@@ -146,6 +149,7 @@ impl HitlToolContext {
             user_id: user_id.into(),
             subtask_id: None,
             subagent_id: None,
+            cancel_token: None,
         }
     }
 
@@ -158,6 +162,12 @@ impl HitlToolContext {
     /// 设置 Sub-Agent ID
     pub fn with_subagent_id(mut self, subagent_id: impl Into<String>) -> Self {
         self.subagent_id = Some(subagent_id.into());
+        self
+    }
+
+    /// 设置取消令牌
+    pub fn with_cancel_token(mut self, cancel_token: CancellationToken) -> Self {
+        self.cancel_token = Some(cancel_token);
         self
     }
 }
@@ -256,8 +266,8 @@ impl HitlToolCaller {
             "Creating HITL confirmation request"
         );
 
-        // 创建确认请求
-        let mut request = self
+        // 创建确认请求（包含 subtask_id 和 subagent_id）
+        let request = self
             .manager
             .create_confirmation_request(
                 tool_name,
@@ -266,12 +276,10 @@ impl HitlToolCaller {
                 preview,
                 &context.conversation_id,
                 &context.user_id,
+                context.subtask_id,
+                context.subagent_id.clone(),
             )
             .await?;
-
-        // 设置可选字段
-        request.subtask_id = context.subtask_id;
-        request.subagent_id = context.subagent_id.clone();
 
         let request_id = request.id.clone();
 
@@ -281,8 +289,11 @@ impl HitlToolCaller {
             "Waiting for user response"
         );
 
-        // 等待用户响应
-        let response = self.manager.wait_for_response(&request_id).await?;
+        // 等待用户响应（支持取消）
+        let response = self
+            .manager
+            .wait_for_response_with_cancel(&request_id, context.cancel_token.as_ref())
+            .await?;
 
         // 处理响应
         self.process_response(response, tool_name, args, execute_fn)

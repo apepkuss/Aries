@@ -59,6 +59,20 @@ impl HitlRequestStatus {
     pub fn can_respond(&self) -> bool {
         matches!(self, Self::Pending)
     }
+
+    /// 转换为 snake_case 字符串（与 serde 序列化一致）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Modified => "modified",
+            Self::TimedOut => "timed_out",
+            Self::Cancelled => "cancelled",
+            Self::Processing => "processing",
+            Self::Completed => "completed",
+        }
+    }
 }
 
 /// HITL 请求
@@ -146,8 +160,7 @@ impl HitlRequest {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeoutBehavior {
-    /// 自动拒绝（默认）
-    #[default]
+    /// 自动拒绝
     Reject,
     /// 自动批准（仅限低风险，High/Critical 会被强制改为 Reject）
     Approve,
@@ -155,7 +168,8 @@ pub enum TimeoutBehavior {
     Skip,
     /// 终止整个任务
     Abort,
-    /// 无限等待（不超时）
+    /// 无限等待（不超时）- 默认
+    #[default]
     Wait,
 }
 
@@ -477,6 +491,9 @@ pub enum HitlError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("HITL request cancelled: {0}")]
+    Cancelled(String),
 }
 
 #[cfg(test)]
@@ -522,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_timeout_behavior_default() {
-        assert_eq!(TimeoutBehavior::default(), TimeoutBehavior::Reject);
+        assert_eq!(TimeoutBehavior::default(), TimeoutBehavior::Wait);
     }
 
     #[test]

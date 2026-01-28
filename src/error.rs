@@ -79,6 +79,10 @@ pub enum ServerError {
     SubAgentAlreadyTerminal { id: String, state: String },
     #[error("Sub-Agent global token limit exceeded: used {used} of {max} tokens")]
     SubAgentTokenLimitExceeded { used: u64, max: u64 },
+
+    // User interruption errors
+    #[error("User interrupted: {0}")]
+    UserInterrupted(String),
 }
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
@@ -276,6 +280,14 @@ impl IntoResponse for ServerError {
                 "rate_limit_error".into(),
                 Some("token_limit".into()),
                 Some("subagent_token_limit_exceeded".into()),
+            ),
+            // User interruption
+            ServerError::UserInterrupted(reason) => (
+                StatusCode::OK, // Use 200 OK since this is expected user behavior
+                format!("User interrupted: {reason}"),
+                "user_interrupted".into(),
+                None,
+                Some("user_interrupted".into()),
             ),
         };
 
