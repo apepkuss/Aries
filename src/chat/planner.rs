@@ -668,24 +668,24 @@ impl TaskPlanner {
 </subtask>
 ```
 
-示例2 - 可结合操作的并行优化（计算 23+32+33+22）：
+示例2 - 可结合操作的并行优化（计算 100+200+300+400）：
 
 ⚠️ **错误的串行规划**（效率低）：
 ```xml
-<subtask id="1"><description>计算 23 + 32</description><dependencies></dependencies></subtask>
-<subtask id="2"><description>将结果与 33 相加</description><dependencies>1</dependencies></subtask>
-<subtask id="3"><description>将结果与 22 相加</description><dependencies>2</dependencies></subtask>
+<subtask id="1"><description>计算 100 + 200</description><dependencies></dependencies></subtask>
+<subtask id="2"><description>将结果与 300 相加</description><dependencies>1</dependencies></subtask>
+<subtask id="3"><description>将结果与 400 相加</description><dependencies>2</dependencies></subtask>
 ```
-这样规划会导致串行执行：((23+32)+33)+22，无法并行。
+这样规划会导致串行执行：((100+200)+300)+400，无法并行。
 
 ✅ **正确的并行规划**（效率高）：
 ```xml
 <subtask id="1">
-  <description>计算 23 + 32</description>
+  <description>计算 100 + 200</description>
   <dependencies></dependencies>
 </subtask>
 <subtask id="2">
-  <description>计算 33 + 22</description>
+  <description>计算 300 + 400</description>
   <dependencies></dependencies>  <!-- 与任务1独立，可并行 -->
 </subtask>
 <subtask id="3">
@@ -693,7 +693,7 @@ impl TaskPlanner {
   <dependencies>1, 2</dependencies>  <!-- 依赖两个并行任务的结果 -->
 </subtask>
 ```
-这样规划可以并行执行：(23+32) 和 (33+22) 同时计算，然后汇总。
+这样规划可以并行执行：(100+200) 和 (300+400) 同时计算，然后汇总。
 
 示例3 - 必须串行的任务（有状态依赖）：
 ```xml

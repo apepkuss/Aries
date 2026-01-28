@@ -186,6 +186,18 @@ pub(crate) async fn chat(
         .map(|c| c.is_subagent_mode())
         .unwrap_or(false);
 
+    // Log the execution mode for debugging
+    let execution_mode_str = subagent_config
+        .as_ref()
+        .map(|c| c.execution_mode.as_str())
+        .unwrap_or("direct (default)");
+    dual_info!(
+        "🎯 Execution mode: {} (use_subagent={}) - request_id: {}",
+        execution_mode_str,
+        use_subagent_execution,
+        request_id
+    );
+
     // Initialize time budget for the entire plan
     let time_budget = TimeBudget::new(plan_timeout_secs);
 
@@ -1322,6 +1334,18 @@ async fn execute_chat_plan_realtime(
         .as_ref()
         .map(|c| c.is_subagent_mode())
         .unwrap_or(false);
+
+    // Log the execution mode for debugging
+    let execution_mode_str = subagent_config
+        .as_ref()
+        .map(|c| c.execution_mode.as_str())
+        .unwrap_or("direct (default)");
+    dual_info!(
+        "🎯 Execution mode: {} (use_subagent={}) - request_id: {}",
+        execution_mode_str,
+        use_subagent_execution,
+        request_id
+    );
 
     // Disable streaming for internal LLM calls
     request.stream = Some(false);
@@ -4769,17 +4793,21 @@ async fn execute_subtask_via_subagent(
     };
 
     // 3. Filter tools based on inheritance and blacklist
+    // IMPORTANT: Always filter out Sub-Agent tools to prevent recursive spawning
     let filtered_tools = if executor_config.inherit_tools {
         available_tools
             .iter()
-            .filter(|t| !is_tool_blocked(&t.name, &executor_config.blocked_tools))
+            .filter(|t| {
+                !is_tool_blocked(&t.name, &executor_config.blocked_tools)
+                    && !is_subagent_tool(&t.name)
+            })
             .cloned()
             .collect::<Vec<_>>()
     } else {
-        // Only allow explicitly required tools
+        // Only allow explicitly required tools (but never Sub-Agent tools)
         available_tools
             .iter()
-            .filter(|t| subtask.required_tools.contains(&t.name))
+            .filter(|t| subtask.required_tools.contains(&t.name) && !is_subagent_tool(&t.name))
             .cloned()
             .collect::<Vec<_>>()
     };

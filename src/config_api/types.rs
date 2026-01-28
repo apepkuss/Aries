@@ -220,6 +220,8 @@ pub struct SanitizedSubagentConfig {
     pub enabled: bool,
     /// Execution mode: "direct" (Plan mode) or "subagent" (Sub-Agent mode)
     pub execution_mode: String,
+    /// Parallel mode for subtask execution: "auto" | "sequential" | "manual"
+    pub parallel_mode: String,
     /// Maximum concurrent Sub-Agents
     pub max_concurrent: usize,
     /// Default timeout per Sub-Agent in seconds
@@ -335,6 +337,8 @@ pub struct RagConfigUpdate {
 pub struct SubagentConfigUpdate {
     /// Execution mode: "direct" (Plan mode) or "subagent" (Sub-Agent mode)
     pub execution_mode: Option<String>,
+    /// Parallel mode for subtask execution: "auto" | "sequential" | "manual"
+    pub parallel_mode: Option<String>,
 }
 
 /// HITL configuration updatable fields

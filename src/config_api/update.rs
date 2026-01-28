@@ -399,9 +399,16 @@ fn apply_subagent_config_update(
                 "Sub-Agent configuration not initialized",
             );
         }
+        if update.parallel_mode.is_some() {
+            result.add_failed(
+                "subagent.parallel_mode",
+                "Sub-Agent configuration not initialized",
+            );
+        }
         return;
     };
 
+    // Update execution_mode
     if let Some(ref mode) = update.execution_mode {
         let field = "subagent.execution_mode";
         if validated_fields.contains(&field.to_string()) {
@@ -413,6 +420,24 @@ fn apply_subagent_config_update(
                 result.add_failed(
                     field,
                     "Invalid execution_mode. Must be 'direct' or 'subagent'",
+                );
+            }
+        }
+    }
+
+    // Update parallel_mode (in subtask_executor config)
+    if let Some(ref mode) = update.parallel_mode {
+        let field = "subagent.parallel_mode";
+        if validated_fields.contains(&field.to_string()) {
+            // Validate parallel_mode value
+            let valid_modes = ["auto", "sequential", "manual"];
+            if valid_modes.contains(&mode.as_str()) {
+                subagent_config.subtask_executor.parallel_mode = mode.clone();
+                result.add_updated(field);
+            } else {
+                result.add_failed(
+                    field,
+                    "Invalid parallel_mode. Must be 'auto', 'sequential', or 'manual'",
                 );
             }
         }

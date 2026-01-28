@@ -218,6 +218,24 @@ pub async fn update_config_handler(
     let side_effect_fields = update_result.side_effect_fields.clone();
     let updated_fields_count = update_result.updated_fields.len();
 
+    // Log detailed update info for debugging
+    dual_info!(
+        "📝 Config update result - request_id: {} - updated: {:?}, failed: {:?}",
+        request_id,
+        update_result.updated_fields,
+        update_result.failed_fields
+    );
+
+    // Log current subagent.execution_mode for debugging mode switching
+    if let Some(ref subagent) = config.subagent {
+        dual_info!(
+            "📝 Current subagent config - execution_mode: {}, parallel_mode: {} - request_id: {}",
+            subagent.execution_mode,
+            subagent.subtask_executor.parallel_mode,
+            request_id
+        );
+    }
+
     // Step 3: Build response
     let mut response = update_result.into_response();
 

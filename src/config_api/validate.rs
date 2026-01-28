@@ -4,7 +4,8 @@
 
 use super::types::{
     ChatConfigUpdate, ConfigUpdateRequest, EmbeddingConfigUpdate, HitlConfigUpdate,
-    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, UPDATABLE_FIELDS,
+    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, SubagentConfigUpdate,
+    UPDATABLE_FIELDS,
 };
 
 /// Validation error for configuration updates
@@ -80,6 +81,11 @@ pub fn validate_config_update(request: &ConfigUpdateRequest) -> ValidationResult
     // Validate rag config updates
     if let Some(ref rag) = request.rag {
         validate_rag_config(rag, &mut result);
+    }
+
+    // Validate subagent config updates
+    if let Some(ref subagent) = request.subagent {
+        validate_subagent_config(subagent, &mut result);
     }
 
     // Validate HITL config updates
@@ -246,6 +252,31 @@ fn validate_memory_config(memory: &MemoryConfigUpdate, result: &mut ValidationRe
 fn validate_rag_config(rag: &RagConfigUpdate, result: &mut ValidationResult) {
     if rag.enable.is_some() {
         result.add_valid("rag.enable");
+    }
+}
+
+/// Validate Sub-Agent configuration updates
+fn validate_subagent_config(subagent: &SubagentConfigUpdate, result: &mut ValidationResult) {
+    // Validate execution_mode
+    if let Some(ref mode) = subagent.execution_mode {
+        let field = "subagent.execution_mode";
+        let valid_modes = ["direct", "subagent"];
+        if !valid_modes.contains(&mode.as_str()) {
+            result.add_error(field, "must be one of: direct, subagent");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    // Validate parallel_mode
+    if let Some(ref mode) = subagent.parallel_mode {
+        let field = "subagent.parallel_mode";
+        let valid_modes = ["auto", "sequential", "manual"];
+        if !valid_modes.contains(&mode.as_str()) {
+            result.add_error(field, "must be one of: auto, sequential, manual");
+        } else {
+            result.add_valid(field);
+        }
     }
 }
 

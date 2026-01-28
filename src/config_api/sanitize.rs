@@ -195,6 +195,7 @@ impl Sanitize for SubAgentSystemConfig {
         SanitizedSubagentConfig {
             enabled: self.enabled,
             execution_mode: self.execution_mode.clone(),
+            parallel_mode: self.subtask_executor.parallel_mode.clone(),
             max_concurrent: self.max_concurrent,
             default_timeout_secs: self.default_timeout_secs,
             default_max_iterations: self.default_max_iterations,

@@ -380,10 +380,11 @@ pub struct McpToolServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_url: Option<String>,
     pub enable: bool,
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     pub server_name: Option<String>,
-    #[serde(skip_deserializing)]
+    #[serde(skip)]
     pub tools: Option<Vec<RmcpTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_message: Option<String>,
 }
 impl McpToolServerConfig {
