@@ -25,6 +25,13 @@ const riskConfig: Record<
     icon: typeof ShieldCheckIcon;
   }
 > = {
+  safe: {
+    label: 'Safe',
+    bgColor: 'bg-blue-100 dark:bg-blue-900/30',
+    textColor: 'text-blue-700 dark:text-blue-400',
+    borderColor: 'border-blue-300 dark:border-blue-700',
+    icon: ShieldCheckIcon,
+  },
   low: {
     label: 'Low Risk',
     bgColor: 'bg-green-100 dark:bg-green-900/30',
@@ -74,7 +81,8 @@ export function RiskBadge({
   size = 'md',
   className,
 }: RiskBadgeProps) {
-  const config = riskConfig[level];
+  // Fallback to medium if level is not recognized
+  const config = riskConfig[level] || riskConfig.medium;
   const Icon = config.icon;
 
   return (
@@ -101,7 +109,8 @@ export function RiskLevelIcon({
   level: HitlRiskLevel;
   className?: string;
 }) {
-  const config = riskConfig[level];
+  // Fallback to medium if level is not recognized
+  const config = riskConfig[level] || riskConfig.medium;
   const Icon = config.icon;
   return <Icon className={cn(config.textColor, className)} />;
 }

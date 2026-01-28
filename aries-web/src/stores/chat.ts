@@ -598,7 +598,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             break;
 
           case 'hitl_status':
-            console.log('[Chat Store] HITL status event:', event.data.request_id, event.data.new_status);
+            console.log('[Chat Store] HITL status event:', event.data.request_id, event.data.status);
             useHitlStore.getState().handleStatusEvent(event.data);
             break;
 

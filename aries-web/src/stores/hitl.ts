@@ -8,6 +8,7 @@ import type {
   HitlRequestStatus,
   HitlRespondResponse,
   HitlRequestType,
+  HitlRiskLevel,
 } from '@/api/types';
 import {
   getPendingRequests,
@@ -95,17 +96,22 @@ function toUIRequest(request: HitlRequest): UIHitlRequest {
 
 // Create a placeholder request type for SSE events (full data fetched separately)
 function createPlaceholderRequestType(
-  type: 'confirmation' | 'clarification' | 'feedback' | 'pause'
+  type: 'confirmation' | 'clarification' | 'feedback' | 'pause',
+  eventData?: {
+    summary?: string;
+    tool_name?: string;
+    risk_level?: string;
+  }
 ): HitlRequestType {
   switch (type) {
     case 'confirmation':
       return {
         type: 'confirmation',
         data: {
-          summary: '',
-          tool_name: '',
+          summary: eventData?.summary || '',
+          tool_name: eventData?.tool_name || '',
           tool_args: {},
-          risk_level: 'medium',
+          risk_level: (eventData?.risk_level as HitlRiskLevel) || 'medium',
           preview: { type: 'generic', title: '', description: '' },
           risk_factors: [],
           allow_modification: false,
@@ -228,14 +234,14 @@ export const useHitlStore = create<HitlState>((set, get) => ({
 
       set((state) => {
         const newRequests = new Map(state.pendingRequests);
-        if (terminalStatuses.includes(response.new_status)) {
+        if (terminalStatuses.includes(response.status)) {
           newRequests.delete(requestId);
         } else {
           const req = newRequests.get(requestId);
           if (req) {
             newRequests.set(requestId, {
               ...req,
-              status: response.new_status,
+              status: response.status,
               isResponding: false,
             });
           }
@@ -330,13 +336,17 @@ export const useHitlStore = create<HitlState>((set, get) => ({
   // Handle SSE: new request event
   handleRequestEvent: (event: HitlRequestEvent) => {
     // Create a minimal request from the event
-    // Note: data is a placeholder that will be populated when fetchRequestDetail completes
+    // Note: Some fields are populated from event, rest will be filled when fetchRequestDetail completes
     const requestType = event.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause';
     const request: UIHitlRequest = {
       id: event.request_id,
       conversation_id: event.conversation_id,
       user_id: '', // Will be filled when we fetch detail
-      request_type: createPlaceholderRequestType(requestType),
+      request_type: createPlaceholderRequestType(requestType, {
+        summary: event.summary,
+        tool_name: event.tool_name,
+        risk_level: event.risk_level,
+      }),
       status: 'pending',
       created_at: new Date().toISOString(),
       expires_at: event.expires_at,
@@ -373,14 +383,14 @@ export const useHitlStore = create<HitlState>((set, get) => ({
     set((state) => {
       const newRequests = new Map(state.pendingRequests);
 
-      if (terminalStatuses.includes(event.new_status)) {
+      if (terminalStatuses.includes(event.status)) {
         newRequests.delete(event.request_id);
       } else {
         const request = newRequests.get(event.request_id);
         if (request) {
           newRequests.set(event.request_id, {
             ...request,
-            status: event.new_status,
+            status: event.status,
           });
         }
       }
@@ -388,7 +398,7 @@ export const useHitlStore = create<HitlState>((set, get) => ({
       return {
         pendingRequests: newRequests,
         activeRequestId:
-          terminalStatuses.includes(event.new_status) &&
+          terminalStatuses.includes(event.status) &&
           state.activeRequestId === event.request_id
             ? null
             : state.activeRequestId,

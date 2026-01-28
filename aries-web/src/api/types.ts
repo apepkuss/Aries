@@ -659,7 +659,7 @@ export interface UISubAgent {
 // ============================================================================
 
 /** Risk level for HITL operations */
-export type HitlRiskLevel = 'low' | 'medium' | 'high' | 'critical';
+export type HitlRiskLevel = 'safe' | 'low' | 'medium' | 'high' | 'critical';
 
 /** HITL request status */
 export type HitlRequestStatus =
@@ -803,7 +803,7 @@ export interface HitlRespondRequest {
 export interface HitlRespondResponse {
   success: boolean;
   request_id: string;
-  new_status: HitlRequestStatus;
+  status: HitlRequestStatus;
   message?: string;
 }
 
@@ -840,9 +840,8 @@ export interface HitlRequestEvent {
 /** HITL status event - request status changed */
 export interface HitlStatusEvent {
   request_id: string;
-  old_status: HitlRequestStatus;
-  new_status: HitlRequestStatus;
-  reason?: string;
+  status: HitlRequestStatus;
+  message: string;
 }
 
 /** HITL timeout warning event */

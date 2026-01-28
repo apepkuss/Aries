@@ -1,11 +1,19 @@
-import { apiClient } from './client';
+import { apiClient, getCurrentUserId } from './client';
 import type {
   HitlRequest,
-  HitlRespondRequest,
   HitlRespondResponse,
   HitlPendingListResponse,
   HitlHistoryResponse,
 } from './types';
+
+/**
+ * Backend request format for HITL respond endpoint
+ */
+interface BackendRespondRequest {
+  user_id: string;
+  response_type: string;
+  data?: Record<string, unknown>;
+}
 
 /**
  * Get all pending HITL requests for the current conversation
@@ -19,7 +27,7 @@ export async function getPendingRequests(
     : undefined;
 
   return apiClient
-    .get('v1/hitl/pending', { searchParams })
+    .get('api/hitl/pending', { searchParams })
     .json<HitlPendingListResponse>();
 }
 
@@ -28,21 +36,29 @@ export async function getPendingRequests(
  * @param requestId - The HITL request ID
  */
 export async function getRequestDetail(requestId: string): Promise<HitlRequest> {
-  return apiClient.get(`v1/hitl/${requestId}`).json<HitlRequest>();
+  return apiClient.get(`api/hitl/requests/${requestId}`).json<HitlRequest>();
 }
 
 /**
- * Respond to a HITL request
+ * Respond to a HITL request (internal)
  * @param requestId - The HITL request ID
- * @param response - The response action
+ * @param responseType - The response type (approve, reject, modify, abort, clarify, feedback, resume)
+ * @param data - Optional additional data
  */
-export async function respondToRequest(
+async function respondToRequest(
   requestId: string,
-  response: HitlRespondRequest
+  responseType: string,
+  data?: Record<string, unknown>
 ): Promise<HitlRespondResponse> {
+  const request: BackendRespondRequest = {
+    user_id: getCurrentUserId(),
+    response_type: responseType,
+    data,
+  };
+
   return apiClient
-    .post(`v1/hitl/${requestId}/respond`, {
-      json: response,
+    .post(`api/hitl/requests/${requestId}/respond`, {
+      json: request,
     })
     .json<HitlRespondResponse>();
 }
@@ -52,7 +68,10 @@ export async function respondToRequest(
  * @param requestId - The HITL request ID
  */
 export async function cancelRequest(requestId: string): Promise<void> {
-  await apiClient.delete(`v1/hitl/${requestId}`);
+  const userId = getCurrentUserId();
+  await apiClient.delete(`api/hitl/requests/${requestId}`, {
+    searchParams: { user_id: userId },
+  });
 }
 
 /**
@@ -81,7 +100,7 @@ export async function getRequestHistory(options?: {
   }
 
   return apiClient
-    .get('v1/hitl/history', {
+    .get('api/hitl/stats', {
       searchParams: Object.keys(searchParams).length > 0 ? searchParams : undefined,
     })
     .json<HitlHistoryResponse>();
@@ -91,9 +110,7 @@ export async function getRequestHistory(options?: {
  * Helper: Approve a HITL request
  */
 export async function approveRequest(requestId: string): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'approve' },
-  });
+  return respondToRequest(requestId, 'approve');
 }
 
 /**
@@ -103,9 +120,7 @@ export async function rejectRequest(
   requestId: string,
   reason?: string
 ): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'reject', reason },
-  });
+  return respondToRequest(requestId, 'reject', reason ? { reason } : undefined);
 }
 
 /**
@@ -115,9 +130,7 @@ export async function modifyRequest(
   requestId: string,
   modifications: Record<string, unknown>
 ): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'modify', modifications },
-  });
+  return respondToRequest(requestId, 'modify', { modifications });
 }
 
 /**
@@ -127,9 +140,7 @@ export async function abortRequest(
   requestId: string,
   reason?: string
 ): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'abort', reason },
-  });
+  return respondToRequest(requestId, 'abort', reason ? { reason } : undefined);
 }
 
 /**
@@ -140,9 +151,14 @@ export async function clarifyRequest(
   selectedOption?: number,
   input?: string
 ): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'clarify', selected_option: selectedOption, input },
-  });
+  const data: Record<string, unknown> = {};
+  if (selectedOption !== undefined) {
+    data.selected_option = selectedOption;
+  }
+  if (input !== undefined) {
+    data.input = input;
+  }
+  return respondToRequest(requestId, 'clarify', Object.keys(data).length > 0 ? data : undefined);
 }
 
 /**
@@ -153,16 +169,19 @@ export async function provideFeedback(
   rating?: number,
   comment?: string
 ): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'provide_feedback', rating, comment },
-  });
+  const data: Record<string, unknown> = {};
+  if (rating !== undefined) {
+    data.rating = rating;
+  }
+  if (comment !== undefined) {
+    data.comment = comment;
+  }
+  return respondToRequest(requestId, 'feedback', Object.keys(data).length > 0 ? data : undefined);
 }
 
 /**
  * Helper: Resume from a pause HITL request
  */
 export async function resumeRequest(requestId: string): Promise<HitlRespondResponse> {
-  return respondToRequest(requestId, {
-    response: { action: 'resume' },
-  });
+  return respondToRequest(requestId, 'resume');
 }
