@@ -6,7 +6,7 @@ use std::{
 
 use aries::{
     AppState, HEALTH_CHECK_INTERVAL, artifacts, capabilities, cli, config, config_api, error,
-    executor, handlers, info, mcp_handlers, memory, responses, skills, subagent, utils,
+    executor, handlers, hitl, info, mcp_handlers, memory, responses, skills, subagent, utils,
 };
 use axum::{
     body::Body,
@@ -202,8 +202,26 @@ async fn main() -> ServerResult<()> {
     // Save subagent config before moving config into AppState
     let subagent_config = config.subagent.clone();
 
+    // Save HITL config before moving config into AppState
+    let hitl_config = config.hitl.clone();
+
     // Save config API settings before moving config into AppState
     let config_api_settings = config.config_api.clone();
+
+    // Initialize HITL system if configured
+    if let Some(ref hitl_cfg) = hitl_config {
+        if hitl_cfg.enabled {
+            hitl::init_global(hitl_cfg.clone(), 100);
+            aries::dual_info!(
+                "HITL system enabled (confirmation_threshold: {:?})",
+                hitl_cfg.confirmation_threshold
+            );
+        } else {
+            aries::dual_info!("HITL system is disabled in config");
+        }
+    } else {
+        aries::dual_info!("HITL system is not configured");
+    }
 
     // Initialize application state
     let mut state =
@@ -544,6 +562,13 @@ async fn main() -> ServerResult<()> {
 
     // Keep subagent_manager alive for the lifetime of the server
     let _subagent_manager = subagent_manager;
+
+    // Create and merge HITL router if enabled
+    if let Some(hitl_manager) = hitl::global() {
+        let hitl_router = hitl::handlers::hitl_router(Arc::clone(hitl_manager));
+        app = app.merge(hitl_router);
+        aries::dual_info!("HITL API endpoints enabled");
+    }
 
     let app =
         app.layer(cors)

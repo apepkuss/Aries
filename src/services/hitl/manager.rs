@@ -109,6 +109,11 @@ impl HitlManager {
         self.event_sender.subscribe()
     }
 
+    /// 检查 HITL 是否启用
+    pub fn is_enabled(&self) -> bool {
+        self.config.enabled
+    }
+
     /// 评估工具调用风险
     pub fn assess_risk(&self, tool_name: &str, args: &serde_json::Value) -> RiskAssessment {
         self.risk_assessor.assess(tool_name, args)
@@ -537,9 +542,25 @@ impl HitlManager {
 
     /// 发送请求事件
     fn notify_request(&self, request: &HitlRequest) {
-        let _ = self
+        match self
             .event_sender
-            .send(HitlEvent::Request(Box::new(request.clone())));
+            .send(HitlEvent::Request(Box::new(request.clone())))
+        {
+            Ok(num_receivers) => {
+                debug!(
+                    request_id = %request.id,
+                    num_receivers = num_receivers,
+                    "HITL event broadcasted to subscribers"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    request_id = %request.id,
+                    error = %e,
+                    "Failed to broadcast HITL event (no subscribers?)"
+                );
+            }
+        }
     }
 
     /// 发送状态更新事件

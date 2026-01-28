@@ -29,6 +29,7 @@ use crate::{
     mcp::MCP_SERVICES,
     reflection::engine::LlmServerInfo,
     server::TargetServerInfo,
+    services::hitl::{self, HitlToolCaller, HitlToolContext, HitlToolResult},
 };
 
 // ============================================================================
@@ -55,6 +56,12 @@ pub struct SubAgentExecutor {
     model: String,
     /// LLM 服务器信息（用于反思）
     llm_server: Option<Arc<RwLock<LlmServerInfo>>>,
+    /// HITL 工具调用器（可选，如果启用 HITL）
+    hitl_caller: Option<HitlToolCaller>,
+    /// 会话 ID（用于 HITL 上下文）
+    conversation_id: String,
+    /// 用户 ID（用于 HITL 上下文）
+    user_id: String,
 }
 
 impl SubAgentExecutor {
@@ -67,11 +74,37 @@ impl SubAgentExecutor {
         available_tools: Vec<ToolDescription>,
         model: String,
     ) -> Self {
+        Self::with_hitl_context(
+            state,
+            chat_server,
+            headers,
+            manager,
+            available_tools,
+            model,
+            "default".to_string(),
+            "anonymous".to_string(),
+        )
+    }
+
+    /// 创建带 HITL 上下文的执行器
+    pub fn with_hitl_context(
+        state: Arc<AppState>,
+        chat_server: TargetServerInfo,
+        headers: HeaderMap,
+        manager: Arc<SubAgentManager>,
+        available_tools: Vec<ToolDescription>,
+        model: String,
+        conversation_id: String,
+        user_id: String,
+    ) -> Self {
         // 创建 LLM 服务器信息用于反思
         let llm_server = Some(Arc::new(RwLock::new(LlmServerInfo {
             url: chat_server.url.clone(),
             api_key: chat_server.api_key.clone(),
         })));
+
+        // 从全局 HITL Manager 创建 HitlToolCaller（如果已初始化且启用）
+        let hitl_caller = hitl::global().map(|m| HitlToolCaller::new(Arc::clone(m)));
 
         Self {
             state,
@@ -81,6 +114,9 @@ impl SubAgentExecutor {
             available_tools,
             model,
             llm_server,
+            hitl_caller,
+            conversation_id,
+            user_id,
         }
     }
 
@@ -302,10 +338,10 @@ impl SubAgentExecutor {
                         )
                         .await;
 
-                    // 执行工具调用
+                    // 执行工具调用（带 HITL 检查）
                     let tool_start = Instant::now();
                     let tool_result = self
-                        .execute_tool_call(&tool_call.function.name, &tool_args)
+                        .execute_tool_call(&tool_call.function.name, &tool_args, id)
                         .await;
 
                     let tool_duration = tool_start.elapsed();
@@ -565,11 +601,12 @@ impl SubAgentExecutor {
             .map_err(|e| ServerError::Operation(format!("Failed to parse response: {e}")))
     }
 
-    /// 执行工具调用
+    /// 执行工具调用（带 HITL 检查）
     async fn execute_tool_call(
         &self,
         tool_name: &str,
         args: &serde_json::Value,
+        subagent_id: &SubAgentId,
     ) -> ServerResult<String> {
         // 检查是否是 Sub-Agent 工具（不允许递归调用，除非配置允许）
         if is_subagent_tool(tool_name) {
@@ -578,20 +615,67 @@ impl SubAgentExecutor {
             ));
         }
 
+        // 如果启用了 HITL，使用 HitlToolCaller 进行检查
+        if let Some(ref hitl_caller) = self.hitl_caller {
+            let context = HitlToolContext::new(&self.conversation_id, &self.user_id)
+                .with_subagent_id(subagent_id.to_string());
+
+            let tool_name_clone = tool_name.to_string();
+            let result = hitl_caller
+                .check_and_execute(tool_name, args, &context, |args| {
+                    let tool_name = tool_name_clone.clone();
+                    async move { Self::execute_mcp_tool(&tool_name, &args).await }
+                })
+                .await;
+
+            match result {
+                Ok(hitl_result) => match hitl_result {
+                    HitlToolResult::Executed(r)
+                    | HitlToolResult::ExecutedWithoutConfirmation(r)
+                    | HitlToolResult::Approved(r)
+                    | HitlToolResult::HitlDisabled(r) => Ok(r),
+                    HitlToolResult::Modified { result, .. } => Ok(result),
+                    HitlToolResult::Rejected { reason } => Err(ServerError::Operation(format!(
+                        "Tool call rejected by user: {}",
+                        reason.unwrap_or_else(|| "No reason provided".to_string())
+                    ))),
+                    HitlToolResult::Skipped { reason } => {
+                        Err(ServerError::Operation(format!("Tool call skipped: {}", reason)))
+                    }
+                    HitlToolResult::Aborted { reason } => Err(ServerError::Operation(format!(
+                        "Tool call aborted: {}",
+                        reason.unwrap_or_else(|| "No reason provided".to_string())
+                    ))),
+                    HitlToolResult::TimedOut { behavior } => Err(ServerError::Operation(format!(
+                        "HITL confirmation timed out (behavior: {})",
+                        behavior
+                    ))),
+                },
+                Err(e) => Err(ServerError::Operation(format!("HITL error: {}", e))),
+            }
+        } else {
+            // 没有 HITL，直接执行
+            Self::execute_mcp_tool(tool_name, args)
+                .await
+                .map_err(ServerError::Operation)
+        }
+    }
+
+    /// 执行 MCP 工具调用（内部方法，不经过 HITL）
+    async fn execute_mcp_tool(tool_name: &str, args: &serde_json::Value) -> Result<String, String> {
         // 解析 MCP 工具名称
-        let (server_name, mcp_tool_name) = parse_mcp_tool_name(tool_name).ok_or_else(|| {
-            ServerError::Operation(format!("Invalid tool name format: {tool_name}"))
-        })?;
+        let (server_name, mcp_tool_name) = parse_mcp_tool_name(tool_name)
+            .ok_or_else(|| format!("Invalid tool name format: {tool_name}"))?;
 
         // 获取 MCP 服务
         let services = MCP_SERVICES
             .get()
-            .ok_or_else(|| ServerError::Operation("MCP services not initialized".to_string()))?;
+            .ok_or_else(|| "MCP services not initialized".to_string())?;
 
         let service_map = services.read().await;
-        let service = service_map.get(server_name).ok_or_else(|| {
-            ServerError::McpOperation(format!("MCP server '{}' not found", server_name))
-        })?;
+        let service = service_map
+            .get(server_name)
+            .ok_or_else(|| format!("MCP server '{}' not found", server_name))?;
 
         // 调用工具
         let request_param = rmcp::model::CallToolRequestParam {
@@ -605,10 +689,10 @@ impl SubAgentExecutor {
             .raw
             .call_tool(request_param)
             .await
-            .map_err(|e| ServerError::McpOperation(format!("Tool call failed: {e}")))?;
+            .map_err(|e| format!("Tool call failed: {e}"))?;
 
         if result.is_error == Some(true) {
-            return Err(ServerError::McpOperation("Tool returned error".to_string()));
+            return Err("Tool returned error".to_string());
         }
 
         // 提取结果文本
@@ -618,7 +702,7 @@ impl SubAgentExecutor {
             return Ok(text.text.clone());
         }
 
-        Err(ServerError::McpEmptyContent)
+        Err("MCP tool returned empty content".to_string())
     }
 
     /// 根据上下文过滤工具列表

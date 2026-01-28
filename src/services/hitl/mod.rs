@@ -29,6 +29,8 @@
 //! - `HitlToolCaller`: 工具调用器，自动检查风险并等待用户确认
 //! - `PreviewBuilder`: 操作预览构建器，生成用户友好的操作预览
 
+use std::sync::{Arc, OnceLock};
+
 pub mod config;
 pub mod handlers;
 pub mod integration;
@@ -54,3 +56,50 @@ pub use security::SecurityValidator;
 pub use store::PendingStore;
 pub use trust_store::TrustStore;
 pub use types::*;
+
+// ============================================================================
+// Global HITL Manager
+// ============================================================================
+
+/// 全局 HITL Manager 实例
+///
+/// 在服务器启动时初始化，通过 `init_global` 设置，
+/// 通过 `global` 获取引用。
+static HITL_MANAGER: OnceLock<Arc<HitlManager>> = OnceLock::new();
+
+/// 初始化全局 HITL Manager
+///
+/// 应该在服务器启动时调用一次。
+///
+/// # Arguments
+///
+/// * `config` - HITL 配置
+/// * `max_pending` - 最大待处理请求数
+///
+/// # Returns
+///
+/// 返回初始化的 HitlManager 引用
+///
+/// # Panics
+///
+/// 如果已经初始化过，会 panic
+pub fn init_global(config: HitlConfig, max_pending: usize) -> &'static Arc<HitlManager> {
+    HITL_MANAGER.get_or_init(|| Arc::new(HitlManager::new(config, max_pending)))
+}
+
+/// 获取全局 HITL Manager
+///
+/// # Returns
+///
+/// - `Some(&Arc<HitlManager>)`: 如果已初始化
+/// - `None`: 如果未初始化
+pub fn global() -> Option<&'static Arc<HitlManager>> {
+    HITL_MANAGER.get()
+}
+
+/// 检查 HITL 是否已启用
+///
+/// 如果全局 Manager 已初始化且配置为启用状态，返回 true
+pub fn is_enabled() -> bool {
+    global().is_some_and(|m| m.is_enabled())
+}

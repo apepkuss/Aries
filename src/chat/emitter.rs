@@ -879,13 +879,25 @@ impl EventEmitter for NoopEventEmitter {
 /// - If disabled, returns a `NoopEventEmitter` with no receiver
 ///
 /// The emitter is wrapped in `Arc` to allow sharing across parallel subtask executions.
+///
+/// If HITL is enabled globally, also spawns a HitlNotifier to bridge HITL events to the SSE stream.
 pub fn create_emitter(
     config: &EnhancedStreamConfig,
     channel_capacity: usize,
 ) -> (Arc<dyn EventEmitter>, Option<mpsc::Receiver<String>>) {
     if config.enabled {
         let (tx, rx) = mpsc::channel(channel_capacity);
-        let emitter = Arc::new(SseEventEmitter::new(tx, config.clone()));
+        let emitter: Arc<dyn EventEmitter> = Arc::new(SseEventEmitter::new(tx, config.clone()));
+
+        // Spawn HitlNotifier if HITL is enabled
+        if let Some(hitl_manager) = crate::services::hitl::global() {
+            crate::services::hitl::HitlNotifier::spawn(
+                std::sync::Arc::clone(hitl_manager),
+                emitter.clone(),
+            );
+            tracing::debug!("HitlNotifier spawned for SSE connection");
+        }
+
         (emitter, Some(rx))
     } else {
         (Arc::new(NoopEventEmitter::new()), None)

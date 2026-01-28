@@ -53,23 +53,31 @@ impl HitlNotifier {
     }
 
     /// 创建并启动 notifier（fire and forget）
+    ///
+    /// 注意：此方法会立即订阅事件通道，确保不会因为竞态条件丢失事件。
+    /// 订阅发生在当前线程，然后将 receiver 传递给后台任务。
     pub fn spawn(manager: Arc<HitlManager>, emitter: Arc<dyn EventEmitter>) {
-        let notifier = Self::new(manager, emitter);
+        // 立即订阅，避免竞态条件导致事件丢失
+        // 这样即使后台任务还没开始运行，事件也会被缓冲在 receiver 中
+        let receiver = manager.subscribe();
+        debug!("HITL notifier subscribed to event channel");
+
         tokio::spawn(async move {
-            notifier.run().await;
+            Self::run_with_receiver(emitter, receiver).await;
         });
     }
 
-    /// 运行事件监听循环
-    async fn run(&self) {
-        let mut receiver = self.manager.subscribe();
-
+    /// 运行事件监听循环（使用已订阅的 receiver）
+    async fn run_with_receiver(
+        emitter: Arc<dyn EventEmitter>,
+        mut receiver: tokio::sync::broadcast::Receiver<super::manager::HitlEvent>,
+    ) {
         debug!("HITL notifier started");
 
         loop {
             match receiver.recv().await {
                 Ok(event) => {
-                    self.handle_event(event).await;
+                    Self::handle_event_static(&emitter, event).await;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     debug!("HITL event channel closed, notifier stopping");
@@ -84,15 +92,39 @@ impl HitlNotifier {
         debug!("HITL notifier stopped");
     }
 
-    /// 处理单个事件
-    async fn handle_event(&self, event: HitlEvent) {
+    /// 运行事件监听循环（实例方法，用于 start()）
+    async fn run(&self) {
+        let mut receiver = self.manager.subscribe();
+
+        debug!("HITL notifier started (instance mode)");
+
+        loop {
+            match receiver.recv().await {
+                Ok(event) => {
+                    Self::handle_event_static(&self.emitter, event).await;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    debug!("HITL event channel closed, notifier stopping");
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                    warn!(count = count, "HITL notifier lagged, some events missed");
+                }
+            }
+        }
+
+        debug!("HITL notifier stopped");
+    }
+
+    /// 处理单个事件（静态版本）
+    async fn handle_event_static(emitter: &Arc<dyn EventEmitter>, event: HitlEvent) {
         match event {
             HitlEvent::Request(request) => {
                 // 提取请求类型和相关信息
                 let (request_type, risk_level, tool_name, summary) = match &request.request_type {
                     HitlRequestType::Confirmation(conf) => (
                         "confirmation",
-                        Some(format!("{:?}", conf.risk_level)),
+                        Some(format!("{:?}", conf.risk_level).to_lowercase()),
                         Some(conf.tool_name.clone()),
                         conf.summary.clone(),
                     ),
@@ -105,7 +137,7 @@ impl HitlNotifier {
                     }
                 };
 
-                self.emitter
+                emitter
                     .emit_hitl_request(
                         &request.id,
                         request_type,
@@ -134,7 +166,7 @@ impl HitlNotifier {
                 status,
                 message,
             } => {
-                self.emitter
+                emitter
                     .emit_hitl_status(&request_id, &format!("{:?}", status), &message)
                     .await;
 
@@ -149,7 +181,7 @@ impl HitlNotifier {
                 request_id,
                 remaining_seconds,
             } => {
-                self.emitter
+                emitter
                     .emit_hitl_timeout_warning(&request_id, remaining_seconds)
                     .await;
 

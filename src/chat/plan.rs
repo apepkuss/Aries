@@ -1226,6 +1226,15 @@ async fn execute_chat_plan_realtime(
         enhanced_stream_config.clone(),
     ));
 
+    // Spawn HitlNotifier if HITL is enabled to bridge HITL events to SSE
+    if let Some(hitl_manager) = crate::services::hitl::global() {
+        crate::services::hitl::HitlNotifier::spawn(
+            std::sync::Arc::clone(hitl_manager),
+            emitter.clone(),
+        );
+        tracing::debug!("HitlNotifier spawned for realtime SSE connection");
+    }
+
     // Get target server
     let chat_server = get_chat_server(&state, &request_id).await?;
 
@@ -4757,13 +4766,22 @@ async fn execute_subtask_via_subagent(
         .await;
 
     // 9. Create executor and run
-    let executor = SubAgentExecutor::new(
+    // Extract user_id from headers (set by frontend in X-User-ID header)
+    let user_id = headers
+        .get("X-User-ID")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
+    let executor = SubAgentExecutor::with_hitl_context(
         state.clone(),
         chat_server.clone(),
         headers.clone(),
         subagent_manager.clone(),
         filtered_tools,
         model.to_string(),
+        request_id.to_string(), // Use request_id as conversation_id
+        user_id,
     );
 
     let subagent_context = SubAgentContext::new(
@@ -5185,13 +5203,22 @@ async fn execute_subtask_via_subagent_with_context(
         .await;
 
     // 9. Create executor and run
-    let executor = SubAgentExecutor::new(
+    // Extract user_id from headers (set by frontend in X-User-ID header)
+    let user_id = headers
+        .get("X-User-ID")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
+    let executor = SubAgentExecutor::with_hitl_context(
         state.clone(),
         chat_server.clone(),
         headers.clone(),
         subagent_manager.clone(),
         filtered_tools,
         model.to_string(),
+        request_id.to_string(), // Use request_id as conversation_id
+        user_id,
     );
 
     let subagent_context = SubAgentContext::new(

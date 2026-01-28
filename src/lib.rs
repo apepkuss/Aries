@@ -73,6 +73,9 @@ pub mod responses;
 pub mod skills;
 pub mod subagent;
 
+// Re-export hitl from services
+pub use services::hitl;
+
 // Integration modules (also available via crate::integration::*)
 pub mod mcp;
 pub mod mcp_handlers;
