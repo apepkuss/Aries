@@ -192,6 +192,7 @@ export interface SanitizedArtifactsConfig {
 export interface SanitizedSubagentConfig {
   enabled: boolean;
   execution_mode: 'direct' | 'subagent';
+  parallel_mode: 'auto' | 'sequential' | 'manual';
   max_concurrent: number;
   default_timeout_secs: number;
   default_max_iterations: number;
@@ -242,6 +243,7 @@ export interface RagConfigUpdate {
 
 export interface SubagentConfigUpdate {
   execution_mode?: 'direct' | 'subagent';
+  parallel_mode?: 'auto' | 'sequential' | 'manual';
 }
 
 export interface ConfigUpdateResponse {
