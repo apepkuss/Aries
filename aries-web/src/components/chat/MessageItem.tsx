@@ -12,7 +12,7 @@ import 'katex/dist/katex.min.css';
 import 'react-medium-image-zoom/dist/styles.css';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { UIMessage } from '@/api/types';
+import type { UIMessage, UISubAgent } from '@/api/types';
 import type { ExecutionStatus } from '@/stores';
 import { ThinkingProcess } from './ThinkingProcess';
 import { MermaidDiagram } from './MermaidDiagram';
@@ -21,9 +21,11 @@ interface MessageItemProps {
   message: UIMessage;
   executionStatus?: ExecutionStatus;
   isStreaming?: boolean;
+  subAgents?: UISubAgent[];
+  getSubAgent?: (id: string) => UISubAgent | undefined;
 }
 
-export function MessageItem({ message, executionStatus, isStreaming }: MessageItemProps) {
+export function MessageItem({ message, executionStatus, isStreaming, subAgents, getSubAgent }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
@@ -88,7 +90,7 @@ export function MessageItem({ message, executionStatus, isStreaming }: MessageIt
               )}
 
               {/* Thinking process (only for assistant) */}
-              {!isUser && (message.thinking || message.toolCalls?.length || message.executionEvents?.length || message.taskPlan || (message.isStreaming && executionStatus)) && (
+              {!isUser && (message.thinking || message.toolCalls?.length || message.executionEvents?.length || message.taskPlan || subAgents?.length || (message.isStreaming && executionStatus)) && (
                 <div className="mb-4">
                   <ThinkingProcess
                     thinking={message.thinking}
@@ -97,12 +99,20 @@ export function MessageItem({ message, executionStatus, isStreaming }: MessageIt
                     taskPlan={message.taskPlan}
                     executionStatus={message.isStreaming ? executionStatus : undefined}
                     isStreaming={message.isStreaming && isStreaming}
+                    subAgents={subAgents}
+                    getSubAgent={getSubAgent}
                   />
                 </div>
               )}
 
               {/* Main content */}
               {message.content && (
+                message.content === 'Interrupted by user.' ? (
+                  // Special styling for interrupted message
+                  <p className="text-sm italic text-muted-foreground">
+                    {message.content}
+                  </p>
+                ) : (
                 <div className={cn(
                   "prose prose-sm max-w-none leading-relaxed",
                   isUser ? "text-foreground" : "dark:prose-invert text-foreground/90 font-sans"
@@ -245,6 +255,7 @@ export function MessageItem({ message, executionStatus, isStreaming }: MessageIt
                     {message.content}
                   </ReactMarkdown>
                 </div>
+                )
               )}
 
               {/* Streaming indicator */}

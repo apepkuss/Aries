@@ -405,7 +405,7 @@ export interface UITaskPlan {
 export interface UISubtask {
   id: number;
   description: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped' | 'interrupted';
 
   // Sub-Agent association (for subagent execution mode)
   subAgentId?: string;
@@ -541,6 +541,11 @@ export interface FinishEvent {
   };
 }
 
+export interface ErrorEvent {
+  message: string;
+  type?: 'user_interrupted' | 'timeout' | 'error';
+}
+
 export type EnhancedStreamEvent =
   | { type: 'status'; data: StatusEvent }
   | { type: 'plan'; data: PlanEvent }
@@ -549,6 +554,7 @@ export type EnhancedStreamEvent =
   | { type: 'tool_result'; data: ToolResultEvent }
   | { type: 'text'; data: TextEvent }
   | { type: 'finish'; data: FinishEvent }
+  | { type: 'error'; data: ErrorEvent }
   | { type: 'subagent_spawned'; data: SubAgentSpawnedEvent }
   | { type: 'subagent_started'; data: SubAgentStartedEvent }
   | { type: 'subagent_progress'; data: SubAgentProgressEvent }
@@ -564,7 +570,7 @@ export type EnhancedStreamEvent =
 // ============================================================================
 
 /** Sub-Agent state enum */
-export type SubAgentState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type SubAgentState = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
 /** Base event data for Sub-Agent events */
 interface SubAgentEventBase {
@@ -771,7 +777,28 @@ export type HitlRequestType =
   | { type: 'feedback'; data: HitlFeedbackRequest }
   | { type: 'pause'; data: HitlPauseRequest };
 
-/** HITL request */
+/** HITL request from API (matches backend HitlRequestDetailResponse) */
+export interface HitlRequestFromApi {
+  id: string;
+  conversation_id: string;
+  user_id: string;
+  request_type: string; // "confirmation" | "clarification" | "feedback" | "pause"
+  details: HitlConfirmationRequest | HitlClarificationRequest | HitlFeedbackRequest | HitlPauseRequest;
+  status: HitlRequestStatus;
+  created_at: string;
+  updated_at?: string;
+  expires_at: string;
+  remaining_seconds?: number;
+  timeout_behavior: string;
+  metadata?: Record<string, unknown>;
+  response?: unknown;
+  /** Optional subtask ID (1-based) */
+  subtask_id?: number;
+  /** Optional Sub-Agent ID */
+  subagent_id?: string;
+}
+
+/** HITL request (normalized for frontend use) */
 export interface HitlRequest {
   id: string;
   conversation_id: string;
@@ -782,6 +809,10 @@ export interface HitlRequest {
   expires_at: string;
   timeout_behavior: HitlTimeoutBehavior;
   responded_at?: string;
+  /** Optional subtask ID (1-based) */
+  subtask_id?: number;
+  /** Optional Sub-Agent ID */
+  subagent_id?: string;
 }
 
 /** HITL response types */
@@ -835,6 +866,10 @@ export interface HitlRequestEvent {
   conversation_id: string;
   expires_at: string;
   timeout_behavior: HitlTimeoutBehavior;
+  /** Optional subtask ID (1-based) */
+  subtask_id?: number;
+  /** Optional Sub-Agent ID */
+  subagent_id?: string;
 }
 
 /** HITL status event - request status changed */

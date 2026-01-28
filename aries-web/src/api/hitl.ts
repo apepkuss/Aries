@@ -1,10 +1,37 @@
 import { apiClient, getCurrentUserId } from './client';
 import type {
   HitlRequest,
+  HitlRequestFromApi,
+  HitlRequestType,
+  HitlTimeoutBehavior,
   HitlRespondResponse,
   HitlPendingListResponse,
   HitlHistoryResponse,
 } from './types';
+
+/**
+ * Convert backend API response to frontend HitlRequest format
+ */
+function convertApiResponseToHitlRequest(apiResponse: HitlRequestFromApi): HitlRequest {
+  // Convert request_type string + details to the { type, data } format
+  const requestType: HitlRequestType = {
+    type: apiResponse.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause',
+    data: apiResponse.details,
+  } as HitlRequestType;
+
+  return {
+    id: apiResponse.id,
+    conversation_id: apiResponse.conversation_id,
+    user_id: apiResponse.user_id,
+    request_type: requestType,
+    status: apiResponse.status,
+    created_at: apiResponse.created_at,
+    expires_at: apiResponse.expires_at,
+    timeout_behavior: apiResponse.timeout_behavior as HitlTimeoutBehavior,
+    subtask_id: apiResponse.subtask_id,
+    subagent_id: apiResponse.subagent_id,
+  };
+}
 
 /**
  * Backend request format for HITL respond endpoint
@@ -36,7 +63,10 @@ export async function getPendingRequests(
  * @param requestId - The HITL request ID
  */
 export async function getRequestDetail(requestId: string): Promise<HitlRequest> {
-  return apiClient.get(`api/hitl/requests/${requestId}`).json<HitlRequest>();
+  const apiResponse = await apiClient
+    .get(`api/hitl/requests/${requestId}`)
+    .json<HitlRequestFromApi>();
+  return convertApiResponseToHitlRequest(apiResponse);
 }
 
 /**

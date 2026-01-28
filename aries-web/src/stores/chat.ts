@@ -139,6 +139,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: true,
       abortController,
       executionStatus: initialExecutionStatus,
+      subAgents: new Map(), // Clear Sub-Agents from previous queries
       error: null,
     });
 
@@ -155,6 +156,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const executionEvents: ExecutionEvent[] = [];
       let eventSeq = 0;
       let taskPlan: UITaskPlan | undefined = undefined;
+      let isUserInterrupted = false;
 
       // Use enhanced streaming to get detailed events
       for await (const event of streamChatCompletionEnhanced(
@@ -362,13 +364,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
 
                 // If associated with a Subtask, update the task plan
+                // IMPORTANT: Get current taskPlan from state.messages to avoid race conditions
                 let updatedMessages = state.messages;
-                if (subtaskId !== null && taskPlan) {
-                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
+                const currentTaskPlan = currentMessage?.taskPlan;
+
+                if (subtaskId !== null && currentTaskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(currentTaskPlan, subtaskId, {
                     subAgentId: subagent_id,
                   });
                   if (updatedTaskPlan) {
-                    taskPlan = updatedTaskPlan;
+                    taskPlan = updatedTaskPlan; // Keep outer variable in sync
                     updatedMessages = state.messages.map((msg) =>
                       msg.id === assistantMessage.id
                         ? { ...msg, taskPlan: updatedTaskPlan }
@@ -424,9 +430,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
 
                 // Update task plan if associated with a subtask
+                // IMPORTANT: Get current taskPlan from state.messages to avoid race conditions
                 let updatedMessages = state.messages;
-                if (subtaskId !== null && taskPlan) {
-                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
+                const currentTaskPlan = currentMessage?.taskPlan;
+
+                if (subtaskId !== null && currentTaskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(currentTaskPlan, subtaskId, {
                     progress: {
                       iteration,
                       maxIterations: 20, // TODO: get from config
@@ -435,7 +445,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     },
                   });
                   if (updatedTaskPlan) {
-                    taskPlan = updatedTaskPlan;
+                    taskPlan = updatedTaskPlan; // Keep outer variable in sync
                     updatedMessages = state.messages.map((msg) =>
                       msg.id === assistantMessage.id
                         ? { ...msg, taskPlan: updatedTaskPlan }
@@ -461,13 +471,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
                 // Find associated subtask ID from the agent name
                 const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
-                console.log('[Chat Store] Extracted subtaskId:', subtaskId, 'taskPlan exists:', !!taskPlan);
 
                 // Update task plan if associated with a subtask
+                // IMPORTANT: Get current taskPlan from state.messages to avoid race conditions
                 let updatedMessages = state.messages;
-                if (subtaskId !== null && taskPlan) {
+                const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
+                const currentTaskPlan = currentMessage?.taskPlan;
+
+                console.log('[Chat Store] Extracted subtaskId:', subtaskId, 'taskPlan exists:', !!currentTaskPlan);
+
+                if (subtaskId !== null && currentTaskPlan) {
                   // Get existing tool calls or create new array
-                  const existingSubtask = taskPlan.subtasks.find((s) => s.id === subtaskId);
+                  const existingSubtask = currentTaskPlan.subtasks.find((s) => s.id === subtaskId);
                   const existingToolCalls = existingSubtask?.toolCalls || [];
 
                   // Check if this tool call already exists (deduplication)
@@ -477,7 +492,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     return { subAgents: newSubAgents, messages: updatedMessages };
                   }
 
-                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                  const updatedTaskPlan = updateSubtaskInPlan(currentTaskPlan, subtaskId, {
                     toolCalls: [
                       ...existingToolCalls,
                       {
@@ -489,7 +504,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ],
                   });
                   if (updatedTaskPlan) {
-                    taskPlan = updatedTaskPlan;
+                    taskPlan = updatedTaskPlan; // Keep outer variable in sync
                     updatedMessages = state.messages.map((msg) =>
                       msg.id === assistantMessage.id
                         ? { ...msg, taskPlan: updatedTaskPlan }
@@ -524,15 +539,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 }
 
                 // Update task plan if associated with a subtask
+                // IMPORTANT: Get current taskPlan from state.messages to avoid race conditions
                 let updatedMessages = state.messages;
-                if (subtaskId !== null && taskPlan) {
-                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
+                const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
+                const currentTaskPlan = currentMessage?.taskPlan;
+
+                if (subtaskId !== null && currentTaskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(currentTaskPlan, subtaskId, {
                     status: 'completed',
                     result: { output, metrics },
                     progress: undefined, // Clear progress when completed
                   });
                   if (updatedTaskPlan) {
-                    taskPlan = updatedTaskPlan;
+                    taskPlan = updatedTaskPlan; // Keep outer variable in sync
                     updatedMessages = state.messages.map((msg) =>
                       msg.id === assistantMessage.id
                         ? { ...msg, taskPlan: updatedTaskPlan }
@@ -550,6 +569,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
             {
               const { subagent_id, error: errorMsg, metrics } = event.data;
               console.log('[Chat Store] Sub-Agent failed:', subagent_id, errorMsg);
+
+              // Check if this is a user interruption
+              const wasInterruptedByUser =
+                errorMsg?.includes('User interrupted') ||
+                errorMsg?.includes('user_interrupted');
+
+              // Set the outer flag for later use when finishing the stream
+              if (wasInterruptedByUser) {
+                isUserInterrupted = true;
+              }
+
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
@@ -560,24 +590,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 if (agent) {
                   newSubAgents.set(subagent_id, {
                     ...agent,
-                    state: 'failed',
+                    state: wasInterruptedByUser ? 'interrupted' : 'failed',
                     completedAt: Date.now(),
-                    error: errorMsg,
+                    error: wasInterruptedByUser ? 'User interrupted the operation' : errorMsg,
                     result: metrics ? { output: '', metrics } : undefined,
                   });
                 }
 
                 // Update task plan if associated with a subtask
+                // IMPORTANT: Get current taskPlan from state.messages to avoid race conditions
                 let updatedMessages = state.messages;
-                if (subtaskId !== null && taskPlan) {
-                  const updatedTaskPlan = updateSubtaskInPlan(taskPlan, subtaskId, {
-                    status: 'failed',
-                    error: errorMsg,
+                const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
+                const currentTaskPlan = currentMessage?.taskPlan;
+
+                if (subtaskId !== null && currentTaskPlan) {
+                  const updatedTaskPlan = updateSubtaskInPlan(currentTaskPlan, subtaskId, {
+                    status: wasInterruptedByUser ? 'interrupted' : 'failed',
+                    error: wasInterruptedByUser ? 'User interrupted the operation' : errorMsg,
                     result: metrics ? { output: '', metrics } : undefined,
-                    progress: undefined, // Clear progress when failed
+                    progress: undefined, // Clear progress when failed/interrupted
                   });
                   if (updatedTaskPlan) {
-                    taskPlan = updatedTaskPlan;
+                    taskPlan = updatedTaskPlan; // Keep outer variable in sync
                     updatedMessages = state.messages.map((msg) =>
                       msg.id === assistantMessage.id
                         ? { ...msg, taskPlan: updatedTaskPlan }
@@ -606,6 +640,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
             console.log('[Chat Store] HITL timeout warning:', event.data.request_id, event.data.remaining_seconds);
             useHitlStore.getState().handleTimeoutWarning(event.data);
             break;
+
+          case 'error':
+            {
+              const { message, type: errorType } = event.data;
+              console.log('[Chat Store] Error event:', errorType, message);
+              // Check if this is a user interruption error
+              if (errorType === 'user_interrupted') {
+                isUserInterrupted = true;
+
+                // Mark all in_progress subtasks as interrupted
+                if (taskPlan) {
+                  taskPlan.subtasks = taskPlan.subtasks.map((s) =>
+                    s.status === 'in_progress' || s.status === 'pending'
+                      ? { ...s, status: 'interrupted' as const, error: 'User interrupted the operation' }
+                      : s
+                  );
+                  // Update message with updated task plan
+                  set((state) => ({
+                    messages: state.messages.map((msg) =>
+                      msg.id === assistantMessage.id
+                        ? { ...msg, taskPlan: { ...taskPlan! } }
+                        : msg
+                    ),
+                  }));
+                }
+              }
+            }
+            break;
         }
       }
 
@@ -625,17 +687,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           )
         : undefined;
 
-      // Mark all subtasks as completed when streaming finishes
+      // Mark all subtasks as completed when streaming finishes (unless user interrupted)
       const finalTaskPlan = taskPlan
         ? {
             ...taskPlan,
-            subtasks: taskPlan.subtasks.map((s) =>
-              s.status === 'pending' || s.status === 'in_progress'
-                ? { ...s, status: 'completed' as const }
-                : s
-            ),
+            subtasks: isUserInterrupted
+              ? taskPlan.subtasks // Keep current statuses (interrupted/failed/etc.) when user interrupted
+              : taskPlan.subtasks.map((s) =>
+                  s.status === 'pending' || s.status === 'in_progress'
+                    ? { ...s, status: 'completed' as const }
+                    : s
+                ),
           }
         : undefined;
+
+      // Determine final content - show "Interrupted" message if user interrupted and no content
+      const finalContent = fullContent || (isUserInterrupted ? 'Interrupted by user.' : '');
 
       set((state) => ({
         messages: state.messages.map((msg) =>
@@ -643,7 +710,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ? {
                 ...msg,
                 isStreaming: false,
-                content: fullContent || msg.content,
+                content: finalContent,
                 thinking: thinking || msg.thinking,
                 toolCalls: finalToolCalls || msg.toolCalls,
                 executionEvents: finalExecutionEvents || msg.executionEvents,

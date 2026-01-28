@@ -18,19 +18,19 @@ interface HitlOverlayProps {
  * 3. Updates countdown timers in real-time
  */
 export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
-  // Track whether user has manually closed the dialog
-  const [userClosedDialog, setUserClosedDialog] = useState<string | null>(null);
+  // Track whether user has manually opened the dialog to view details
+  const [dialogOpenForRequest, setDialogOpenForRequest] = useState<string | null>(null);
 
   const activeRequest = useActiveHitlRequest();
   const pendingRequests = usePendingHitlRequests();
-  const { approve, reject, modify, abort, setActiveRequest } = useHitlStore();
+  const { approve, reject, abort, setActiveRequest } = useHitlStore();
 
-  // Dialog is open when there's an active pending request, unless user manually closed it
-  // When the active request changes to a new one, the dialog should reopen
+  // Dialog is open only when user explicitly clicks "View Details"
+  // This allows users to quickly approve/reject from the banner without extra clicks
   const dialogOpen =
     activeRequest !== undefined &&
     activeRequest.status === 'pending' &&
-    userClosedDialog !== activeRequest.id;
+    dialogOpenForRequest === activeRequest.id;
 
   // Countdown timer effect
   useEffect(() => {
@@ -67,42 +67,34 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
 
   const handleDialogOpenChange = useCallback(
     (open: boolean) => {
-      if (!open && activeRequest) {
-        // User manually closed the dialog
-        setUserClosedDialog(activeRequest.id);
+      if (!open) {
+        // User closed the dialog
+        setDialogOpenForRequest(null);
       }
     },
-    [activeRequest]
+    []
   );
 
   const handleApprove = useCallback(
     async (requestId: string) => {
       await approve(requestId);
-      setUserClosedDialog(null);
+      setDialogOpenForRequest(null);
     },
     [approve]
   );
 
   const handleReject = useCallback(
-    async (requestId: string, reason?: string) => {
-      await reject(requestId, reason);
-      setUserClosedDialog(null);
+    async (requestId: string) => {
+      await reject(requestId);
+      setDialogOpenForRequest(null);
     },
     [reject]
   );
 
-  const handleModify = useCallback(
-    async (requestId: string, modifications: Record<string, unknown>) => {
-      await modify(requestId, modifications);
-      setUserClosedDialog(null);
-    },
-    [modify]
-  );
-
   const handleAbort = useCallback(
-    async (requestId: string, reason?: string) => {
-      await abort(requestId, reason);
-      setUserClosedDialog(null);
+    async (requestId: string) => {
+      await abort(requestId);
+      setDialogOpenForRequest(null);
     },
     [abort]
   );
@@ -110,7 +102,8 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
   const handleViewDetails = useCallback(
     (requestId: string) => {
       setActiveRequest(requestId);
-      setUserClosedDialog(null);
+      // Open dialog when user clicks "View Details"
+      setDialogOpenForRequest(requestId);
     },
     [setActiveRequest]
   );
@@ -144,7 +137,6 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
         onOpenChange={handleDialogOpenChange}
         onApprove={handleApprove}
         onReject={handleReject}
-        onModify={handleModify}
         onAbort={handleAbort}
       />
     </>

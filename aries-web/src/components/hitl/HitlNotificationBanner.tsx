@@ -30,7 +30,6 @@ export function HitlNotificationBanner({
     request.request_type.type === 'confirmation' ? request.request_type.data : null;
 
   const riskLevel = confirmData?.risk_level || 'medium';
-  const toolName = confirmData?.tool_name || 'Unknown';
   const description = confirmData?.summary;
 
   return (
@@ -51,19 +50,18 @@ export function HitlNotificationBanner({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium">Confirmation Required</span>
+            {/* Subtask identifier badge */}
+            {request.subtask_id !== undefined && (
+              <span className="text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                Subtask-{request.subtask_id}
+              </span>
+            )}
+            {description && <span className="font-medium">{description}</span>}
             <RiskBadge level={riskLevel} size="sm" />
           </div>
 
-          <p className="text-sm mt-1">
-            <span className="font-mono text-xs bg-black/10 dark:bg-white/10 px-1 py-0.5 rounded">
-              {toolName}
-            </span>
-            {description && <span className="ml-2 text-muted-foreground">{description}</span>}
-          </p>
-
-          {/* Timer */}
-          {(request.remainingSeconds ?? 0) > 0 && (
+          {/* Timer - only show when not in 'wait' mode */}
+          {request.timeout_behavior !== 'wait' && (request.remainingSeconds ?? 0) > 0 && (
             <div
               className={cn(
                 'flex items-center gap-1.5 text-xs mt-2',

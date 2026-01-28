@@ -10,13 +10,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { RiskBadge } from './RiskBadge';
 import { OperationPreview } from './OperationPreview';
 import {
   CheckIcon,
   XIcon,
-  PencilIcon,
   AlertTriangleIcon,
   ClockIcon,
   Loader2Icon,
@@ -27,9 +25,8 @@ interface HitlConfirmationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onApprove: (requestId: string) => Promise<void>;
-  onReject: (requestId: string, reason?: string) => Promise<void>;
-  onModify?: (requestId: string, modifications: Record<string, unknown>) => Promise<void>;
-  onAbort?: (requestId: string, reason?: string) => Promise<void>;
+  onReject: (requestId: string) => Promise<void>;
+  onAbort?: (requestId: string) => Promise<void>;
   className?: string;
 }
 
@@ -39,19 +36,14 @@ export function HitlConfirmationDialog({
   onOpenChange,
   onApprove,
   onReject,
-  onModify,
   onAbort,
   className,
 }: HitlConfirmationDialogProps) {
-  const [mode, setMode] = useState<'view' | 'reject' | 'modify'>('view');
-  const [rejectReason, setRejectReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Reset state when dialog opens/closes or request changes
   useEffect(() => {
     if (open) {
-      setMode('view');
-      setRejectReason('');
       setIsSubmitting(false);
     }
   }, [open, request?.id]);
@@ -71,23 +63,23 @@ export function HitlConfirmationDialog({
     if (!request) return;
     setIsSubmitting(true);
     try {
-      await onReject(request.id, rejectReason || undefined);
+      await onReject(request.id);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
     }
-  }, [request, onReject, rejectReason, onOpenChange]);
+  }, [request, onReject, onOpenChange]);
 
   const handleAbort = useCallback(async () => {
     if (!request || !onAbort) return;
     setIsSubmitting(true);
     try {
-      await onAbort(request.id, rejectReason || undefined);
+      await onAbort(request.id);
       onOpenChange(false);
     } finally {
       setIsSubmitting(false);
     }
-  }, [request, onAbort, rejectReason, onOpenChange]);
+  }, [request, onAbort, onOpenChange]);
 
   if (!request) return null;
 
@@ -133,14 +125,20 @@ export function HitlConfirmationDialog({
             {getTitleByRisk()}
           </DialogTitle>
           <DialogDescription className="flex items-center gap-2">
+            {/* Subtask identifier badge */}
+            {request.subtask_id !== undefined && (
+              <span className="text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 px-1.5 py-0.5 rounded">
+                Subtask-{request.subtask_id}
+              </span>
+            )}
             <span>Tool: {toolName}</span>
             <RiskBadge level={riskLevel} size="sm" />
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Countdown Timer */}
-          {(request.remainingSeconds ?? 0) > 0 && (
+          {/* Countdown Timer - only show when not in 'wait' mode */}
+          {request.timeout_behavior !== 'wait' && (request.remainingSeconds ?? 0) > 0 && (
             <div
               className={cn(
                 'flex items-center gap-2 rounded-md px-3 py-2 text-sm',
@@ -173,109 +171,47 @@ export function HitlConfirmationDialog({
 
           {/* Operation Preview */}
           {preview && <OperationPreview preview={preview} />}
-
-          {/* Reject/Modify Mode */}
-          {mode === 'reject' && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Reason (optional)</label>
-              <Textarea
-                placeholder="Enter your reason for rejecting this operation..."
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                className="min-h-[100px]"
-              />
-            </div>
-          )}
         </div>
 
         <DialogFooter className="flex-col gap-2 sm:flex-row">
-          {mode === 'view' ? (
-            <>
-              {/* Approve Button */}
-              <Button
-                variant={riskLevel === 'critical' ? 'destructive' : 'default'}
-                onClick={handleApprove}
-                disabled={isSubmitting}
-                className="gap-2"
-              >
-                {isSubmitting ? (
-                  <Loader2Icon className="h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckIcon className="h-4 w-4" />
-                )}
-                Approve
-              </Button>
+          {/* Approve Button */}
+          <Button
+            variant={riskLevel === 'critical' ? 'destructive' : 'default'}
+            onClick={handleApprove}
+            disabled={isSubmitting}
+            className="gap-2"
+          >
+            {isSubmitting ? (
+              <Loader2Icon className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckIcon className="h-4 w-4" />
+            )}
+            Approve
+          </Button>
 
-              {/* Reject Button */}
-              <Button
-                variant="outline"
-                onClick={() => setMode('reject')}
-                disabled={isSubmitting}
-                className="gap-2"
-              >
-                <XIcon className="h-4 w-4" />
-                Reject
-              </Button>
+          {/* Reject Button */}
+          <Button
+            variant="outline"
+            onClick={handleReject}
+            disabled={isSubmitting}
+            className="gap-2"
+          >
+            <XIcon className="h-4 w-4" />
+            Reject
+          </Button>
 
-              {/* Modify Button (if supported) */}
-              {onModify && confirmData?.allow_modification && (
-                <Button
-                  variant="outline"
-                  onClick={() => setMode('modify')}
-                  disabled={isSubmitting}
-                  className="gap-2"
-                >
-                  <PencilIcon className="h-4 w-4" />
-                  Modify
-                </Button>
-              )}
-
-              {/* Abort Button (if supported) */}
-              {onAbort && (
-                <Button
-                  variant="ghost"
-                  onClick={() => setMode('reject')}
-                  disabled={isSubmitting}
-                  className="gap-2 text-red-600 hover:text-red-700 dark:text-red-400"
-                >
-                  <AlertTriangleIcon className="h-4 w-4" />
-                  Abort Session
-                </Button>
-              )}
-            </>
-          ) : mode === 'reject' ? (
-            <>
-              <Button
-                variant="destructive"
-                onClick={handleReject}
-                disabled={isSubmitting}
-                className="gap-2"
-              >
-                {isSubmitting ? (
-                  <Loader2Icon className="h-4 w-4 animate-spin" />
-                ) : (
-                  <XIcon className="h-4 w-4" />
-                )}
-                Confirm Reject
-              </Button>
-
-              {onAbort && (
-                <Button
-                  variant="destructive"
-                  onClick={handleAbort}
-                  disabled={isSubmitting}
-                  className="gap-2"
-                >
-                  <AlertTriangleIcon className="h-4 w-4" />
-                  Abort Session
-                </Button>
-              )}
-
-              <Button variant="outline" onClick={() => setMode('view')} disabled={isSubmitting}>
-                Back
-              </Button>
-            </>
-          ) : null}
+          {/* Abort Button (if supported) */}
+          {onAbort && (
+            <Button
+              variant="ghost"
+              onClick={handleAbort}
+              disabled={isSubmitting}
+              className="gap-2 text-red-600 hover:text-red-700 dark:text-red-400"
+            >
+              <AlertTriangleIcon className="h-4 w-4" />
+              Abort Session
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

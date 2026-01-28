@@ -12,6 +12,7 @@ import type {
   ToolResultEvent,
   TextEvent,
   FinishEvent,
+  ErrorEvent,
   SubAgentSpawnedEvent,
   SubAgentStartedEvent,
   SubAgentProgressEvent,
@@ -276,6 +277,9 @@ function parseEnhancedEvent(
       return { type: 'hitl_status', data: data as HitlStatusEvent };
     case 'hitl_timeout_warning':
       return { type: 'hitl_timeout_warning', data: data as HitlTimeoutWarningEvent };
+    // Error events
+    case 'error':
+      return { type: 'error', data: data as ErrorEvent };
     default:
       console.log('[Enhanced Stream] Unknown event type:', eventType);
       return null;

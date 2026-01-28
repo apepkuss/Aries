@@ -112,6 +112,11 @@ export function ThinkingProcess({
     executionStatus && executionStatus.phase !== 'idle';
   const hasSubAgents = subAgents && subAgents.length > 0;
 
+  // Check if any subtask or subagent was interrupted
+  const hasInterrupted =
+    (subAgents && subAgents.some((a) => a.state === 'interrupted')) ||
+    (taskPlan && taskPlan.subtasks.some((s) => s.status === 'interrupted'));
+
   if (!hasThinking && !hasToolCalls && !hasExecutionEvents && !hasTaskPlan && !hasExecutionStatus && !hasSubAgents) {
     return null;
   }
@@ -207,7 +212,7 @@ export function ThinkingProcess({
           </div>
         )}
 
-        {/* Status indicator - green pulsing when live, gray when idle */}
+        {/* Status indicator - green pulsing when live, orange when interrupted, gray when idle */}
         <div className="ml-auto flex items-center gap-1.5">
           {isStreaming ? (
             <>
@@ -216,6 +221,11 @@ export function ThinkingProcess({
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider text-green-600 dark:text-green-400">运行中</span>
+            </>
+          ) : hasInterrupted ? (
+            <>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-orange-600 dark:text-orange-400">已中断</span>
             </>
           ) : (
             <span className="relative inline-flex rounded-full h-2 w-2 bg-muted-foreground/30"></span>

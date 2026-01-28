@@ -357,6 +357,8 @@ export const useHitlStore = create<HitlState>((set, get) => ({
       ),
       expanded: false,
       isResponding: false,
+      subtask_id: event.subtask_id,
+      subagent_id: event.subagent_id,
     };
 
     set((state) => ({

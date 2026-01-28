@@ -56,9 +56,11 @@ export function SubAgentCard({
           ? 'border-blue-500/30 bg-blue-500/5'
           : agent.state === 'failed'
             ? 'border-destructive/30 bg-destructive/5'
-            : agent.state === 'completed'
-              ? 'border-green-500/30 bg-green-500/5'
-              : 'border-muted bg-muted/30'
+            : agent.state === 'interrupted'
+              ? 'border-orange-500/30 bg-orange-500/5'
+              : agent.state === 'completed'
+                ? 'border-green-500/30 bg-green-500/5'
+                : 'border-muted bg-muted/30'
       )}
     >
       {/* Header */}
@@ -112,7 +114,7 @@ export function SubAgentCard({
         )}
 
         {/* Duration (when completed/failed) */}
-        {agent.result?.metrics.duration_ms && (
+        {agent.result?.metrics?.duration_ms && (
           <span className="flex items-center gap-0.5 text-xs text-muted-foreground ml-auto">
             <Clock className="h-3 w-3" />
             {formatDuration(agent.result.metrics.duration_ms)}
@@ -136,7 +138,9 @@ export function SubAgentCard({
                   ? 'bg-green-500'
                   : agent.state === 'failed'
                     ? 'bg-destructive'
-                    : 'bg-muted-foreground/30'
+                    : agent.state === 'interrupted'
+                      ? 'bg-orange-500'
+                      : 'bg-muted-foreground/30'
               )}
             />
           )}
@@ -172,6 +176,13 @@ export function SubAgentCard({
           {agent.state === 'failed' && agent.error && (
             <div className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1.5 border border-destructive/20">
               {agent.error}
+            </div>
+          )}
+
+          {/* Interrupted message */}
+          {agent.state === 'interrupted' && (
+            <div className="text-xs text-orange-600 dark:text-orange-400 bg-orange-500/10 rounded px-2 py-1.5 border border-orange-500/20">
+              {agent.error || 'Interrupted by user'}
             </div>
           )}
 
@@ -282,6 +293,12 @@ function getStatusConfig(state: UISubAgent['state']) {
         Icon: XCircle,
         color: 'text-muted-foreground',
         label: '已取消',
+      };
+    case 'interrupted':
+      return {
+        Icon: XCircle,
+        color: 'text-orange-500',
+        label: 'Interrupted',
       };
   }
 }

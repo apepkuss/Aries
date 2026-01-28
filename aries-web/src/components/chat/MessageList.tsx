@@ -5,8 +5,9 @@ import { useChatStore } from '@/stores';
 import { HitlOverlay } from '@/components/hitl';
 
 export function MessageList() {
-  const { messages, executionStatus, isStreaming } = useChatStore();
+  const { messages, executionStatus, isStreaming, getSubAgent, getRootSubAgents } = useChatStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const rootSubAgents = getRootSubAgents();
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -42,6 +43,8 @@ export function MessageList() {
             message={message}
             executionStatus={index === lastStreamingIndex ? executionStatus : undefined}
             isStreaming={index === lastStreamingIndex ? isStreaming : false}
+            subAgents={index === lastStreamingIndex ? rootSubAgents : undefined}
+            getSubAgent={index === lastStreamingIndex ? getSubAgent : undefined}
           />
         ))}
         {/* HITL overlay for pending requests */}
