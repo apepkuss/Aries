@@ -93,9 +93,6 @@ export function ExecutionModeSelector() {
         </select>
         <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
       </div>
-      <span className="text-[10px] text-muted-foreground">
-        ({currentOption?.description})
-      </span>
     </div>
   );
 }
