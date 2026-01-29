@@ -193,6 +193,16 @@ fn validate_chat_config(chat: &ChatConfigUpdate, result: &mut ValidationResult) 
             result.add_valid(field);
         }
     }
+
+    if let Some(ref model) = chat.model {
+        let field = "chat.model";
+        // Model can be empty (to use default) or non-empty
+        if model.is_empty() {
+            result.add_valid(field); // Allow clearing model to use default
+        } else {
+            result.add_valid(field);
+        }
+    }
 }
 
 /// Validate embedding configuration updates
@@ -384,6 +394,7 @@ mod tests {
         let chat = ChatConfigUpdate {
             url: Some("http://localhost:8080/v1".to_string()),
             api_key: Some("sk-test-key".to_string()),
+            model: None,
         };
 
         let mut result = ValidationResult::default();
@@ -398,6 +409,7 @@ mod tests {
         let chat = ChatConfigUpdate {
             url: Some("invalid-url".to_string()),
             api_key: None,
+            model: None,
         };
 
         let mut result = ValidationResult::default();
@@ -456,6 +468,7 @@ mod tests {
             chat: Some(ChatConfigUpdate {
                 url: Some("https://api.example.com/v1".to_string()),
                 api_key: None,
+                model: None,
             }),
             embedding: None,
             memory: None,

@@ -333,6 +333,10 @@ async fn main() -> ServerResult<()> {
         .route(
             "/v1/config/schema",
             get(config_api::get_config_schema_handler),
+        )
+        .route(
+            "/v1/config/test-chat",
+            post(config_api::test_chat_service_handler),
         );
 
     // Add memory endpoints only if memory is enabled

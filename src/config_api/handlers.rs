@@ -2,7 +2,7 @@
 //!
 //! This module contains HTTP handlers for configuration management endpoints.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use axum::{
     Json,
@@ -17,12 +17,12 @@ use super::{
     sanitize::Sanitize,
     types::{
         ConfigSchemaResponse, ConfigSchemaSection, ConfigUpdateRequest, ConfigUpdateResponse,
-        FieldSchema, SanitizedConfig,
+        FieldSchema, SanitizedConfig, TestChatServiceRequest, TestChatServiceResponse,
     },
     update::apply_config_update,
     validate::validate_config_update,
 };
-use crate::{AppState, dual_info, dual_warn};
+use crate::{AppState, dual_error, dual_info, dual_warn};
 
 // ============================================================================
 // GET /v1/config - Get current configuration
@@ -594,6 +594,182 @@ fn build_config_schema() -> ConfigSchemaResponse {
             rag: Some(rag_fields),
         },
         readonly,
+    }
+}
+
+// ============================================================================
+// POST /v1/config/test-chat - Test chat service connectivity
+// ============================================================================
+
+/// POST /v1/config/test-chat - Test chat service connectivity
+///
+/// Tests whether a chat service URL is accessible by attempting to fetch
+/// the list of available models from the service.
+///
+/// # Request Body
+///
+/// A `TestChatServiceRequest` JSON object containing:
+/// - `url`: The chat service URL to test
+/// - `api_key`: Optional API key for authentication
+///
+/// # Response
+///
+/// Returns a `TestChatServiceResponse` JSON object containing:
+/// - `success`: Whether the connection test succeeded
+/// - `error`: Error message if test failed
+/// - `models`: List of available models if successful
+///
+/// # Example Request
+///
+/// ```json
+/// {
+///   "url": "http://localhost:8080/v1",
+///   "api_key": "sk-xxx"
+/// }
+/// ```
+///
+/// # Example Response (Success)
+///
+/// ```json
+/// {
+///   "success": true,
+///   "models": ["gpt-4", "gpt-3.5-turbo"]
+/// }
+/// ```
+///
+/// # Example Response (Failure)
+///
+/// ```json
+/// {
+///   "success": false,
+///   "error": "Connection refused"
+/// }
+/// ```
+pub async fn test_chat_service_handler(
+    headers: HeaderMap,
+    Json(request): Json<TestChatServiceRequest>,
+) -> impl IntoResponse {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!(
+        "Testing chat service connectivity - url: {} - request_id: {}",
+        request.url,
+        request_id
+    );
+
+    // Validate URL format
+    if request.url.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TestChatServiceResponse::failure(
+                "URL cannot be empty".to_string(),
+            )),
+        );
+    }
+
+    // Build the models endpoint URL
+    let models_url = format!("{}/models", request.url.trim_end_matches('/'));
+
+    // Create HTTP client with timeout
+    let client = reqwest::Client::new();
+    let timeout = Duration::from_secs(10);
+
+    // Build request with optional API key
+    let mut req_builder = client.get(&models_url).timeout(timeout);
+    if let Some(ref api_key) = request.api_key
+        && !api_key.is_empty()
+    {
+        req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
+    }
+
+    // Send request
+    match req_builder.send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                // Try to parse the response as models list
+                match response.json::<serde_json::Value>().await {
+                    Ok(json) => {
+                        // Extract model IDs from response
+                        let models: Vec<String> = json
+                            .get("data")
+                            .and_then(|d| d.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|m| m.get("id").and_then(|id| id.as_str()))
+                                    .map(String::from)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        dual_info!(
+                            "Chat service test successful - url: {} - models: {} - request_id: {}",
+                            request.url,
+                            models.len(),
+                            request_id
+                        );
+
+                        (
+                            StatusCode::OK,
+                            Json(TestChatServiceResponse::success(models)),
+                        )
+                    }
+                    Err(e) => {
+                        let error_msg = format!("Failed to parse response: {}", e);
+                        dual_warn!(
+                            "Chat service test failed - url: {} - error: {} - request_id: {}",
+                            request.url,
+                            error_msg,
+                            request_id
+                        );
+                        (
+                            StatusCode::OK,
+                            Json(TestChatServiceResponse::failure(error_msg)),
+                        )
+                    }
+                }
+            } else {
+                let status = response.status();
+                let error_msg = match status.as_u16() {
+                    401 => "Authentication failed: Invalid API key".to_string(),
+                    403 => "Access forbidden: Check API key permissions".to_string(),
+                    404 => "Models endpoint not found at this URL".to_string(),
+                    _ => format!("Server returned error: {}", status),
+                };
+                dual_warn!(
+                    "Chat service test failed - url: {} - status: {} - request_id: {}",
+                    request.url,
+                    status,
+                    request_id
+                );
+                (
+                    StatusCode::OK,
+                    Json(TestChatServiceResponse::failure(error_msg)),
+                )
+            }
+        }
+        Err(e) => {
+            let error_msg = if e.is_timeout() {
+                "Connection timed out".to_string()
+            } else if e.is_connect() {
+                "Unable to connect to service".to_string()
+            } else {
+                format!("Connection error: {}", e)
+            };
+            dual_error!(
+                "Chat service test failed - url: {} - error: {} - request_id: {}",
+                request.url,
+                error_msg,
+                request_id
+            );
+            (
+                StatusCode::OK,
+                Json(TestChatServiceResponse::failure(error_msg)),
+            )
+        }
     }
 }
 

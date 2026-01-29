@@ -214,6 +214,9 @@ fn default_subtask_react_timeout_secs() -> u64 {
 pub struct ChatConfig {
     pub url: String,
     api_key: String,
+    /// Model to use for chat completions (runtime only, not persisted)
+    #[serde(default, skip_serializing)]
+    pub model: String,
 }
 
 impl ChatConfig {
@@ -223,6 +226,10 @@ impl ChatConfig {
         } else {
             std::env::var("DEFAULT_CHAT_SERVICE_API_KEY").ok()
         }
+    }
+
+    pub fn set_api_key(&mut self, api_key: String) {
+        self.api_key = api_key;
     }
 }
 
@@ -239,6 +246,10 @@ impl EmbeddingConfig {
         } else {
             std::env::var("DEFAULT_EMBEDDING_SERVICE_API_KEY").ok()
         }
+    }
+
+    pub fn set_api_key(&mut self, api_key: String) {
+        self.api_key = api_key;
     }
 }
 

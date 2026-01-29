@@ -23,9 +23,10 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "server.subtask_max_retries",
     "server.subtask_react_max_iterations",
     "server.subtask_react_timeout_secs",
-    // Chat config - requires service reload
+    // Chat config - requires service reload (url, api_key) or simple hot update (model)
     "chat.url",
     "chat.api_key",
+    "chat.model",
     // Embedding config - requires service reload
     "embedding.url",
     "embedding.api_key",
@@ -128,6 +129,8 @@ pub struct SanitizedChatConfig {
     pub url: String,
     /// Whether an API key is configured (actual key is hidden)
     pub api_key_configured: bool,
+    /// Model used for chat completions
+    pub model: String,
 }
 
 /// Sanitized embedding service configuration
@@ -304,6 +307,7 @@ pub struct ServerConfigUpdate {
 pub struct ChatConfigUpdate {
     pub url: Option<String>,
     pub api_key: Option<String>,
+    pub model: Option<String>,
 }
 
 /// Embedding configuration updatable fields
@@ -494,6 +498,51 @@ pub struct FieldSchema {
 }
 
 // ============================================================================
+// Service Test Types
+// ============================================================================
+
+/// Request to test chat service connectivity
+#[derive(Debug, Clone, Deserialize)]
+pub struct TestChatServiceRequest {
+    /// The URL to test
+    pub url: String,
+    /// Optional API key for authentication
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+/// Response from testing chat service connectivity
+#[derive(Debug, Clone, Serialize)]
+pub struct TestChatServiceResponse {
+    /// Whether the connection test succeeded
+    pub success: bool,
+    /// Error message if test failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// List of available models (if successful)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<String>>,
+}
+
+impl TestChatServiceResponse {
+    pub fn success(models: Vec<String>) -> Self {
+        Self {
+            success: true,
+            error: None,
+            models: Some(models),
+        }
+    }
+
+    pub fn failure(error: String) -> Self {
+        Self {
+            success: false,
+            error: Some(error),
+            models: None,
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -519,6 +568,7 @@ mod tests {
             chat: Some(SanitizedChatConfig {
                 url: "http://localhost:8080/v1".to_string(),
                 api_key_configured: true,
+                model: "gpt-4".to_string(),
             }),
             embedding: None,
             memory: None,

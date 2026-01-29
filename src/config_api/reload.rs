@@ -59,7 +59,8 @@ pub async fn reload_chat_service(state: &Arc<AppState>) -> ReloadResult {
     dual_info!("Reloading chat service...");
 
     // Step 1: Find and unregister existing config-based chat servers
-    let servers_to_remove = find_config_servers(state, ServerKind::chat, "config-chat-").await;
+    let servers_to_remove =
+        find_config_servers(state, ServerKind::chat, "chat-server-config-").await;
 
     for server_id in servers_to_remove {
         dual_info!("Unregistering old chat server: {}", server_id);
@@ -137,7 +138,7 @@ pub async fn reload_embedding_service(state: &Arc<AppState>) -> ReloadResult {
 
     // Step 1: Find and unregister existing config-based embedding servers
     let servers_to_remove =
-        find_config_servers(state, ServerKind::embeddings, "config-embedding-").await;
+        find_config_servers(state, ServerKind::embeddings, "embeddings-server-config-").await;
 
     for server_id in servers_to_remove {
         dual_info!("Unregistering old embedding server: {}", server_id);
@@ -204,7 +205,7 @@ pub async fn reload_embedding_service(state: &Arc<AppState>) -> ReloadResult {
 ///
 /// * `state` - The application state
 /// * `kind` - The server kind to search for
-/// * `prefix` - The ID prefix to match (e.g., "config-chat-")
+/// * `prefix` - The ID prefix to match (e.g., "chat-server-config-")
 ///
 /// # Returns
 ///

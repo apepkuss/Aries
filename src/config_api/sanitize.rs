@@ -73,6 +73,7 @@ impl Sanitize for ChatConfig {
         SanitizedChatConfig {
             url: self.url.clone(),
             api_key_configured: self.get_api_key().is_some(),
+            model: self.model.clone(),
         }
     }
 }

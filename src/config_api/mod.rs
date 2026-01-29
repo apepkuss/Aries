@@ -47,5 +47,7 @@ mod update;
 mod validate;
 pub mod watcher;
 
-pub use handlers::{get_config_handler, get_config_schema_handler, update_config_handler};
+pub use handlers::{
+    get_config_handler, get_config_schema_handler, test_chat_service_handler, update_config_handler,
+};
 pub use watcher::ConfigWatcher;

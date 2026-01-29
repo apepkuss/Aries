@@ -227,6 +227,9 @@ fn apply_chat_config_update(
         if update.api_key.is_some() {
             result.add_failed("chat.api_key", "Chat configuration not initialized");
         }
+        if update.model.is_some() {
+            result.add_failed("chat.model", "Chat configuration not initialized");
+        }
         return;
     };
 
@@ -238,13 +241,19 @@ fn apply_chat_config_update(
         }
     }
 
-    if let Some(ref _api_key) = update.api_key {
+    if let Some(ref api_key) = update.api_key {
         let field = "chat.api_key";
         if validated_fields.contains(&field.to_string()) {
-            // Note: We can't directly set api_key since it's private
-            // This would require adding a setter method to ChatConfig
-            // For now, we'll mark it as requiring a different approach
-            result.add_failed(field, "API key update requires ChatConfig setter method");
+            chat_config.set_api_key(api_key.clone());
+            result.add_updated(field);
+        }
+    }
+
+    if let Some(ref model) = update.model {
+        let field = "chat.model";
+        if validated_fields.contains(&field.to_string()) {
+            chat_config.model = model.clone();
+            result.add_updated(field);
         }
     }
 }
@@ -278,15 +287,11 @@ fn apply_embedding_config_update(
         }
     }
 
-    if let Some(ref _api_key) = update.api_key {
+    if let Some(ref api_key) = update.api_key {
         let field = "embedding.api_key";
         if validated_fields.contains(&field.to_string()) {
-            // Note: We can't directly set api_key since it's private
-            // This would require adding a setter method to EmbeddingConfig
-            result.add_failed(
-                field,
-                "API key update requires EmbeddingConfig setter method",
-            );
+            embedding_config.set_api_key(api_key.clone());
+            result.add_updated(field);
         }
     }
 }

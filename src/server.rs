@@ -153,7 +153,7 @@ impl Server {
         // Check if API key is available
         let api_key = chat_config.get_api_key();
 
-        let id = format!("config-chat-{}", Uuid::new_v4());
+        let id = format!("chat-server-config-{}", Uuid::new_v4());
 
         Ok(Server {
             id,
@@ -178,7 +178,7 @@ impl Server {
         // Check if API key is available
         let api_key = embedding_config.get_api_key();
 
-        let id = format!("config-embedding-{}", Uuid::new_v4());
+        let id = format!("embeddings-server-config-{}", Uuid::new_v4());
 
         Ok(Server {
             id,
