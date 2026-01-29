@@ -137,7 +137,13 @@ impl HitlRequest {
     }
 
     /// 检查请求是否已过期
+    ///
+    /// 对于 `Wait` 行为的请求，永远返回 `false`，因为它们会无限等待用户响应。
     pub fn is_expired(&self) -> bool {
+        // Wait 行为的请求永不过期
+        if self.timeout_behavior == TimeoutBehavior::Wait {
+            return false;
+        }
         Utc::now() > self.expires_at
     }
 

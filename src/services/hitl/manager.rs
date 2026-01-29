@@ -398,6 +398,56 @@ impl HitlManager {
         Ok(())
     }
 
+    /// 取消指定会话的所有待处理请求
+    ///
+    /// 当 SSE 连接断开时调用此方法，清理该会话的所有 HITL 请求。
+    /// 这样可以防止资源泄漏和孤儿请求累积。
+    pub async fn cancel_by_conversation(&self, conversation_id: &str, reason: &str) -> usize {
+        let pending_requests = self.store.get_pending_by_conversation(conversation_id);
+        let count = pending_requests.len();
+
+        if count == 0 {
+            return 0;
+        }
+
+        info!(
+            conversation_id = %conversation_id,
+            count = count,
+            reason = %reason,
+            "Cancelling all pending HITL requests for conversation"
+        );
+
+        for request in pending_requests {
+            // 更新状态为已取消
+            if self
+                .store
+                .update_status(&request.id, HitlRequestStatus::Cancelled)
+                .is_ok()
+            {
+                // 通知等待者
+                self.notify_waiter(
+                    &request.id,
+                    Err(HitlError::RequestNotFound(format!(
+                        "Request cancelled: {}",
+                        reason
+                    ))),
+                )
+                .await;
+
+                // 发送状态更新事件
+                self.notify_status(&request.id, HitlRequestStatus::Cancelled, reason);
+
+                debug!(
+                    request_id = %request.id,
+                    conversation_id = %conversation_id,
+                    "HITL request cancelled due to connection close"
+                );
+            }
+        }
+
+        count
+    }
+
     /// 处理超时
     pub async fn process_timeouts(&self) -> Vec<HitlRequest> {
         let expired = self.store.get_expired();
@@ -462,12 +512,19 @@ impl HitlManager {
     }
 
     /// 发送超时警告
+    ///
+    /// 跳过 `Wait` 行为的请求，因为它们会无限等待用户响应。
     pub fn send_timeout_warnings(&self) {
         let expiring = self
             .store
             .get_expiring_soon(self.timeout_warning_before_secs);
 
         for request in expiring {
+            // 跳过 Wait 行为的请求 - 它们不需要超时警告
+            if request.timeout_behavior == TimeoutBehavior::Wait {
+                continue;
+            }
+
             let remaining = request.remaining_seconds() as u64;
             self.notify_timeout_warning(&request.id, remaining);
 

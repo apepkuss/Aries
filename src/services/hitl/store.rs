@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use chrono::Utc;
 use dashmap::DashMap;
 
-use super::types::{HitlError, HitlRequest, HitlRequestId, HitlRequestStatus};
+use super::types::{HitlError, HitlRequest, HitlRequestId, HitlRequestStatus, TimeoutBehavior};
 
 /// Pending Store - 存储待处理的 HITL 请求
 ///
@@ -187,11 +187,17 @@ impl PendingStore {
     }
 
     /// 获取所有已过期的待处理请求
+    ///
+    /// 注意：`Wait` 行为的请求不会被视为过期，因为它们会无限等待用户响应。
     pub fn get_expired(&self) -> Vec<HitlRequest> {
         let now = Utc::now();
         self.requests
             .iter()
-            .filter(|r| r.status == HitlRequestStatus::Pending && r.expires_at < now)
+            .filter(|r| {
+                r.status == HitlRequestStatus::Pending
+                    && r.timeout_behavior != TimeoutBehavior::Wait
+                    && r.expires_at < now
+            })
             .map(|r| r.clone())
             .collect()
     }

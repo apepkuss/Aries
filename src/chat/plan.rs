@@ -50,6 +50,7 @@ use crate::{
     },
     dual_debug, dual_error, dual_info, dual_warn,
     error::{ServerError, ServerResult},
+    hitl::{self, HitlToolCaller, HitlToolContext, HitlToolResult},
     mcp::{
         DEFAULT_SEARCH_FALLBACK_MESSAGE, MCP_SERVICES, SEARCH_MCP_SERVER_NAMES, extract_tool_name,
         format_mcp_tool_name, parse_mcp_tool_name,
@@ -432,6 +433,13 @@ pub(crate) async fn chat(
 
     dual_info!("🚀 Starting task execution - request_id: {}", request_id);
 
+    // Extract user_id from headers for HITL context
+    let user_id = headers
+        .get("X-User-ID")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
     // Emit executing status event with subtask count
     let total_subtasks = plan.execution_order.len();
     emitter
@@ -666,6 +674,7 @@ pub(crate) async fn chat(
                             &available_tools,
                             Some(&skills_summaries),
                             conv_id.as_deref(),
+                            &user_id,
                             attempt_timeout,
                             subtask_react_max_iterations,
                             max_tools_per_iteration,
@@ -1140,14 +1149,33 @@ pub(crate) async fn chat(
         .await;
 
     // Build response
-    build_response(
+    let response = build_response(
         final_response,
         &final_content,
         stream,
         &enhanced_stream_config,
         event_receiver,
         request_id,
-    )
+    );
+
+    // Cleanup any pending HITL requests for this conversation (batch mode)
+    if let Some(ref cid) = conv_id
+        && let Some(hitl_manager) = hitl::global()
+    {
+        let cancelled = hitl_manager
+            .cancel_by_conversation(cid, "Batch request completed")
+            .await;
+        if cancelled > 0 {
+            dual_info!(
+                "Cleaned up {} pending HITL requests for conversation {} - request_id: {}",
+                cancelled,
+                cid,
+                request_id
+            );
+        }
+    }
+
+    response
 }
 
 // ============================================================================
@@ -1186,6 +1214,9 @@ async fn chat_realtime_stream(
     // Clone values needed for the background task
     let request_id_clone = request_id.clone();
 
+    // Clone conv_id for cleanup
+    let conv_id_for_cleanup = conv_id.clone();
+
     // Spawn background task to execute the plan
     tokio::spawn(async move {
         let result = execute_chat_plan_realtime(
@@ -1218,6 +1249,24 @@ async fn chat_realtime_stream(
                 dual_error!(
                     "Realtime chat execution failed: {} - request_id: {}",
                     e,
+                    request_id_clone
+                );
+            }
+        }
+
+        // Cleanup any pending HITL requests for this conversation
+        // This handles cases where the SSE connection closes or the task ends
+        if let Some(ref cid) = conv_id_for_cleanup
+            && let Some(hitl_manager) = hitl::global()
+        {
+            let cancelled = hitl_manager
+                .cancel_by_conversation(cid, "SSE connection closed")
+                .await;
+            if cancelled > 0 {
+                dual_info!(
+                    "Cleaned up {} pending HITL requests for conversation {} - request_id: {}",
+                    cancelled,
+                    cid,
                     request_id_clone
                 );
             }
@@ -1547,6 +1596,13 @@ async fn execute_chat_plan_realtime(
 
     dual_info!("🚀 Starting task execution - request_id: {}", request_id);
 
+    // Extract user_id from headers for HITL context
+    let user_id = headers
+        .get("X-User-ID")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("anonymous")
+        .to_string();
+
     // Emit executing status event with subtask count
     let total_subtasks = plan.execution_order.len();
     emitter
@@ -1843,6 +1899,7 @@ async fn execute_chat_plan_realtime(
                             &available_tools,
                             Some(&skills_summaries),
                             conv_id.as_deref(),
+                            &user_id,
                             attempt_timeout,
                             subtask_react_max_iterations,
                             max_tools_per_iteration,
@@ -2461,6 +2518,7 @@ async fn execute_subtask_with_react(
     available_tools: &[ToolDescription],
     skills_summaries: Option<&[SkillSummary]>,
     conv_id: Option<&str>,
+    user_id: &str,
     timeout: Duration,
     max_iterations: u32,
     max_tools_per_iteration: usize,
@@ -2690,9 +2748,12 @@ async fn execute_subtask_with_react(
                         tool_call,
                         &active_skills,
                         conv_id,
+                        user_id,
+                        Some(subtask.id),
                         tool_call_max_retries,
                         tool_call_retry_delay,
                         request_id,
+                        cancel_token,
                         &mut iter_trace,
                         Some(&subagent_ctx),
                         emitter,
@@ -2746,8 +2807,15 @@ async fn execute_subtask_with_react(
                     ));
                 }
             } else if let Some(content) = content {
+                // === Check for skill request FIRST (before action tags) ===
+                // If LLM outputs both <use_skill> and <action> in the same response,
+                // prioritize skill loading and ignore the action tag.
+                let has_skill_request =
+                    active_skills.is_empty() && SkillDetector::detect_first(content).is_some();
+
                 // === XML JSON-embedded format tool call ===
-                if let Some(xml_tool_call) = extract_xml_tool_call(content) {
+                // Skip if there's a skill request in the same response
+                if !has_skill_request && let Some(xml_tool_call) = extract_xml_tool_call(content) {
                     // Extract thought
                     if let Some(thought) = extract_thought(content) {
                         dual_info!("💭 Subtask {} Thought: {}", subtask.id, thought);
@@ -2806,9 +2874,12 @@ async fn execute_subtask_with_react(
                         &tool_call,
                         &active_skills,
                         conv_id,
+                        user_id,
+                        Some(subtask.id),
                         tool_call_max_retries,
                         tool_call_retry_delay,
                         request_id,
+                        cancel_token,
                         &mut iter_trace,
                         Some(&subagent_ctx),
                         emitter,
@@ -2860,6 +2931,109 @@ async fn execute_subtask_with_react(
                     messages.push(ChatCompletionRequestMessage::Tool(
                         ChatCompletionToolMessage::new(&observation, &tool_call.id),
                     ));
+                } else if has_skill_request {
+                    // Skill request detected - process it (prioritize over action tags)
+                    // Extract thought first
+                    if let Some(thought) = extract_thought(content) {
+                        dual_info!("💭 Subtask {} Thought: {}", subtask.id, thought);
+                        iter_trace.thought = Some(thought.clone());
+
+                        emitter
+                            .emit_thought(
+                                &thought,
+                                ThoughtStatus::Done,
+                                Some(subtask.id),
+                                Some(iteration_count),
+                            )
+                            .await;
+                    }
+
+                    // Process skill request
+                    if let Ok(registry) = SkillRegistry::global() {
+                        let all_loaded_skills = registry.get_all_loaded().await;
+                        let (resolved_skills, removed_skills) =
+                            SkillDetector::detect_and_resolve(content, &all_loaded_skills);
+
+                        if !resolved_skills.is_empty() {
+                            // Log resolved skills
+                            if resolved_skills.len() == 1 {
+                                dual_info!(
+                                    "🎯 Subtask {} requested skill: {} (ignored concurrent action tag) - request_id: {}",
+                                    subtask.id,
+                                    resolved_skills[0],
+                                    request_id
+                                );
+                            } else {
+                                dual_info!(
+                                    "🎯 Subtask {} requested {} skills: [{}] (ignored concurrent action tag) - request_id: {}",
+                                    subtask.id,
+                                    resolved_skills.len(),
+                                    resolved_skills.join(", "),
+                                    request_id
+                                );
+                            }
+
+                            // Log removed skills
+                            for (removed, reason) in &removed_skills {
+                                dual_warn!(
+                                    "⚠️ Skill '{}' removed: {} - request_id: {}",
+                                    removed,
+                                    reason,
+                                    request_id
+                                );
+                            }
+
+                            // Load all resolved skills
+                            let mut loaded_skills_list: Vec<LoadedSkill> = Vec::new();
+                            let mut skill_names_loaded: Vec<String> = Vec::new();
+
+                            for skill_name in &resolved_skills {
+                                if let Some(loaded_skill) = registry.get(skill_name).await {
+                                    dual_info!(
+                                        "📖 Loaded skill '{}' for subtask {} - request_id: {}",
+                                        skill_name,
+                                        subtask.id,
+                                        request_id
+                                    );
+                                    skill_names_loaded.push(skill_name.clone());
+                                    loaded_skills_list.push(loaded_skill);
+                                } else {
+                                    dual_warn!(
+                                        "⚠️ Skill '{}' not found, skipping - request_id: {}",
+                                        skill_name,
+                                        request_id
+                                    );
+                                }
+                            }
+
+                            if !loaded_skills_list.is_empty() {
+                                // Record skill request in iteration trace
+                                iter_trace.set_skill_request(skill_names_loaded[0].clone(), true);
+
+                                // Record skill activation in subtask trace
+                                subtask_trace.set_active_skills(skill_names_loaded.clone());
+
+                                // Store the active skills
+                                active_skills = loaded_skills_list;
+
+                                // Rebuild context with the active skills (Phase 2)
+                                messages = build_context_for_react(
+                                    subtask,
+                                    previous_results,
+                                    available_tools,
+                                    None,
+                                    &active_skills,
+                                    max_reference_size,
+                                )
+                                .await;
+
+                                // Finalize iteration trace and continue loop
+                                iter_trace.duration = iter_start.elapsed();
+                                subtask_trace.add_iteration(iter_trace);
+                                continue;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -3027,7 +3201,7 @@ pub struct SubAgentToolContext {
     pub cancel_token: CancellationToken,
 }
 
-/// Executes a single tool call with retry logic.
+/// Executes a single tool call with retry logic and HITL support.
 ///
 /// Supports both MCP tools (format: `mcp__{server}__{tool}`) and internal tools
 /// (format: `internal__{tool}`).
@@ -3037,15 +3211,22 @@ pub struct SubAgentToolContext {
 /// - `internal__spawn_sub_agent`: Spawn a new Sub-Agent
 /// - `internal__get_sub_agent_result`: Get result from a Sub-Agent
 /// - `internal__cancel_sub_agent`: Cancel a running Sub-Agent
+///
+/// # HITL Support
+/// For MCP tools, HITL (Human-in-the-Loop) checking is performed if enabled,
+/// allowing users to approve, modify, or reject tool calls based on risk assessment.
 #[allow(clippy::too_many_arguments)]
 async fn execute_tool_call(
     state: &Arc<AppState>,
     tool_call: &endpoints::chat::ToolCall,
     active_skills: &[LoadedSkill],
     conv_id: Option<&str>,
+    user_id: &str,
+    subtask_id: Option<usize>,
     max_retries: u32,
     retry_delay: Duration,
     request_id: &str,
+    cancel_token: &CancellationToken,
     iter_trace: &mut IterationTrace,
     subagent_ctx: Option<&SubAgentToolContext>,
     emitter: &dyn EventEmitter,
@@ -3110,7 +3291,160 @@ async fn execute_tool_call(
         ServerError::McpOperation(err_msg)
     })?;
 
-    // Retry loop
+    // Check if HITL is enabled and create the tool caller
+    let hitl_caller = hitl::global().map(|m| HitlToolCaller::new(Arc::clone(m)));
+
+    // If HITL is enabled, use check_and_execute for MCP tools
+    if let Some(ref hitl_caller) = hitl_caller {
+        let mut context =
+            HitlToolContext::new(request_id, user_id).with_cancel_token(cancel_token.clone());
+
+        // Add subtask_id to context if available
+        if let Some(id) = subtask_id {
+            context = context.with_subtask_id(id);
+        }
+
+        let tool_name_for_closure = tool_call.function.name.clone();
+        let server_name_str = server_name.to_string();
+        let max_retries_copy = max_retries;
+        let retry_delay_copy = retry_delay;
+        let request_id_str = request_id.to_string();
+
+        let result = hitl_caller
+            .check_and_execute(&tool_call.function.name, &tool_args, &context, |args| {
+                let tool_name = tool_name_for_closure.clone();
+                let server_name = server_name_str.clone();
+                let max_retries = max_retries_copy;
+                let retry_delay = retry_delay_copy;
+                let request_id = request_id_str.clone();
+                async move {
+                    execute_mcp_tool_with_retry(
+                        &tool_name,
+                        &server_name,
+                        &args,
+                        max_retries,
+                        retry_delay,
+                        &request_id,
+                    )
+                    .await
+                }
+            })
+            .await;
+
+        // Handle HITL result
+        match result {
+            Ok(hitl_result) => match hitl_result {
+                HitlToolResult::Executed(r)
+                | HitlToolResult::ExecutedWithoutConfirmation(r)
+                | HitlToolResult::Approved(r)
+                | HitlToolResult::HitlDisabled(r) => {
+                    let final_result = wrap_search_result(server_name, &r, service).await;
+                    tool_trace.set_result(final_result.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Ok(final_result)
+                }
+                HitlToolResult::Modified { result, .. } => {
+                    let final_result = wrap_search_result(server_name, &result, service).await;
+                    tool_trace.set_result(final_result.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Ok(final_result)
+                }
+                HitlToolResult::Rejected { reason } => {
+                    let err_msg =
+                        reason.unwrap_or_else(|| "Tool call rejected by user".to_string());
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::UserInterrupted(err_msg))
+                }
+                HitlToolResult::Skipped { reason } => {
+                    let err_msg = format!("Tool call skipped: {}", reason);
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::Operation(err_msg))
+                }
+                HitlToolResult::Aborted { reason } => {
+                    let err_msg = format!(
+                        "Tool call aborted: {}",
+                        reason.unwrap_or_else(|| "No reason provided".to_string())
+                    );
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::Operation(err_msg))
+                }
+                HitlToolResult::TimedOut { behavior } => {
+                    let err_msg = format!("HITL confirmation timed out (behavior: {})", behavior);
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::Operation(err_msg))
+                }
+            },
+            Err(e) => {
+                // Handle Cancelled error specially - treat it as user interruption
+                if matches!(e, hitl::HitlError::Cancelled(_)) {
+                    let err_msg =
+                        "HITL request cancelled due to another subtask rejection".to_string();
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::UserInterrupted(err_msg))
+                } else {
+                    let err_msg = format!("HITL error: {}", e);
+                    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                    iter_trace.add_tool_call(tool_trace);
+                    Err(ServerError::Operation(err_msg))
+                }
+            }
+        }
+    } else {
+        // No HITL, execute directly with retry
+        let result = execute_mcp_tool_with_retry(
+            &tool_call.function.name,
+            server_name,
+            &tool_args,
+            max_retries,
+            retry_delay,
+            request_id,
+        )
+        .await;
+
+        match result {
+            Ok(result_text) => {
+                let final_result = wrap_search_result(server_name, &result_text, service).await;
+                tool_trace.set_result(final_result.clone(), tool_call_start.elapsed());
+                iter_trace.add_tool_call(tool_trace);
+                Ok(final_result)
+            }
+            Err(err_msg) => {
+                tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
+                iter_trace.add_tool_call(tool_trace);
+                Err(ServerError::McpOperation(err_msg))
+            }
+        }
+    }
+}
+
+/// Execute MCP tool with retry logic (internal helper)
+async fn execute_mcp_tool_with_retry(
+    full_tool_name: &str,
+    server_name: &str,
+    args: &serde_json::Value,
+    max_retries: u32,
+    retry_delay: Duration,
+    request_id: &str,
+) -> Result<String, String> {
+    // Parse the actual tool name
+    let (_, tool_name) = parse_mcp_tool_name(full_tool_name)
+        .ok_or_else(|| format!("Invalid tool name format: {}", full_tool_name))?;
+
+    // Get MCP services
+    let services = MCP_SERVICES
+        .get()
+        .ok_or_else(|| "MCP services not initialized".to_string())?;
+
+    let service_map = services.read().await;
+    let service = service_map
+        .get(server_name)
+        .ok_or_else(|| format!("MCP server '{}' not found", server_name))?;
+
     let mut last_error: Option<String> = None;
 
     for attempt in 0..=max_retries {
@@ -3127,7 +3461,7 @@ async fn execute_tool_call(
 
         let request_param = CallToolRequestParam {
             name: tool_name.to_string().into(),
-            arguments: serde_json::from_value(tool_args.clone()).ok(),
+            arguments: serde_json::from_value(args.clone()).ok(),
         };
 
         match service.read().await.raw.call_tool(request_param).await {
@@ -3140,40 +3474,15 @@ async fn execute_tool_call(
                 if !result.content.is_empty()
                     && let RawContent::Text(text) = &result.content[0].raw
                 {
-                    let result_text = text.text.clone();
                     dual_info!(
                         "Tool call succeeded: {} - request_id: {}",
                         tool_name,
                         request_id
                     );
-
-                    // Check if this is a search server and wrap accordingly
-                    let final_result = if SEARCH_MCP_SERVER_NAMES.contains(&server_name) {
-                        // Get fallback message
-                        let fallback = if service.read().await.has_fallback_message() {
-                            service.read().await.fallback_message.clone().unwrap()
-                        } else {
-                            DEFAULT_SEARCH_FALLBACK_MESSAGE.to_string()
-                        };
-
-                        format!(
-                            "Please answer the question based on the information between **---BEGIN CONTEXT---** and **---END CONTEXT---**. Do not use any external knowledge. If the information between **---BEGIN CONTEXT---** and **---END CONTEXT---** is empty, please respond with `{fallback}`. Note that DO NOT use any tools if provided.\n\n---BEGIN CONTEXT---\n\n{context}\n\n---END CONTEXT---",
-                            fallback = fallback,
-                            context = result_text,
-                        )
-                    } else {
-                        result_text
-                    };
-
-                    tool_trace.set_result(final_result.clone(), tool_call_start.elapsed());
-                    iter_trace.add_tool_call(tool_trace);
-                    return Ok(final_result);
+                    return Ok(text.text.clone());
                 }
 
-                let err_msg = "Tool returned empty content";
-                tool_trace.set_error(err_msg.to_string(), tool_call_start.elapsed());
-                iter_trace.add_tool_call(tool_trace);
-                return Err(ServerError::McpEmptyContent);
+                return Err("Tool returned empty content".to_string());
             }
             Err(e) => {
                 last_error = Some(e.to_string());
@@ -3188,15 +3497,30 @@ async fn execute_tool_call(
         }
     }
 
-    // All retries exhausted
-    let err_msg = last_error.unwrap_or_else(|| "Unknown error".to_string());
-    tool_trace.set_error(err_msg.clone(), tool_call_start.elapsed());
-    iter_trace.add_tool_call(tool_trace);
-    Err(ServerError::ToolCallRetryExhausted {
-        tool_name: tool_name.to_string(),
-        attempts: max_retries + 1,
-        message: err_msg,
-    })
+    Err(last_error.unwrap_or_else(|| "Unknown error".to_string()))
+}
+
+/// Wrap search results with context markers if the server is a search server
+async fn wrap_search_result(
+    server_name: &str,
+    result_text: &str,
+    service: &tokio::sync::RwLock<crate::mcp::McpService>,
+) -> String {
+    if SEARCH_MCP_SERVER_NAMES.contains(&server_name) {
+        let fallback = if service.read().await.has_fallback_message() {
+            service.read().await.fallback_message.clone().unwrap()
+        } else {
+            DEFAULT_SEARCH_FALLBACK_MESSAGE.to_string()
+        };
+
+        format!(
+            "Please answer the question based on the information between **---BEGIN CONTEXT---** and **---END CONTEXT---**. Do not use any external knowledge. If the information between **---BEGIN CONTEXT---** and **---END CONTEXT---** is empty, please respond with `{fallback}`. Note that DO NOT use any tools if provided.\n\n---BEGIN CONTEXT---\n\n{context}\n\n---END CONTEXT---",
+            fallback = fallback,
+            context = result_text,
+        )
+    } else {
+        result_text.to_string()
+    }
 }
 
 /// Executes a Sub-Agent tool.
@@ -3958,6 +4282,7 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 1. Analyze the task and think about how to accomplish it
 2. If a skill would help, request it using <use_skill>skill-name</use_skill> tags
    - You can request multiple skills: <use_skill>skill-a, skill-b</use_skill>
+   - **⚠️ IMPORTANT**: When you request a skill, ONLY output the <use_skill> tag. Do NOT include any <action> tags in the same response. The system will load the skill and provide the actual tool list in the next turn.
 3. Use the available tools as needed to complete the task
 4. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
 
@@ -3969,15 +4294,21 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 
 ## Tool Call Examples
 
-### Example 1: MCP Tool Call
+### Example 1: Request a Skill (Correct)
+<thought>I need to perform a calculation. The cardea-calculator skill can help with this.</thought>
+<use_skill>cardea-calculator</use_skill>
+
+(Do NOT add <action> tags here. Wait for the skill to be loaded in the next turn.)
+
+### Example 2: MCP Tool Call (After Skill is Loaded)
 <thought>I need to search for information</thought>
 <action>{{"name": "mcp__search__query", "arguments": {{"query": "example search"}}}}</action>
 
-### Example 2: Spawn a Sub-Agent for Parallel Task Execution
+### Example 4: Spawn a Sub-Agent for Parallel Task Execution
 <thought>I need to perform multiple independent searches in parallel. I'll spawn Sub-Agents for each search.</thought>
 <action>{{"name": "internal__spawn_sub_agent", "arguments": {{"name": "WebSearcher", "role": "You are a research assistant specialized in web searching.", "task": "Search for the latest news about AI developments", "wait_for_completion": false}}}}</action>
 
-### Example 3: Get Sub-Agent Result
+### Example 5: Get Sub-Agent Result
 <thought>I need to check the result from the Sub-Agent I spawned earlier.</thought>
 <action>{{"name": "internal__get_sub_agent_result", "arguments": {{"subagent_id": "subagent_abc123", "wait": true}}}}</action>
 
@@ -4004,13 +4335,21 @@ Remember: Focus only on this specific subtask. Use the context from previous res
                 previous_results
                     .iter()
                     .find(|(id, _)| id == dep_id)
-                    .map(|(id, result)| format!("Result from subtask {}: {}", id, result))
+                    .map(|(id, result)| {
+                        format!(
+                            "**任务{}的结果** = {}\n(当任务描述中提到\"任务{}的结果\"时，直接使用上面的值)",
+                            id, result, id
+                        )
+                    })
             })
             .collect();
 
         if !context_parts.is_empty() {
             let context_message = format!(
-                "Here are the results from previous subtasks that this task depends on:\n\n{}",
+                "## ⚠️ 重要：前置任务结果\n\n\
+                以下是本任务依赖的前置任务的执行结果。**你必须直接使用这些结果值**，不要重新计算或重新执行已完成的操作。\n\n\
+                {}\n\n\
+                **说明**：如果任务描述中包含\"任务N的结果\"这样的引用，请将其替换为上面对应的实际值。",
                 context_parts.join("\n\n")
             );
             messages.push(ChatCompletionRequestMessage::User(

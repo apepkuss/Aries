@@ -695,14 +695,44 @@ impl TaskPlanner {
 ```
 这样规划可以并行执行：(100+200) 和 (300+400) 同时计算，然后汇总。
 
-示例3 - 必须串行的任务（有状态依赖）：
+示例3 - 奇数个操作数的正确处理（计算 32+33+22）：
+
+⚠️ **错误方式1 - 修改原始数值**：
+```xml
+<subtask id="1"><description>计算 32 + 33</description><dependencies></dependencies></subtask>
+<subtask id="2"><description>计算 30 + 40（即 33 + 22）</description><dependencies></dependencies></subtask>
+<subtask id="3"><description>将任务1和任务2的结果相加</description><dependencies>1, 2</dependencies></subtask>
+```
+问题：任务2错误地修改了原始数值（30+40 ≠ 33+22），这是**严重错误**！不要为了并行而"凑整"或修改数值。
+
+⚠️ **错误方式2 - 重复字面表达式**：
+```xml
+<subtask id="1"><description>计算 32 + 33</description><dependencies></dependencies></subtask>
+<subtask id="2"><description>计算 (32 + 33) + 22</description><dependencies>1</dependencies></subtask>
+```
+问题：任务2的描述包含字面表达式 `(32 + 33)`，执行时模型可能会重新计算。
+
+✅ **正确的串行方式**（3个数应串行处理）：
+```xml
+<subtask id="1">
+  <description>计算 32 + 33</description>
+  <dependencies></dependencies>
+</subtask>
+<subtask id="2">
+  <description>计算 任务1的结果 + 22</description>
+  <dependencies>1</dependencies>  <!-- 使用"任务1的结果"引用，串行执行 -->
+</subtask>
+```
+正确做法：奇数个操作数使用串行方式，用"任务N的结果"作为占位符。
+
+示例4 - 必须串行的任务（有状态依赖）：
 ```xml
 <subtask id="1">
   <description>读取文件 config.json</description>
   <dependencies></dependencies>
 </subtask>
 <subtask id="2">
-  <description>根据配置内容修改数据库</description>
+  <description>根据任务1读取的配置内容修改数据库</description>
   <dependencies>1</dependencies>  <!-- 必须依赖任务1，因为需要其内容 -->
 </subtask>
 ```
@@ -732,16 +762,25 @@ impl TaskPlanner {
    - **可并行**（无依赖）：独立的查询、搜索操作（如同时查询多个城市天气）
    - **必须串行**（有依赖）：需要前一步**具体结果内容**才能执行的操作
 5. **⭐ 并行优化原则**（关键）：
-   - 对于**可结合操作**（加法、乘法、字符串拼接、集合合并等），应拆分为并行子任务
-   - 例如：`A+B+C+D` 应规划为 `(A+B)` 和 `(C+D)` 并行，然后汇总
+   - 对于**可结合操作**（加法、乘法、字符串拼接、集合合并等），**当操作数为偶数个时**可拆分为并行子任务
+   - 例如：`A+B+C+D`（4个数）应规划为 `(A+B)` 和 `(C+D)` 并行，然后汇总
    - 例如：搜索4个关键词应规划为4个并行搜索任务，然后汇总结果
    - **判断方法**：如果操作顺序不影响最终结果，就可以并行
+   - **⚠️ 奇数个操作数**：当操作数为奇数时（如3个数 `A+B+C`），应使用**串行方式**：
+     - 任务1: 计算 A + B
+     - 任务2: 计算 任务1的结果 + C（依赖任务1）
+   - **❌ 禁止**：不要为了追求并行而错误地修改、拆分或"凑整"原始数值
 6. 依赖关系中的 ID 必须是已定义的子任务 ID
 7. 如果任务简单，可以只有一个子任务
 8. 子任务数量不应超过 {max_subtasks} 个
 9. **重要**：子任务描述中必须包含用户请求中的具体值（如文件名、路径、参数等），不要使用通用占位符或示例值
+10. **⭐ 依赖结果引用**（关键）：当子任务依赖其他任务的结果时，必须使用"任务N的结果"而非重复原始表达式
+    - ❌ **错误**：`<description>计算 33 + (23 + 32)</description>` — 会导致重复计算
+    - ✅ **正确**：`<description>计算 33 + 任务1的结果</description>` — 使用引用
+    - **原因**：执行时会注入依赖任务的结果，使用引用可以确保模型正确使用已计算的值
+    - **适用场景**：数学计算、API调用结果处理、文件内容处理等任何需要使用前置任务输出的情况
 
-**⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}"#,
+**⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"、"任务N的结果"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}"#,
             skills_section = skills_section,
             tools_desc = tools_desc,
             recommended_skill_tag = recommended_skill_tag,
@@ -859,11 +898,19 @@ fn compute_execution_order(subtasks: &[SubTask]) -> Result<Vec<usize>, ServerErr
     }
 
     // Kahn's algorithm for topological sort
+    // IMPORTANT: Collect and sort zero-degree nodes to ensure deterministic execution order
+    // When multiple nodes have no dependencies (like parallel subtasks), they should be
+    // processed in ID order (1, 2, 3...) rather than arbitrary HashMap iteration order
+    let mut zero_degree_nodes: Vec<usize> = in_degree
+        .iter()
+        .filter(|&(_, degree)| *degree == 0)
+        .map(|(id, _)| *id)
+        .collect();
+    zero_degree_nodes.sort(); // Sort by ID for deterministic order
+
     let mut queue: VecDeque<usize> = VecDeque::new();
-    for (&id, &degree) in &in_degree {
-        if degree == 0 {
-            queue.push_back(id);
-        }
+    for id in zero_degree_nodes {
+        queue.push_back(id);
     }
 
     let mut order = Vec::new();
