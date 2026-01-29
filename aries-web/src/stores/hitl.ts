@@ -256,16 +256,44 @@ export const useHitlStore = create<HitlState>((set, get) => ({
 
       return response;
     } catch (err) {
+      // Check if the error is a 410 Gone or 404 Not Found (request expired/not found)
+      // ApiError has a status property, but we also check message for safety
+      const errorStatus = (err as { status?: number }).status;
+      const isGoneError =
+        errorStatus === 410 ||
+        errorStatus === 404 ||
+        (err instanceof Error &&
+          (err.message.includes('410') ||
+            err.message.includes('Gone') ||
+            err.message.includes('expired') ||
+            err.message.includes('not found')));
+
       set((state) => {
         const newRequests = new Map(state.pendingRequests);
-        const req = newRequests.get(requestId);
-        if (req) {
-          newRequests.set(requestId, { ...req, isResponding: false });
+
+        if (isGoneError) {
+          // Request expired or not found - remove it from pending
+          newRequests.delete(requestId);
+          console.log(`[HITL] Request ${requestId} expired or not found (status: ${errorStatus}), removing from pending list`);
+        } else {
+          // Other error - keep request but reset responding state
+          const req = newRequests.get(requestId);
+          if (req) {
+            newRequests.set(requestId, { ...req, isResponding: false });
+          }
         }
+
         return {
-          error: err instanceof Error ? err.message : 'Failed to respond',
+          error: isGoneError
+            ? 'Request has expired'
+            : err instanceof Error
+              ? err.message
+              : 'Failed to respond',
           isResponding: false,
           pendingRequests: newRequests,
+          activeRequestId: isGoneError && state.activeRequestId === requestId
+            ? null
+            : state.activeRequestId,
         };
       });
       return null;
