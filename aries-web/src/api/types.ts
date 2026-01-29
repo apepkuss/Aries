@@ -277,6 +277,18 @@ export interface FieldSchema {
   side_effect?: string;
 }
 
+// Service Test Types
+export interface TestChatServiceRequest {
+  url: string;
+  api_key?: string;
+}
+
+export interface TestChatServiceResponse {
+  success: boolean;
+  error?: string;
+  models?: string[];
+}
+
 // ============================================================================
 // Memory API Types
 // ============================================================================

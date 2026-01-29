@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +28,9 @@ export function ConfigPanel() {
     saveChanges,
     clearPendingChanges,
     hasPendingChanges,
+    hasUrlChange,
+    urlTestState,
+    testChatUrl,
   } = useConfigStore();
 
   // Fetch config when dialog opens
@@ -38,6 +40,20 @@ export function ConfigPanel() {
       fetchSchema();
     }
   }, [settingsOpen, fetchConfig, fetchSchema]);
+
+  // Determine if we need to show Test button
+  const needsTest = hasUrlChange() && urlTestState !== 'passed';
+  const isTesting = urlTestState === 'testing';
+
+  // Handle test
+  const handleTest = async () => {
+    const success = await testChatUrl();
+    if (success) {
+      toast.success('Connection test successful');
+    } else {
+      toast.error('Connection test failed');
+    }
+  };
 
   // Handle save
   const handleSave = async () => {
@@ -125,20 +141,22 @@ export function ConfigPanel() {
               </Tabs>
             </ScrollArea>
 
-            <DialogFooter className="shrink-0 flex-col sm:flex-row gap-2 border-t pt-4">
-              {hasPendingChanges() && (
-                <Badge variant="secondary" className="sm:mr-auto self-start">
-                  Unsaved changes
-                </Badge>
-              )}
+            <DialogFooter className="shrink-0 gap-2 border-t pt-4">
               <div className="flex gap-2 w-full sm:w-auto justify-end">
                 <Button variant="outline" onClick={handleClose}>
                   Cancel
                 </Button>
-                <Button onClick={handleSave} disabled={!hasPendingChanges() || isSaving}>
-                  {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save
-                </Button>
+                {needsTest ? (
+                  <Button onClick={handleTest} disabled={isTesting}>
+                    {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Connect
+                  </Button>
+                ) : (
+                  <Button onClick={handleSave} disabled={!hasPendingChanges() || isSaving}>
+                    {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Save
+                  </Button>
+                )}
               </div>
             </DialogFooter>
           </>

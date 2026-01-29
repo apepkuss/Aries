@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useChatStore } from '@/stores';
 import { ExecutionModeSelector } from './ExecutionModeSelector';
+import { ModelSelector } from './ModelSelector';
 
 export function ChatInput() {
   const [input, setInput] = useState('');
@@ -93,9 +94,12 @@ export function ChatInput() {
           )}
         </div>
 
-        {/* Execution Mode Selector */}
+        {/* Mode and Model Selectors */}
         <div className="flex items-center justify-between">
-          <ExecutionModeSelector />
+          <div className="flex items-center gap-4">
+            <ExecutionModeSelector />
+            <ModelSelector />
+          </div>
           <span className="text-xs text-muted-foreground">
             Cmd+Enter to send
           </span>

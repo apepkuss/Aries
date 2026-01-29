@@ -77,7 +77,6 @@ export function ExecutionModeSelector() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground">Mode:</span>
       <div className="relative">
         <select
           value={currentCombinedMode}

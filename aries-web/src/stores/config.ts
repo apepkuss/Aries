@@ -3,6 +3,7 @@ import {
   getConfig,
   updateConfig,
   getConfigSchema,
+  testChatService,
 } from '@/api/config';
 import type {
   SanitizedConfig,
@@ -10,6 +11,8 @@ import type {
   ConfigUpdateResponse,
   ConfigSchemaResponse,
 } from '@/api/types';
+
+type UrlTestState = 'idle' | 'testing' | 'passed' | 'failed';
 
 interface ConfigState {
   // Data
@@ -26,6 +29,10 @@ interface ConfigState {
   // Pending changes (not yet saved)
   pendingChanges: ConfigUpdateRequest;
 
+  // URL test state
+  urlTestState: UrlTestState;
+  urlTestError: string | null;
+
   // Actions
   fetchConfig: () => Promise<void>;
   fetchSchema: () => Promise<void>;
@@ -37,6 +44,9 @@ interface ConfigState {
   clearPendingChanges: () => void;
   saveChanges: () => Promise<ConfigUpdateResponse | null>;
   hasPendingChanges: () => boolean;
+  hasUrlChange: () => boolean;
+  testChatUrl: () => Promise<boolean>;
+  resetUrlTest: () => void;
 }
 
 export const useConfigStore = create<ConfigState>((set, get) => ({
@@ -47,6 +57,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   isSaving: false,
   error: null,
   pendingChanges: {},
+  urlTestState: 'idle',
+  urlTestError: null,
 
   // Fetch current config
   fetchConfig: async () => {
@@ -85,6 +97,13 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   setPendingChange: (section, field, value) => {
     set((state) => {
       const currentSection = state.pendingChanges[section] || {};
+
+      // Reset URL test state when URL changes
+      const newUrlTestState =
+        section === 'chat' && field === 'url' ? 'idle' : state.urlTestState;
+      const newUrlTestError =
+        section === 'chat' && field === 'url' ? null : state.urlTestError;
+
       return {
         pendingChanges: {
           ...state.pendingChanges,
@@ -93,13 +112,15 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
             [field]: value,
           },
         },
+        urlTestState: newUrlTestState as UrlTestState,
+        urlTestError: newUrlTestError,
       };
     });
   },
 
   // Clear all pending changes
   clearPendingChanges: () => {
-    set({ pendingChanges: {} });
+    set({ pendingChanges: {}, urlTestState: 'idle', urlTestError: null });
   },
 
   // Check if there are pending changes
@@ -108,6 +129,53 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
     return Object.keys(pendingChanges).some(
       (key) => Object.keys(pendingChanges[key as keyof ConfigUpdateRequest] || {}).length > 0
     );
+  },
+
+  // Check if URL has changed
+  hasUrlChange: () => {
+    const { config, pendingChanges } = get();
+    const pendingUrl = pendingChanges.chat?.url;
+    const savedUrl = config?.chat?.url;
+
+    // URL has changed if there's a pending URL that differs from saved
+    return pendingUrl !== undefined && pendingUrl !== savedUrl;
+  },
+
+  // Test chat service URL connectivity
+  testChatUrl: async () => {
+    const { pendingChanges } = get();
+    const url = pendingChanges.chat?.url;
+
+    if (!url) {
+      set({ urlTestError: 'URL is required' });
+      return false;
+    }
+
+    set({ urlTestState: 'testing', urlTestError: null });
+
+    try {
+      const response = await testChatService({
+        url,
+        api_key: pendingChanges.chat?.api_key || undefined,
+      });
+
+      if (response.success) {
+        set({ urlTestState: 'passed', urlTestError: null });
+        return true;
+      } else {
+        set({ urlTestState: 'failed', urlTestError: response.error || 'Connection test failed' });
+        return false;
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to test connection';
+      set({ urlTestState: 'failed', urlTestError: errorMessage });
+      return false;
+    }
+  },
+
+  // Reset URL test state
+  resetUrlTest: () => {
+    set({ urlTestState: 'idle', urlTestError: null });
   },
 
   // Save pending changes
@@ -130,6 +198,8 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
           config,
           pendingChanges: {},
           isSaving: false,
+          urlTestState: 'idle',
+          urlTestError: null,
         });
       } else {
         set({
