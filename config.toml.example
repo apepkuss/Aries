@@ -356,9 +356,9 @@ confirmation_threshold = "medium"     # Minimum risk level that requires confirm
 # This section contains configuration for AI services including chat and
 # embedding models. These are optional services that can be enabled as needed.
 
-# [chat]
-# url = "https://api.openai.com/v1"  # Base URL for the model API
-# api_key = ""                       # API key for the model service (leave empty to use environment variable: DEFAULT_CHAT_SERVICE_API_KEY)
+[chat]
+url = "https://api.openai.com/v1"  # Base URL for the model API
+api_key = ""                       # API key for the model service (leave empty to use environment variable: DEFAULT_CHAT_SERVICE_API_KEY)
 
 # [embedding]
 # url = "https://api.openai.com/v1"  # Base URL for the model API
