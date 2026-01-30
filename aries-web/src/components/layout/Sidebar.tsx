@@ -8,37 +8,81 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { useUIStore, useConversationsStore, useChatStore, useConfigStore } from '@/stores';
+import {
+  useUIStore,
+  useConversationsStore,
+  useChatStore,
+  useConfigStore,
+  useSessionsStore,
+} from '@/stores';
 import { useEffect } from 'react';
+import { SessionList } from '@/components/session/SessionList';
 
 export function Sidebar() {
   const { sidebarOpen } = useUIStore();
   const {
     conversations,
-    currentId,
-    isLoading,
+    currentId: currentConvId,
+    isLoading: isLoadingConv,
     fetchConversations,
     selectConversation,
     deleteConversation: removeConversation,
   } = useConversationsStore();
+  const {
+    sessions,
+    currentId: currentSessionId,
+    isLoading: isLoadingSessions,
+    fetchSessions,
+    selectSession,
+    deleteSession: removeSession,
+  } = useSessionsStore();
   const { clearMessages, loadMessages, setConversationId } = useChatStore();
   const { config } = useConfigStore();
 
-  // Check if memory feature is enabled
+  // Feature flags
   const memoryEnabled = config?.memory?.enable ?? false;
+  const sessionEnabled = config?.session?.enable ?? false;
 
-  // Fetch conversations on mount (only if memory is enabled)
+  // Use session history as primary source; fall back to memory conversations
+  const useSessionHistory = sessionEnabled;
+
+  // Fetch data on mount based on which feature is enabled
   useEffect(() => {
-    if (memoryEnabled) {
+    if (useSessionHistory) {
+      fetchSessions();
+    } else if (memoryEnabled) {
       fetchConversations();
     }
-  }, [fetchConversations, memoryEnabled]);
+  }, [fetchSessions, fetchConversations, useSessionHistory, memoryEnabled]);
 
   const handleNewChat = () => {
     clearMessages();
+    useSessionsStore.getState().clearCurrent();
+    useConversationsStore.getState().clearCurrent();
   };
 
+  // --- Session history handlers ---
+  const handleSelectSession = async (id: string) => {
+    // Clear memory conversation selection
+    useConversationsStore.getState().clearCurrent();
+
+    const messages = await selectSession(id);
+    loadMessages(messages);
+    setConversationId(null);
+  };
+
+  const handleDeleteSession = async (id: string) => {
+    await removeSession(id);
+    if (currentSessionId === id) {
+      clearMessages();
+    }
+  };
+
+  // --- Memory conversation handlers ---
   const handleSelectConversation = async (id: string) => {
+    // Clear session selection
+    useSessionsStore.getState().clearCurrent();
+
     const messages = await selectConversation(id);
     loadMessages(messages);
     setConversationId(id);
@@ -46,7 +90,7 @@ export function Sidebar() {
 
   const handleDeleteConversation = async (id: string) => {
     await removeConversation(id);
-    if (currentId === id) {
+    if (currentConvId === id) {
       clearMessages();
     }
   };
@@ -54,6 +98,8 @@ export function Sidebar() {
   if (!sidebarOpen) {
     return null;
   }
+
+  const historyDisabled = !useSessionHistory && !memoryEnabled;
 
   return (
     <aside className="w-64 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
@@ -68,14 +114,22 @@ export function Sidebar() {
         </Button>
       </div>
 
-      {/* Conversations list */}
+      {/* History list */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 py-2">
-          {!memoryEnabled ? (
+          {historyDisabled ? (
             <div className="text-sm text-muted-foreground text-center py-8 px-2">
               会话历史已禁用
             </div>
-          ) : isLoading ? (
+          ) : useSessionHistory ? (
+            <SessionList
+              sessions={sessions}
+              currentId={currentSessionId}
+              isLoading={isLoadingSessions}
+              onSelect={handleSelectSession}
+              onDelete={handleDeleteSession}
+            />
+          ) : isLoadingConv ? (
             <div className="text-sm text-muted-foreground text-center py-8">
               加载中...
             </div>
@@ -89,7 +143,7 @@ export function Sidebar() {
                 key={conv.id}
                 id={conv.id}
                 title={conv.title}
-                isActive={currentId === conv.id}
+                isActive={currentConvId === conv.id}
                 onSelect={() => handleSelectConversation(conv.id)}
                 onDelete={() => handleDeleteConversation(conv.id)}
               />

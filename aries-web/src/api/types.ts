@@ -111,7 +111,13 @@ export interface SanitizedConfig {
   skill?: SanitizedSkillConfig;
   artifacts?: SanitizedArtifactsConfig;
   subagent?: SanitizedSubagentConfig;
+  session?: SanitizedSessionConfig;
   updatable_fields: string[];
+}
+
+export interface SanitizedSessionConfig {
+  enable: boolean;
+  storage_path: string;
 }
 
 export interface SanitizedServerConfig {
@@ -299,6 +305,64 @@ export interface ConversationMessage {
 export interface ConversationHistoryResponse {
   messages: ConversationMessage[];
   summary?: string;
+}
+
+// ============================================================================
+// Session History API Types
+// ============================================================================
+
+export interface SessionMeta {
+  session_id: string;
+  user_id: string;
+  model: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface SessionListResponse {
+  sessions: SessionMeta[];
+  total: number;
+}
+
+export interface SessionTokenUsage {
+  prompt: number;
+  completion: number;
+}
+
+export type SessionRecordType = 'session_start' | 'message';
+
+export interface SessionStartRecord {
+  type: 'session_start';
+  version: number;
+  session_id: string;
+  user_id: string;
+  model: string;
+  created_at: string;
+}
+
+export interface SessionMessageRecord {
+  type: 'message';
+  version: number;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  timestamp: string;
+  message_id: string;
+  sequence: number;
+  tokens?: SessionTokenUsage;
+  tool_calls?: unknown[];
+}
+
+export type SessionRecord = SessionStartRecord | SessionMessageRecord;
+
+export interface SessionDetailResponse {
+  records: SessionRecord[];
+}
+
+export interface SessionDeleteResponse {
+  success: boolean;
+  session_id: string;
+  message: string;
 }
 
 // ============================================================================
