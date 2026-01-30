@@ -249,6 +249,7 @@ bitflags! {
         const tts = 1 << 3;
         const translate = 1 << 4;
         const transcribe = 1 << 5;
+        const privacy_chat = 1 << 6;
     }
 }
 impl std::fmt::Display for ServerKind {
@@ -271,6 +272,9 @@ impl std::fmt::Display for ServerKind {
         }
         if self.contains(ServerKind::transcribe) {
             kind_str.push_str("transcribe,");
+        }
+        if self.contains(ServerKind::privacy_chat) {
+            kind_str.push_str("privacy_chat,");
         }
 
         if !kind_str.is_empty() {
@@ -295,6 +299,7 @@ impl std::str::FromStr for ServerKind {
                 "tts" => kind.set(Self::tts, true),
                 "translate" => kind.set(Self::translate, true),
                 "transcribe" => kind.set(Self::transcribe, true),
+                "privacy_chat" => kind.set(Self::privacy_chat, true),
                 _ => return Err(ServerError::InvalidServerKind(s.to_string())),
             }
         }
@@ -325,6 +330,9 @@ impl Serialize for ServerKind {
         }
         if self.contains(ServerKind::transcribe) {
             kind_str.push_str("transcribe,");
+        }
+        if self.contains(ServerKind::privacy_chat) {
+            kind_str.push_str("privacy_chat,");
         }
 
         // Remove trailing comma if present
@@ -457,6 +465,11 @@ impl ServerGroup {
 
     pub(crate) async fn is_empty(&self) -> bool {
         self.healthy_servers.read().await.is_empty()
+    }
+
+    /// Returns the set of server IDs registered in this group.
+    pub(crate) async fn server_ids(&self) -> HashSet<String> {
+        self.healthy_servers.read().await.clone()
     }
 }
 #[async_trait]

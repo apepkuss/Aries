@@ -23,10 +23,6 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "server.subtask_max_retries",
     "server.subtask_react_max_iterations",
     "server.subtask_react_timeout_secs",
-    // Chat config - requires service reload (url, api_key) or simple hot update (model)
-    "chat.url",
-    "chat.api_key",
-    "chat.model",
     // Embedding config - requires service reload
     "embedding.url",
     "embedding.api_key",
@@ -48,12 +44,7 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
 
 /// Fields that require service reload after update
 #[allow(dead_code)]
-pub const SIDE_EFFECT_FIELDS: &[&str] = &[
-    "chat.url",
-    "chat.api_key",
-    "embedding.url",
-    "embedding.api_key",
-];
+pub const SIDE_EFFECT_FIELDS: &[&str] = &["embedding.url", "embedding.api_key"];
 
 // ============================================================================
 // Sanitized Config Response Types
@@ -637,15 +628,19 @@ mod tests {
     #[test]
     fn test_updatable_fields_list() {
         assert!(UPDATABLE_FIELDS.contains(&"server.max_tools_per_iteration"));
-        assert!(UPDATABLE_FIELDS.contains(&"chat.url"));
+        assert!(!UPDATABLE_FIELDS.contains(&"chat.url"));
+        assert!(!UPDATABLE_FIELDS.contains(&"chat.api_key"));
+        assert!(!UPDATABLE_FIELDS.contains(&"chat.model"));
         assert!(!UPDATABLE_FIELDS.contains(&"server.host"));
         assert!(!UPDATABLE_FIELDS.contains(&"server.port"));
     }
 
     #[test]
     fn test_side_effect_fields_list() {
-        assert!(SIDE_EFFECT_FIELDS.contains(&"chat.url"));
-        assert!(SIDE_EFFECT_FIELDS.contains(&"chat.api_key"));
+        assert!(!SIDE_EFFECT_FIELDS.contains(&"chat.url"));
+        assert!(!SIDE_EFFECT_FIELDS.contains(&"chat.api_key"));
+        assert!(SIDE_EFFECT_FIELDS.contains(&"embedding.url"));
+        assert!(SIDE_EFFECT_FIELDS.contains(&"embedding.api_key"));
         assert!(!SIDE_EFFECT_FIELDS.contains(&"server.max_tools_per_iteration"));
     }
 }

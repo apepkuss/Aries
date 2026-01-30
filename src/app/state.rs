@@ -133,6 +133,15 @@ impl AppState {
                 .register(server.clone())
                 .await?;
         }
+        if server.kind.contains(ServerKind::privacy_chat) {
+            self.server_group
+                .write()
+                .await
+                .entry(ServerKind::privacy_chat)
+                .or_insert(server::ServerGroup::new(ServerKind::privacy_chat))
+                .register(server.clone())
+                .await?;
+        }
 
         Ok(())
     }

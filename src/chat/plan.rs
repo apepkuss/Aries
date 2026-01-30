@@ -117,8 +117,9 @@ pub(crate) async fn chat(
 ) -> ServerResult<axum::response::Response> {
     let request_id = request_id.as_ref();
 
-    // Get target server
-    let chat_server = get_chat_server(&state, request_id).await?;
+    // Get target server (route based on X-Privacy-Mode header)
+    let server_kind = resolve_chat_server_kind(&headers);
+    let chat_server = get_chat_server(&state, request_id, server_kind).await?;
 
     // Extract user message for planning
     let user_message = extract_user_message(&request);
@@ -1318,8 +1319,9 @@ async fn execute_chat_plan_realtime(
         tracing::debug!("HitlNotifier spawned for realtime SSE connection");
     }
 
-    // Get target server
-    let chat_server = get_chat_server(&state, &request_id).await?;
+    // Get target server (route based on X-Privacy-Mode header)
+    let server_kind = resolve_chat_server_kind(&headers);
+    let chat_server = get_chat_server(&state, &request_id, server_kind).await?;
 
     // Extract user message for planning
     let user_message = extract_user_message(&request);
@@ -2402,27 +2404,45 @@ async fn execute_chat_plan_realtime(
 // ============================================================================
 
 /// Gets the chat server for making LLM requests.
+///
+/// Routes to either the normal `chat` or `privacy_chat` server group
+/// based on the specified `kind`.
 async fn get_chat_server(
     state: &Arc<AppState>,
     request_id: &str,
+    kind: ServerKind,
 ) -> ServerResult<crate::server::TargetServerInfo> {
     let servers = state.server_group.read().await;
-    let chat_servers = match servers.get(&ServerKind::chat) {
+    let chat_servers = match servers.get(&kind) {
         Some(servers) => servers,
         None => {
-            let err_msg = "No chat server available";
+            let err_msg = format!("No {} server available", kind);
             dual_error!("{} - request_id: {}", err_msg, request_id);
-            return Err(ServerError::Operation(err_msg.to_string()));
+            return Err(ServerError::Operation(err_msg));
         }
     };
 
     match chat_servers.next().await {
         Ok(target_server_info) => Ok(target_server_info),
         Err(e) => {
-            let err_msg = format!("Failed to get the chat server: {e}");
+            let err_msg = format!("Failed to get the {} server: {e}", kind);
             dual_error!("{} - request_id: {}", err_msg, request_id);
             Err(ServerError::Operation(err_msg))
         }
+    }
+}
+
+/// Determines the chat server kind based on the `X-Privacy-Mode` header.
+fn resolve_chat_server_kind(headers: &HeaderMap) -> ServerKind {
+    let is_privacy = headers
+        .get("x-privacy-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == "true");
+
+    if is_privacy {
+        ServerKind::privacy_chat
+    } else {
+        ServerKind::chat
     }
 }
 

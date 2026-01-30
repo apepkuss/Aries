@@ -3,7 +3,7 @@ use std::{sync::Arc, time::SystemTime};
 use axum::{
     Json,
     body::Body,
-    extract::{Extension, State},
+    extract::{Extension, Query, State},
     http::{HeaderMap, Response, StatusCode},
 };
 use endpoints::{
@@ -881,9 +881,17 @@ pub async fn image_handler(
     }
 }
 
+/// Query parameters for the models endpoint
+#[derive(Debug, Deserialize)]
+pub struct ModelsQuery {
+    /// Filter models by service type: "chat" or "privacy_chat"
+    pub service: Option<String>,
+}
+
 pub async fn models_handler(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
+    Query(query): Query<ModelsQuery>,
 ) -> ServerResult<axum::response::Response> {
     let request_id = headers
         .get("x-request-id")
@@ -892,9 +900,30 @@ pub async fn models_handler(
         .to_string();
 
     let models = state.models.read().await;
+
+    let data = if let Some(ref service) = query.service {
+        // Filter models by service type: find server IDs belonging to the requested ServerKind
+        let kind = service
+            .parse::<ServerKind>()
+            .map_err(|_| ServerError::Operation(format!("Invalid service type: {service}")))?;
+        let server_groups = state.server_group.read().await;
+        if let Some(group) = server_groups.get(&kind) {
+            let server_ids = group.server_ids().await;
+            models
+                .iter()
+                .filter(|(sid, _)| server_ids.contains(sid.as_str()))
+                .flat_map(|(_, m)| m.clone())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        models.values().flatten().cloned().collect()
+    };
+
     let list_response = ListModelsResponse {
         object: String::from("list"),
-        data: models.values().flatten().cloned().collect(),
+        data,
     };
 
     let json_body = serde_json::to_string(&list_response).map_err(|e| {
@@ -1646,6 +1675,7 @@ pub mod admin {
             || server_kind.contains(ServerKind::transcribe)
             || server_kind.contains(ServerKind::translate)
             || server_kind.contains(ServerKind::tts)
+            || server_kind.contains(ServerKind::privacy_chat)
         {
             dual_warn!(
                 "Ignore the server verification for: {server_id} - request_id: {request_id}"
