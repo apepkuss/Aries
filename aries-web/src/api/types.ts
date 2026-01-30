@@ -103,6 +103,7 @@ export interface ChatStreamChunk {
 export interface SanitizedConfig {
   server: SanitizedServerConfig;
   chat?: SanitizedChatConfig;
+  privacy_chat?: SanitizedChatConfig;
   embedding?: SanitizedEmbeddingConfig;
   memory?: SanitizedMemoryConfig;
   rag?: SanitizedRagConfig;
@@ -202,6 +203,7 @@ export interface SanitizedSubagentConfig {
 export interface ConfigUpdateRequest {
   server?: ServerConfigUpdate;
   chat?: ChatConfigUpdate;
+  privacy_chat?: ChatConfigUpdate;
   embedding?: EmbeddingConfigUpdate;
   memory?: MemoryConfigUpdate;
   rag?: RagConfigUpdate;

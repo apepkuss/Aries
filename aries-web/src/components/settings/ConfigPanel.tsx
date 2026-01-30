@@ -29,8 +29,11 @@ export function ConfigPanel() {
     clearPendingChanges,
     hasPendingChanges,
     hasUrlChange,
+    hasPrivacyUrlChange,
     urlTestState,
+    privacyUrlTestState,
     testChatUrl,
+    testPrivacyChatUrl,
   } = useConfigStore();
 
   // Fetch config when dialog opens
@@ -42,17 +45,36 @@ export function ConfigPanel() {
   }, [settingsOpen, fetchConfig, fetchSchema]);
 
   // Determine if we need to show Test button
-  const needsTest = hasUrlChange() && urlTestState !== 'passed';
-  const isTesting = urlTestState === 'testing';
+  const chatNeedsTest = hasUrlChange() && urlTestState !== 'passed';
+  const privacyNeedsTest = hasPrivacyUrlChange() && privacyUrlTestState !== 'passed';
+  const needsTest = chatNeedsTest || privacyNeedsTest;
+  const isTesting = urlTestState === 'testing' || privacyUrlTestState === 'testing';
 
   // Handle test
   const handleTest = async () => {
-    const success = await testChatUrl();
-    if (success) {
-      toast.success('Connection test successful');
-    } else {
-      toast.error('Connection test failed');
+    let allSuccess = true;
+
+    if (chatNeedsTest) {
+      const success = await testChatUrl();
+      if (success) {
+        toast.success('Chat service connection test successful');
+      } else {
+        toast.error('Chat service connection test failed');
+        allSuccess = false;
+      }
     }
+
+    if (privacyNeedsTest) {
+      const success = await testPrivacyChatUrl();
+      if (success) {
+        toast.success('Privacy chat service connection test successful');
+      } else {
+        toast.error('Privacy chat service connection test failed');
+        allSuccess = false;
+      }
+    }
+
+    return allSuccess;
   };
 
   // Handle save

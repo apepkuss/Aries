@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageItem } from './MessageItem';
-import { useChatStore } from '@/stores';
+import { useChatStore, useUIStore } from '@/stores';
 import { HitlOverlay } from '@/components/hitl';
 
 export function MessageList() {
   const { messages, executionStatus, isStreaming, getSubAgent, getRootSubAgents } = useChatStore();
+  const { privacyMode } = useUIStore();
   const bottomRef = useRef<HTMLDivElement>(null);
   const rootSubAgents = getRootSubAgents();
 
@@ -18,8 +19,17 @@ export function MessageList() {
     return (
       <div className="flex-1 min-h-0 flex items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <p className="text-lg font-medium">Welcome to Aries</p>
-          <p className="text-sm">Start a conversation by typing a message below</p>
+          {privacyMode ? (
+            <>
+              <p className="text-lg font-medium text-emerald-600">Privacy Mode</p>
+              <p className="text-sm">Your conversation is protected with a privacy-enabled service</p>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-medium">Welcome to Aries</p>
+              <p className="text-sm">Start a conversation by typing a message below</p>
+            </>
+          )}
         </div>
       </div>
     );

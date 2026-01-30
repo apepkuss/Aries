@@ -1,48 +1,79 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { useConfigStore } from '@/stores';
 
 export function ServiceConfigForm() {
-  const { config, pendingChanges, setPendingChange, urlTestState, urlTestError } = useConfigStore();
+  const {
+    config, pendingChanges, setPendingChange,
+    urlTestState, urlTestError,
+    privacyUrlTestState, privacyUrlTestError,
+  } = useConfigStore();
 
   // Track whether API Key input is enabled
   const [enableApiKey, setEnableApiKey] = useState(false);
+  const [enablePrivacyApiKey, setEnablePrivacyApiKey] = useState(false);
 
-  // Track the original URL to detect changes
+  // Track the original URLs to detect changes
   const originalUrlRef = useRef<string | undefined>(undefined);
+  const originalPrivacyUrlRef = useRef<string | undefined>(undefined);
 
-  // Get current values (pending or saved)
+  // Get current values (pending or saved) - Chat Service
   const savedUrl = config?.chat?.url ?? '';
   const chatUrl = pendingChanges.chat?.url ?? savedUrl;
   const chatApiKey = pendingChanges.chat?.api_key ?? '';
   const hasExistingApiKey = config?.chat?.api_key_configured ?? false;
+  const isChatConfigured = !!savedUrl;
 
-  // Initialize original URL reference
+  // Get current values (pending or saved) - Privacy Chat Service
+  const savedPrivacyUrl = config?.privacy_chat?.url ?? '';
+  const privacyChatUrl = pendingChanges.privacy_chat?.url ?? savedPrivacyUrl;
+  const privacyChatApiKey = pendingChanges.privacy_chat?.api_key ?? '';
+  const hasExistingPrivacyApiKey = config?.privacy_chat?.api_key_configured ?? false;
+  const isPrivacyChatConfigured = !!savedPrivacyUrl;
+
+  // Initialize original URL references
   useEffect(() => {
     if (originalUrlRef.current === undefined && savedUrl) {
       originalUrlRef.current = savedUrl;
     }
   }, [savedUrl]);
 
+  useEffect(() => {
+    if (originalPrivacyUrlRef.current === undefined && savedPrivacyUrl) {
+      originalPrivacyUrlRef.current = savedPrivacyUrl;
+    }
+  }, [savedPrivacyUrl]);
+
   // Detect URL changes and reset API Key state
   useEffect(() => {
-    // Only trigger when URL has been modified from the original saved value
     if (originalUrlRef.current !== undefined && chatUrl !== originalUrlRef.current) {
-      // URL changed - disable API Key and mark for clearing
       setEnableApiKey(false);
       setPendingChange('chat', 'api_key', '');
     }
   }, [chatUrl, setPendingChange]);
 
+  useEffect(() => {
+    if (originalPrivacyUrlRef.current !== undefined && privacyChatUrl !== originalPrivacyUrlRef.current) {
+      setEnablePrivacyApiKey(false);
+      setPendingChange('privacy_chat', 'api_key', '');
+    }
+  }, [privacyChatUrl, setPendingChange]);
+
   // Handle API Key switch toggle
   const handleApiKeyToggle = (checked: boolean) => {
     setEnableApiKey(checked);
     if (!checked) {
-      // When disabled, mark API key for clearing
       setPendingChange('chat', 'api_key', '');
+    }
+  };
+
+  const handlePrivacyApiKeyToggle = (checked: boolean) => {
+    setEnablePrivacyApiKey(checked);
+    if (!checked) {
+      setPendingChange('privacy_chat', 'api_key', '');
     }
   };
 
@@ -50,7 +81,15 @@ export function ServiceConfigForm() {
     <div className="space-y-6">
       {/* Chat Service */}
       <div className="space-y-4">
-        <h4 className="font-medium">Chat Service</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="font-medium">Chat Service</h4>
+          <span
+            className={`h-2 w-2 rounded-full shrink-0 ${
+              isChatConfigured ? 'bg-green-500' : 'bg-muted-foreground/40'
+            }`}
+            title={isChatConfigured ? 'Configured' : 'Not configured'}
+          />
+        </div>
 
         <div className="space-y-2">
           <Label htmlFor="chat-url">
@@ -111,7 +150,90 @@ export function ServiceConfigForm() {
               : 'Enter the API key for authentication.'}
           </p>
         </div>
+      </div>
 
+      {/* Divider */}
+      <div className="border-t border-border/60" />
+
+      {/* Privacy Chat Service */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-emerald-500 fill-emerald-500/20 shrink-0" />
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="font-medium">Privacy Chat Service</h4>
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  isPrivacyChatConfigured ? 'bg-green-500' : 'bg-muted-foreground/40'
+                }`}
+                title={isPrivacyChatConfigured ? 'Configured' : 'Not configured'}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Used when privacy mode is enabled. Typically a locally deployed model.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="privacy-chat-url">
+            URL <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id="privacy-chat-url"
+            type="url"
+            placeholder="http://localhost:8080/v1"
+            value={privacyChatUrl}
+            onChange={(e) => setPendingChange('privacy_chat', 'url', e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Privacy chat completion service endpoint (OpenAI compatible)
+          </p>
+
+          {/* Test result feedback */}
+          {privacyUrlTestState === 'failed' && privacyUrlTestError && (
+            <div className="flex items-center gap-2 text-destructive text-sm">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{privacyUrlTestError}</span>
+            </div>
+          )}
+          {privacyUrlTestState === 'passed' && (
+            <div className="flex items-center gap-2 text-green-600 text-sm">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>Connection test successful</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="enable-privacy-api-key"
+              checked={enablePrivacyApiKey}
+              onCheckedChange={handlePrivacyApiKeyToggle}
+            />
+            <Label htmlFor="enable-privacy-api-key" className="cursor-pointer">
+              Enable API Key
+            </Label>
+          </div>
+
+          <Input
+            id="privacy-chat-api-key"
+            type="password"
+            placeholder={hasExistingPrivacyApiKey && !enablePrivacyApiKey ? '••••••••' : 'Enter API key'}
+            value={privacyChatApiKey}
+            onChange={(e) => setPendingChange('privacy_chat', 'api_key', e.target.value)}
+            disabled={!enablePrivacyApiKey}
+          />
+
+          <p className="text-xs text-muted-foreground">
+            {!enablePrivacyApiKey
+              ? hasExistingPrivacyApiKey
+                ? 'Enable the switch to update or clear the API key.'
+                : 'Enable the switch if this service requires an API key.'
+              : 'Enter the API key for authentication.'}
+          </p>
+        </div>
       </div>
     </div>
   );

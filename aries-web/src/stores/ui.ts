@@ -22,6 +22,10 @@ interface UIState {
   thinkingCollapsed: boolean;
   setThinkingCollapsed: (collapsed: boolean) => void;
 
+  // Privacy mode (session-level: set at session creation, not toggled mid-session)
+  privacyMode: boolean;
+  setPrivacyMode: (enabled: boolean) => void;
+
   // Settings dialog
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
@@ -48,6 +52,10 @@ export const useUIStore = create<UIState>()(
       // Thinking process
       thinkingCollapsed: true,
       setThinkingCollapsed: (collapsed) => set({ thinkingCollapsed: collapsed }),
+
+      // Privacy mode
+      privacyMode: false,
+      setPrivacyMode: (enabled) => set({ privacyMode: enabled }),
 
       // Settings dialog
       settingsOpen: false,

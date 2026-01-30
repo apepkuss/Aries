@@ -2,15 +2,15 @@ import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
 import { Send, Square, Shield, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { useChatStore } from '@/stores';
+import { useChatStore, useUIStore } from '@/stores';
 import { ExecutionModeSelector } from './ExecutionModeSelector';
 import { ModelSelector } from './ModelSelector';
 
 export function ChatInput() {
   const [input, setInput] = useState('');
-  const [privacyMode, setPrivacyMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, stopGeneration, isStreaming } = useChatStore();
+  const { privacyMode } = useUIStore();
 
   // Auto-focus on mount
   useEffect(() => {
@@ -67,27 +67,21 @@ export function ChatInput() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={privacyMode ? "Type a message... (Privacy mode enabled)" : "Type a message..."}
+              placeholder="Type a message..."
               className="min-h-[44px] max-h-[200px] resize-none pl-10 pr-3"
               rows={1}
               disabled={isStreaming}
             />
-            <button
-              type="button"
-              onClick={() => setPrivacyMode(!privacyMode)}
-              className="absolute left-1 top-1/2 -translate-y-1/2 p-1 rounded-md transition-all duration-200 hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-primary/50"
-              title={privacyMode ? 'Privacy mode enabled' : 'Enable privacy mode'}
+            <div
+              className="absolute left-1 top-1/2 -translate-y-1/2 p-1"
+              title={privacyMode ? 'Privacy mode enabled' : 'Privacy mode disabled'}
             >
-{privacyMode ? (
-                <ShieldCheck
-                  className="h-6 w-6 text-emerald-500 fill-emerald-500/20 transition-all duration-200"
-                />
+              {privacyMode ? (
+                <ShieldCheck className="h-6 w-6 text-emerald-500 fill-emerald-500/20" />
               ) : (
-                <Shield
-                  className="h-6 w-6 text-muted-foreground/50 hover:text-muted-foreground transition-all duration-200"
-                />
+                <Shield className="h-6 w-6 text-muted-foreground/40" />
               )}
-            </button>
+            </div>
           </div>
 
           {isStreaming ? (

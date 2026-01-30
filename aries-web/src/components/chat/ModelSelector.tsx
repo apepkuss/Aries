@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useConfigStore } from '@/stores';
+import { useConfigStore, useUIStore } from '@/stores';
 import { fetchModels, type Model } from '@/api/models';
 
 export function ModelSelector() {
@@ -8,17 +8,25 @@ export function ModelSelector() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { config, setPendingChange, saveChanges, isSaving } = useConfigStore();
+  const { privacyMode } = useUIStore();
 
-  const currentModel = config?.chat?.model;
-  const chatUrl = config?.chat?.url;
+  // Select config section based on privacy mode
+  const serviceKey = privacyMode ? 'privacy_chat' : 'chat';
+  const currentModel = config?.[serviceKey]?.model;
+  const serviceUrl = config?.[serviceKey]?.url;
 
-  // Fetch models on mount and when chat URL changes
+  // Fetch models when service URL or mode changes
   useEffect(() => {
+    if (!serviceUrl) {
+      setModels([]);
+      return;
+    }
+
     const loadModels = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        const response = await fetchModels();
+        const response = await fetchModels(serviceKey);
         setModels(response.data);
       } catch (err) {
         console.error('Failed to fetch models:', err);
@@ -29,15 +37,20 @@ export function ModelSelector() {
     };
 
     loadModels();
-  }, [chatUrl]);
+  }, [serviceUrl, serviceKey]);
 
   const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newModel = e.target.value;
     if (newModel === currentModel) return;
 
-    setPendingChange('chat', 'model', newModel);
+    setPendingChange(serviceKey, 'model', newModel);
     await saveChanges();
   };
+
+  // Don't render if service not configured
+  if (!serviceUrl) {
+    return null;
+  }
 
   // Don't render if loading or error
   if (isLoading) {
