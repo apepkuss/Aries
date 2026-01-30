@@ -205,6 +205,9 @@ async fn main() -> ServerResult<()> {
     // Save HITL config before moving config into AppState
     let hitl_config = config.hitl.clone();
 
+    // Save session config before moving config into AppState
+    let session_config = config.session.clone();
+
     // Save config API settings before moving config into AppState
     let config_api_settings = config.config_api.clone();
 
@@ -230,6 +233,28 @@ async fn main() -> ServerResult<()> {
     // Attach memory system to state
     if let Some(memory_system) = memory {
         state = state.with_memory(memory_system);
+    }
+
+    // Initialize session writer if enabled
+    if let Some(ref sess_cfg) = session_config {
+        if sess_cfg.enable {
+            let storage_path = shellexpand::tilde(&sess_cfg.storage_path).to_string();
+            tokio::fs::create_dir_all(&storage_path)
+                .await
+                .map_err(|e| {
+                    let err_msg = format!("Failed to create session storage directory: {e}");
+                    aries::dual_error!("{err_msg}");
+                    ServerError::Operation(err_msg)
+                })?;
+
+            let writer = aries::session::writer::SessionWriter::new(&storage_path);
+            state = state.with_session_writer(writer);
+            aries::dual_info!("Session history enabled, storage: {}", storage_path);
+        } else {
+            aries::dual_info!("Session history is disabled in config");
+        }
+    } else {
+        aries::dual_info!("Session history is not configured");
     }
 
     let state = Arc::new(state);
@@ -362,6 +387,23 @@ async fn main() -> ServerResult<()> {
             );
     } else {
         aries::dual_info!("Memory endpoints are disabled");
+    }
+
+    // Add session history endpoints if session writer is enabled
+    if state.has_session_writer() {
+        aries::dual_info!("Session history endpoints are enabled");
+        main_router = main_router
+            .route(
+                "/v1/sessions",
+                get(aries::session::handlers::list_sessions_handler),
+            )
+            .route(
+                "/v1/sessions/{id}",
+                get(aries::session::handlers::get_session_handler)
+                    .delete(aries::session::handlers::delete_session_handler),
+            );
+    } else {
+        aries::dual_info!("Session history endpoints are disabled");
     }
 
     // Add skills API endpoints if skills system is initialized

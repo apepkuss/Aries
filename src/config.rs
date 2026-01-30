@@ -74,6 +74,9 @@ pub struct Config {
     /// HITL (Human-in-the-Loop) configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hitl: Option<crate::services::hitl::HitlConfig>,
+    /// Session history configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<SessionConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -136,6 +139,7 @@ impl Default for Config {
             config_api: None,
             subagent: None,
             hitl: None,
+            session: None,
         }
     }
 }
@@ -1472,6 +1476,51 @@ impl Default for ConfigApiSettings {
             hot_reload_debounce_ms: default_hot_reload_debounce_ms(),
             hot_reload_keep_on_invalid: default_hot_reload_keep_on_invalid(),
             hot_reload_audit: false,
+        }
+    }
+}
+
+// ============================================================================
+// Session History Configuration
+// ============================================================================
+
+/// Session history configuration
+///
+/// Controls JSONL-based chat history persistence for normal (non-privacy) sessions.
+///
+/// # Example Configuration
+///
+/// ```toml
+/// [session]
+/// enable = true
+/// storage_path = "~/.aries/history"
+/// ```
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SessionConfig {
+    /// Enable or disable session history recording
+    #[serde(default = "default_session_enabled")]
+    pub enable: bool,
+
+    /// Directory for storing session JSONL files
+    /// Supports `~` for home directory expansion.
+    /// Layout: {storage_path}/{user_id}/{session_id}.jsonl
+    #[serde(default = "default_session_storage_path")]
+    pub storage_path: String,
+}
+
+fn default_session_enabled() -> bool {
+    true
+}
+
+fn default_session_storage_path() -> String {
+    "~/.aries/history".to_string()
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            enable: default_session_enabled(),
+            storage_path: default_session_storage_path(),
         }
     }
 }

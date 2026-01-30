@@ -116,6 +116,7 @@ pub(crate) async fn chat(
     headers: HeaderMap,
     Json(mut request): Json<ChatCompletionRequest>,
     conv_id: Option<String>,
+    session_id: Option<String>,
     request_id: impl AsRef<str>,
 ) -> ServerResult<axum::response::Response> {
     let request_id = request_id.as_ref();
@@ -151,6 +152,36 @@ pub(crate) async fn chat(
         if let Err(e) = memory.add_user_message(conv_id, user_msg.clone()).await {
             dual_error!(
                 "Failed to add user message to memory: {} - request_id: {}",
+                e,
+                request_id
+            );
+        }
+    }
+
+    // Write user message to session history (JSONL)
+    if let Some(ref sid) = session_id
+        && let Some(ref writer) = state.session_writer
+        && let Some(ref user_msg) = user_message
+    {
+        let uid = request.user.as_deref().unwrap_or("anonymous");
+        let model_name = request
+            .model
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let seq = writer.next_sequence(uid).await;
+        let record = crate::session::types::SessionRecord::Message {
+            version: crate::session::types::JSONL_FORMAT_VERSION,
+            role: "user".to_string(),
+            content: user_msg.clone(),
+            timestamp: chrono::Utc::now(),
+            message_id: format!("msg_{}", uuid::Uuid::new_v4()),
+            sequence: seq,
+            tokens: None,
+            tool_calls: None,
+        };
+        if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
+            dual_warn!(
+                "Failed to write user message to session: {} - request_id: {}",
                 e,
                 request_id
             );
@@ -278,6 +309,7 @@ pub(crate) async fn chat(
             headers,
             request,
             conv_id,
+            session_id,
             request_id.to_string(),
             enhanced_stream_config,
             time_budget,
@@ -383,6 +415,9 @@ pub(crate) async fn chat(
                     request_id
                 );
             }
+
+            // Write assistant message to session history
+            write_assistant_to_session(&state, &session_id, &request, &answer.answer).await;
 
             // Build and return response directly
             return build_direct_answer_response(
@@ -1106,6 +1141,9 @@ pub(crate) async fn chat(
         );
     }
 
+    // Write assistant message to session history
+    write_assistant_to_session(&state, &session_id, &request, &final_content).await;
+
     // Finalize trace
     trace.finalize(TraceStatus::Success);
     dual_info!("Plan trace: {}", trace.summary());
@@ -1201,6 +1239,7 @@ async fn chat_realtime_stream(
     headers: HeaderMap,
     request: ChatCompletionRequest,
     conv_id: Option<String>,
+    session_id: Option<String>,
     request_id: String,
     enhanced_stream_config: EnhancedStreamConfig,
     time_budget: TimeBudget,
@@ -1232,6 +1271,7 @@ async fn chat_realtime_stream(
             headers,
             request,
             conv_id,
+            session_id,
             request_id_clone.clone(),
             enhanced_stream_config,
             time_budget,
@@ -1294,6 +1334,7 @@ async fn execute_chat_plan_realtime(
     headers: HeaderMap,
     mut request: ChatCompletionRequest,
     conv_id: Option<String>,
+    session_id: Option<String>,
     request_id: String,
     enhanced_stream_config: EnhancedStreamConfig,
     time_budget: TimeBudget,
@@ -1356,6 +1397,36 @@ async fn execute_chat_plan_realtime(
         if let Err(e) = memory.add_user_message(conv_id, user_msg.clone()).await {
             dual_error!(
                 "Failed to add user message to memory: {} - request_id: {}",
+                e,
+                request_id
+            );
+        }
+    }
+
+    // Write user message to session history (JSONL) - realtime mode
+    if let Some(ref sid) = session_id
+        && let Some(ref writer) = state.session_writer
+        && let Some(ref user_msg) = user_message
+    {
+        let uid = request.user.as_deref().unwrap_or("anonymous");
+        let model_name = request
+            .model
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let seq = writer.next_sequence(uid).await;
+        let record = crate::session::types::SessionRecord::Message {
+            version: crate::session::types::JSONL_FORMAT_VERSION,
+            role: "user".to_string(),
+            content: user_msg.clone(),
+            timestamp: chrono::Utc::now(),
+            message_id: format!("msg_{}", uuid::Uuid::new_v4()),
+            sequence: seq,
+            tokens: None,
+            tool_calls: None,
+        };
+        if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
+            dual_warn!(
+                "Failed to write user message to session: {} - request_id: {}",
                 e,
                 request_id
             );
@@ -1505,6 +1576,9 @@ async fn execute_chat_plan_realtime(
                     request_id
                 );
             }
+
+            // Write assistant message to session history
+            write_assistant_to_session(&state, &session_id, &request, &answer.answer).await;
 
             // Send text events for direct answer
             let text_chunks = gen_chunks_with_formatting(&answer.answer, 10);
@@ -2343,6 +2417,9 @@ async fn execute_chat_plan_realtime(
         );
     }
 
+    // Write assistant message to session history
+    write_assistant_to_session(&state, &session_id, &request, &final_content).await;
+
     // Finalize trace
     trace.finalize(TraceStatus::Success);
     dual_info!("Plan trace: {}", trace.summary());
@@ -2437,6 +2514,40 @@ async fn get_chat_server(
             let err_msg = format!("Failed to get the {} server: {e}", kind);
             dual_error!("{} - request_id: {}", err_msg, request_id);
             Err(ServerError::Operation(err_msg))
+        }
+    }
+}
+
+/// Write assistant message to JSONL session history.
+///
+/// This is a no-op if session_id or session_writer is absent.
+async fn write_assistant_to_session(
+    state: &Arc<AppState>,
+    session_id: &Option<String>,
+    request: &ChatCompletionRequest,
+    content: &str,
+) {
+    if let Some(sid) = session_id
+        && let Some(writer) = &state.session_writer
+    {
+        let uid = request.user.as_deref().unwrap_or("anonymous");
+        let model_name = request
+            .model
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let seq = writer.next_sequence(uid).await;
+        let record = crate::session::types::SessionRecord::Message {
+            version: crate::session::types::JSONL_FORMAT_VERSION,
+            role: "assistant".to_string(),
+            content: content.to_string(),
+            timestamp: chrono::Utc::now(),
+            message_id: format!("msg_{}", uuid::Uuid::new_v4()),
+            sequence: seq,
+            tokens: None,
+            tool_calls: None,
+        };
+        if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
+            dual_warn!("Failed to write assistant message to session: {}", e);
         }
     }
 }

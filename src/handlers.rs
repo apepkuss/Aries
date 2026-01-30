@@ -179,6 +179,28 @@ pub async fn chat_handler(
         None
     };
 
+    // Determine session_id for JSONL history (skip for privacy mode)
+    let is_privacy = headers
+        .get("x-privacy-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == "true");
+
+    let session_id = if !is_privacy {
+        if let Some(ref writer) = state.session_writer {
+            let uid = request.user.as_deref().unwrap_or("anonymous");
+            if let Some(ref cid) = conv_id {
+                // Reuse memory's conv_id as session_id
+                Some(cid.clone())
+            } else {
+                Some(writer.get_or_create_session_id(uid).await)
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Aries operates exclusively in Plan mode
     dual_debug!("Using Plan mode - request_id: {}", request_id);
 
@@ -189,6 +211,7 @@ pub async fn chat_handler(
         headers,
         Json(request),
         conv_id.clone(),
+        session_id,
         &request_id,
     )
     .await;

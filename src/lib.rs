@@ -87,6 +87,7 @@ pub mod cli;
 pub mod config_api;
 pub mod handlers;
 pub mod info;
+pub mod session;
 pub mod utils;
 
 // Re-export commonly used types for convenience

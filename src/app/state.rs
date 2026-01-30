@@ -28,6 +28,8 @@ pub struct AppState {
     pub(crate) server_info: Arc<RwLock<info::ServerInfo>>,
     pub(crate) models: Arc<RwLock<HashMap<server::ServerId, Vec<endpoints::models::Model>>>>,
     pub(crate) memory: Option<Arc<memory::CompleteChatMemory>>,
+    /// JSONL session writer for chat history persistence
+    pub(crate) session_writer: Option<crate::session::writer::SessionWriter>,
     /// Timestamp of the last API-based config update (for conflict detection with file watcher)
     pub(crate) last_config_update_time: RwLock<Option<Instant>>,
 }
@@ -41,6 +43,7 @@ impl AppState {
             server_info: Arc::new(RwLock::new(server_info)),
             models: Arc::new(RwLock::new(HashMap::new())),
             memory: None,
+            session_writer: None,
             last_config_update_time: RwLock::new(None),
         }
     }
@@ -66,6 +69,11 @@ impl AppState {
         self
     }
 
+    pub fn with_session_writer(mut self, writer: crate::session::writer::SessionWriter) -> Self {
+        self.session_writer = Some(writer);
+        self
+    }
+
     /// Get the configuration file path if set
     pub fn get_config_path(&self) -> Option<&std::path::Path> {
         self.config_path.as_deref()
@@ -74,6 +82,11 @@ impl AppState {
     /// Check if memory system is enabled
     pub fn has_memory(&self) -> bool {
         self.memory.is_some()
+    }
+
+    /// Check if session history writer is enabled
+    pub fn has_session_writer(&self) -> bool {
+        self.session_writer.is_some()
     }
 
     pub async fn register_downstream_server(&self, server: server::Server) -> ServerResult<()> {
