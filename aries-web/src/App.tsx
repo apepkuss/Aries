@@ -4,7 +4,7 @@ import { Layout } from '@/components/layout';
 import { ChatContainer } from '@/components/chat';
 import { ConfigPanel } from '@/components/settings';
 import { useTheme } from '@/hooks';
-import { useConfigStore } from '@/stores';
+import { useConfigStore, useServiceStore } from '@/stores';
 
 function App() {
   // Apply theme
@@ -12,9 +12,11 @@ function App() {
 
   // Load config on app startup
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const autoRegister = useServiceStore((state) => state.autoRegister);
   useEffect(() => {
     fetchConfig();
-  }, [fetchConfig]);
+    autoRegister();
+  }, [fetchConfig, autoRegister]);
 
   return (
     <>

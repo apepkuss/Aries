@@ -3,14 +3,16 @@ import { AlertCircle, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { useConfigStore } from '@/stores';
+import { useServiceStore } from '@/stores';
 
 export function ServiceConfigForm() {
   const {
-    config, pendingChanges, setPendingChange,
-    urlTestState, urlTestError,
-    privacyUrlTestState, privacyUrlTestError,
-  } = useConfigStore();
+    chat, privacyChat,
+    pendingChat, pendingPrivacyChat,
+    setPendingChat, setPendingPrivacyChat,
+    chatTestState, chatTestError,
+    privacyChatTestState, privacyChatTestError,
+  } = useServiceStore();
 
   // Track whether API Key input is enabled
   const [enableApiKey, setEnableApiKey] = useState(false);
@@ -21,17 +23,17 @@ export function ServiceConfigForm() {
   const originalPrivacyUrlRef = useRef<string | undefined>(undefined);
 
   // Get current values (pending or saved) - Chat Service
-  const savedUrl = config?.chat?.url ?? '';
-  const chatUrl = pendingChanges.chat?.url ?? savedUrl;
-  const chatApiKey = pendingChanges.chat?.api_key ?? '';
-  const hasExistingApiKey = config?.chat?.api_key_configured ?? false;
+  const savedUrl = chat?.url ?? '';
+  const chatUrl = pendingChat.url ?? savedUrl;
+  const chatApiKey = pendingChat.apiKey ?? '';
+  const hasExistingApiKey = !!(chat?.apiKey);
   const isChatConfigured = !!savedUrl;
 
   // Get current values (pending or saved) - Privacy Chat Service
-  const savedPrivacyUrl = config?.privacy_chat?.url ?? '';
-  const privacyChatUrl = pendingChanges.privacy_chat?.url ?? savedPrivacyUrl;
-  const privacyChatApiKey = pendingChanges.privacy_chat?.api_key ?? '';
-  const hasExistingPrivacyApiKey = config?.privacy_chat?.api_key_configured ?? false;
+  const savedPrivacyUrl = privacyChat?.url ?? '';
+  const privacyChatUrl = pendingPrivacyChat.url ?? savedPrivacyUrl;
+  const privacyChatApiKey = pendingPrivacyChat.apiKey ?? '';
+  const hasExistingPrivacyApiKey = !!(privacyChat?.apiKey);
   const isPrivacyChatConfigured = !!savedPrivacyUrl;
 
   // Initialize original URL references
@@ -51,29 +53,29 @@ export function ServiceConfigForm() {
   useEffect(() => {
     if (originalUrlRef.current !== undefined && chatUrl !== originalUrlRef.current) {
       setEnableApiKey(false);
-      setPendingChange('chat', 'api_key', '');
+      setPendingChat('apiKey', '');
     }
-  }, [chatUrl, setPendingChange]);
+  }, [chatUrl, setPendingChat]);
 
   useEffect(() => {
     if (originalPrivacyUrlRef.current !== undefined && privacyChatUrl !== originalPrivacyUrlRef.current) {
       setEnablePrivacyApiKey(false);
-      setPendingChange('privacy_chat', 'api_key', '');
+      setPendingPrivacyChat('apiKey', '');
     }
-  }, [privacyChatUrl, setPendingChange]);
+  }, [privacyChatUrl, setPendingPrivacyChat]);
 
   // Handle API Key switch toggle
   const handleApiKeyToggle = (checked: boolean) => {
     setEnableApiKey(checked);
     if (!checked) {
-      setPendingChange('chat', 'api_key', '');
+      setPendingChat('apiKey', '');
     }
   };
 
   const handlePrivacyApiKeyToggle = (checked: boolean) => {
     setEnablePrivacyApiKey(checked);
     if (!checked) {
-      setPendingChange('privacy_chat', 'api_key', '');
+      setPendingPrivacyChat('apiKey', '');
     }
   };
 
@@ -100,23 +102,23 @@ export function ServiceConfigForm() {
             type="url"
             placeholder="http://localhost:8080/v1"
             value={chatUrl}
-            onChange={(e) => setPendingChange('chat', 'url', e.target.value)}
+            onChange={(e) => setPendingChat('url', e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
             Chat completion service endpoint (OpenAI compatible)
           </p>
 
           {/* Test result feedback */}
-          {urlTestState === 'failed' && urlTestError && (
+          {chatTestState === 'failed' && chatTestError && (
             <div className="flex items-center gap-2 text-destructive text-sm">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{urlTestError}</span>
+              <span>{chatTestError}</span>
             </div>
           )}
-          {urlTestState === 'passed' && (
+          {chatTestState === 'passed' && (
             <div className="flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>Connection test successful</span>
+              <span>Connected successfully</span>
             </div>
           )}
         </div>
@@ -138,7 +140,7 @@ export function ServiceConfigForm() {
             type="password"
             placeholder={hasExistingApiKey && !enableApiKey ? '••••••••' : 'Enter API key'}
             value={chatApiKey}
-            onChange={(e) => setPendingChange('chat', 'api_key', e.target.value)}
+            onChange={(e) => setPendingChat('apiKey', e.target.value)}
             disabled={!enableApiKey}
           />
 
@@ -184,23 +186,23 @@ export function ServiceConfigForm() {
             type="url"
             placeholder="http://localhost:8080/v1"
             value={privacyChatUrl}
-            onChange={(e) => setPendingChange('privacy_chat', 'url', e.target.value)}
+            onChange={(e) => setPendingPrivacyChat('url', e.target.value)}
           />
           <p className="text-xs text-muted-foreground">
             Privacy chat completion service endpoint (OpenAI compatible)
           </p>
 
           {/* Test result feedback */}
-          {privacyUrlTestState === 'failed' && privacyUrlTestError && (
+          {privacyChatTestState === 'failed' && privacyChatTestError && (
             <div className="flex items-center gap-2 text-destructive text-sm">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{privacyUrlTestError}</span>
+              <span>{privacyChatTestError}</span>
             </div>
           )}
-          {privacyUrlTestState === 'passed' && (
+          {privacyChatTestState === 'passed' && (
             <div className="flex items-center gap-2 text-green-600 text-sm">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>Connection test successful</span>
+              <span>Connected successfully</span>
             </div>
           )}
         </div>
@@ -222,7 +224,7 @@ export function ServiceConfigForm() {
             type="password"
             placeholder={hasExistingPrivacyApiKey && !enablePrivacyApiKey ? '••••••••' : 'Enter API key'}
             value={privacyChatApiKey}
-            onChange={(e) => setPendingChange('privacy_chat', 'api_key', e.target.value)}
+            onChange={(e) => setPendingPrivacyChat('apiKey', e.target.value)}
             disabled={!enablePrivacyApiKey}
           />
 

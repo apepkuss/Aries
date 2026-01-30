@@ -6,16 +6,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useUIStore, useChatStore, useConfigStore } from '@/stores';
+import { useUIStore, useChatStore, useServiceStore } from '@/stores';
 import { toast } from 'sonner';
 
 export function Header() {
   const { sidebarOpen, toggleSidebar, theme, setTheme, setSettingsOpen, setPrivacyMode } = useUIStore();
   const { clearMessages } = useChatStore();
-  const { config } = useConfigStore();
+  const { chat, privacyChat } = useServiceStore();
 
-  const isChatConfigured = !!config?.chat?.url;
-  const isPrivacyChatConfigured = !!config?.privacy_chat?.url;
+  const isChatConfigured = !!chat?.url;
+  const isPrivacyChatConfigured = !!privacyChat?.url;
 
   return (
     <header className="h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4">

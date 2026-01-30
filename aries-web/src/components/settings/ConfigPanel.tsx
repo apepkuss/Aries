@@ -12,7 +12,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useUIStore, useConfigStore } from '@/stores';
+import { useUIStore, useConfigStore, useServiceStore } from '@/stores';
 import { ServiceConfigForm } from './ServiceConfigForm';
 import { ServerParamsForm } from './ServerParamsForm';
 import { MemoryConfigForm } from './MemoryConfigForm';
@@ -28,13 +28,18 @@ export function ConfigPanel() {
     saveChanges,
     clearPendingChanges,
     hasPendingChanges,
-    hasUrlChange,
-    hasPrivacyUrlChange,
-    urlTestState,
-    privacyUrlTestState,
-    testChatUrl,
-    testPrivacyChatUrl,
   } = useConfigStore();
+
+  const {
+    hasChatUrlChange,
+    hasPrivacyChatUrlChange,
+    hasServicePendingChanges,
+    chatTestState,
+    privacyChatTestState,
+    connectChat,
+    connectPrivacyChat,
+    clearPending: clearServicePending,
+  } = useServiceStore();
 
   // Fetch config when dialog opens
   useEffect(() => {
@@ -44,32 +49,32 @@ export function ConfigPanel() {
     }
   }, [settingsOpen, fetchConfig, fetchSchema]);
 
-  // Determine if we need to show Test button
-  const chatNeedsTest = hasUrlChange() && urlTestState !== 'passed';
-  const privacyNeedsTest = hasPrivacyUrlChange() && privacyUrlTestState !== 'passed';
-  const needsTest = chatNeedsTest || privacyNeedsTest;
-  const isTesting = urlTestState === 'testing' || privacyUrlTestState === 'testing';
+  // Determine button state for service tab
+  const chatNeedsConnect = hasChatUrlChange() && chatTestState !== 'passed';
+  const privacyNeedsConnect = hasPrivacyChatUrlChange() && privacyChatTestState !== 'passed';
+  const needsConnect = chatNeedsConnect || privacyNeedsConnect;
+  const isConnecting = chatTestState === 'testing' || privacyChatTestState === 'testing';
 
-  // Handle test
-  const handleTest = async () => {
+  // Handle connect (register service via admin API)
+  const handleConnect = async () => {
     let allSuccess = true;
 
-    if (chatNeedsTest) {
-      const success = await testChatUrl();
+    if (chatNeedsConnect) {
+      const success = await connectChat();
       if (success) {
-        toast.success('Chat service connection test successful');
+        toast.success('Chat service connected successfully');
       } else {
-        toast.error('Chat service connection test failed');
+        toast.error('Chat service connection failed');
         allSuccess = false;
       }
     }
 
-    if (privacyNeedsTest) {
-      const success = await testPrivacyChatUrl();
+    if (privacyNeedsConnect) {
+      const success = await connectPrivacyChat();
       if (success) {
-        toast.success('Privacy chat service connection test successful');
+        toast.success('Privacy chat service connected successfully');
       } else {
-        toast.error('Privacy chat service connection test failed');
+        toast.error('Privacy chat service connection failed');
         allSuccess = false;
       }
     }
@@ -77,14 +82,13 @@ export function ConfigPanel() {
     return allSuccess;
   };
 
-  // Handle save
+  // Handle save (for params/memory changes via config API)
   const handleSave = async () => {
     const response = await saveChanges();
     if (response) {
       if (response.success) {
         toast.success('Configuration saved successfully');
 
-        // Show side effect warnings
         if (response.requires_action && Object.keys(response.requires_action).length > 0) {
           Object.entries(response.requires_action).forEach(([field, action]) => {
             toast.info(`${field}: ${action}`);
@@ -93,7 +97,6 @@ export function ConfigPanel() {
       } else {
         toast.error(response.message);
 
-        // Show failed fields
         if (response.failed_fields) {
           Object.entries(response.failed_fields).forEach(([field, error]) => {
             toast.error(`${field}: ${error}`);
@@ -106,8 +109,13 @@ export function ConfigPanel() {
   // Handle close
   const handleClose = () => {
     clearPendingChanges();
+    clearServicePending();
     setSettingsOpen(false);
   };
+
+  // Determine which button to show
+  const hasConfigChanges = hasPendingChanges();
+  const hasAnyServiceChanges = hasServicePendingChanges();
 
   return (
     <Dialog open={settingsOpen} onOpenChange={(open) => !open && handleClose()}>
@@ -168,16 +176,28 @@ export function ConfigPanel() {
                 <Button variant="outline" onClick={handleClose}>
                   Cancel
                 </Button>
-                {needsTest ? (
-                  <Button onClick={handleTest} disabled={isTesting}>
-                    {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {needsConnect ? (
+                  <Button onClick={handleConnect} disabled={isConnecting}>
+                    {isConnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Connect
                   </Button>
-                ) : (
-                  <Button onClick={handleSave} disabled={!hasPendingChanges() || isSaving}>
+                ) : (hasConfigChanges || hasAnyServiceChanges) ? (
+                  <Button
+                    onClick={async () => {
+                      if (hasAnyServiceChanges) {
+                        await handleConnect();
+                      }
+                      if (hasConfigChanges) {
+                        await handleSave();
+                      }
+                    }}
+                    disabled={isSaving}
+                  >
                     {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Save
                   </Button>
+                ) : (
+                  <Button disabled>Save</Button>
                 )}
               </div>
             </DialogFooter>

@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useConfigStore, useUIStore } from '@/stores';
+import { useServiceStore, useUIStore } from '@/stores';
 import { fetchModels, type Model } from '@/api/models';
 
 export function ModelSelector() {
   const [models, setModels] = useState<Model[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { config, setPendingChange, saveChanges, isSaving } = useConfigStore();
+  const { chat, privacyChat, setChatModel, setPrivacyChatModel } = useServiceStore();
   const { privacyMode } = useUIStore();
 
-  // Select config section based on privacy mode
+  // Select config based on privacy mode
   const serviceKey = privacyMode ? 'privacy_chat' : 'chat';
-  const currentModel = config?.[serviceKey]?.model;
-  const serviceUrl = config?.[serviceKey]?.url;
+  const serviceConfig = privacyMode ? privacyChat : chat;
+  const currentModel = serviceConfig?.model;
+  const serviceUrl = serviceConfig?.url;
 
   // Fetch models when service URL or mode changes
   useEffect(() => {
@@ -39,12 +40,15 @@ export function ModelSelector() {
     loadModels();
   }, [serviceUrl, serviceKey]);
 
-  const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newModel = e.target.value;
     if (newModel === currentModel) return;
 
-    setPendingChange(serviceKey, 'model', newModel);
-    await saveChanges();
+    if (privacyMode) {
+      setPrivacyChatModel(newModel);
+    } else {
+      setChatModel(newModel);
+    }
   };
 
   // Don't render if service not configured
@@ -71,8 +75,7 @@ export function ModelSelector() {
         <select
           value={currentModel || ''}
           onChange={handleModelChange}
-          disabled={isSaving}
-          className="appearance-none bg-muted/50 border border-border/50 rounded-md px-2.5 py-1 pr-7 text-xs font-medium cursor-pointer hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="appearance-none bg-muted/50 border border-border/50 rounded-md px-2.5 py-1 pr-7 text-xs font-medium cursor-pointer hover:bg-muted/80 focus:outline-none focus:ring-1 focus:ring-primary/50"
         >
           {models.map((model) => (
             <option key={model.id} value={model.id}>

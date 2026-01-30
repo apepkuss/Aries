@@ -4,8 +4,6 @@ import type {
   ConfigUpdateRequest,
   ConfigUpdateResponse,
   ConfigSchemaResponse,
-  TestChatServiceRequest,
-  TestChatServiceResponse,
 } from './types';
 
 /**
@@ -35,18 +33,4 @@ export async function updateConfig(
  */
 export async function getConfigSchema(): Promise<ConfigSchemaResponse> {
   return apiClient.get('v1/config/schema').json<ConfigSchemaResponse>();
-}
-
-/**
- * Test chat service connectivity
- * Attempts to connect to the specified URL and fetch available models
- */
-export async function testChatService(
-  request: TestChatServiceRequest
-): Promise<TestChatServiceResponse> {
-  return apiClient
-    .post('v1/config/test-chat', {
-      json: request,
-    })
-    .json<TestChatServiceResponse>();
 }

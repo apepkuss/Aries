@@ -202,8 +202,6 @@ export interface SanitizedSubagentConfig {
 // Config Update
 export interface ConfigUpdateRequest {
   server?: ServerConfigUpdate;
-  chat?: ChatConfigUpdate;
-  privacy_chat?: ChatConfigUpdate;
   embedding?: EmbeddingConfigUpdate;
   memory?: MemoryConfigUpdate;
   rag?: RagConfigUpdate;
@@ -219,12 +217,6 @@ export interface ServerConfigUpdate {
   subtask_max_retries?: number;
   subtask_react_max_iterations?: number;
   subtask_react_timeout_secs?: number;
-}
-
-export interface ChatConfigUpdate {
-  url?: string;
-  model?: string;
-  api_key?: string;
 }
 
 export interface EmbeddingConfigUpdate {
@@ -264,7 +256,6 @@ export interface ConfigSchemaResponse {
 
 export interface ConfigSchemaSection {
   server?: Record<string, FieldSchema>;
-  chat?: Record<string, FieldSchema>;
   embedding?: Record<string, FieldSchema>;
   memory?: Record<string, FieldSchema>;
   rag?: Record<string, FieldSchema>;
@@ -277,18 +268,6 @@ export interface FieldSchema {
   default?: unknown;
   description: string;
   side_effect?: string;
-}
-
-// Service Test Types
-export interface TestChatServiceRequest {
-  url: string;
-  api_key?: string;
-}
-
-export interface TestChatServiceResponse {
-  success: boolean;
-  error?: string;
-  models?: string[];
 }
 
 // ============================================================================

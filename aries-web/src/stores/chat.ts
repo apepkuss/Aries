@@ -9,7 +9,8 @@ import type {
   UISubtask,
   UISubAgent,
 } from '@/api/types';
-import { useConfigStore } from './config';
+import { useServiceStore } from './service';
+import { useUIStore } from './ui';
 import { useHitlStore } from './hitl';
 
 // Execution status for task planning mode
@@ -144,9 +145,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
 
     try {
-      // Build API request with model from config
+      // Build API request with model from service store
       const apiMessages = toApiMessages([...messages, userMessage]);
-      const model = useConfigStore.getState().config?.chat?.model;
+      const privacyMode = useUIStore.getState().privacyMode;
+      const serviceStore = useServiceStore.getState();
+      const serviceConfig = privacyMode ? serviceStore.privacyChat : serviceStore.chat;
+      const model = serviceConfig?.model;
       const request = buildChatRequest(apiMessages, { stream: true, model });
 
       // Track state during streaming
@@ -161,7 +165,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Use enhanced streaming to get detailed events
       for await (const event of streamChatCompletionEnhanced(
         request,
-        abortController.signal
+        abortController.signal,
+        { privacyMode }
       )) {
         console.log('[Chat Store] Processing event:', event.type, event.data);
         switch (event.type) {
