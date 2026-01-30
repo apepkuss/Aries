@@ -4,7 +4,10 @@
 //! 复用现有的 React 循环逻辑，但使用独立的上下文。
 
 use std::{
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -135,6 +138,7 @@ impl SubAgentExecutor {
     /// # Returns
     ///
     /// 执行结果
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
         id: &SubAgentId,
@@ -143,6 +147,7 @@ impl SubAgentExecutor {
         max_iterations: u32,
         cancel_token: &CancellationToken,
         emitter: &dyn EventEmitter,
+        plan_pause_tracker: Option<Arc<AtomicU64>>,
     ) -> ServerResult<SubAgentResult> {
         let start_time = Instant::now();
 
@@ -168,6 +173,7 @@ impl SubAgentExecutor {
                 emitter,
                 start_time,
                 &mut reflector,
+                plan_pause_tracker,
             )
             .await;
 
@@ -214,6 +220,7 @@ impl SubAgentExecutor {
         emitter: &dyn EventEmitter,
         start_time: Instant,
         reflector: &mut SubAgentReflector,
+        plan_pause_tracker: Option<Arc<AtomicU64>>,
     ) -> ServerResult<String> {
         // 获取任务描述用于反思
         let task_description = context.task_description().to_string();
@@ -221,6 +228,10 @@ impl SubAgentExecutor {
         let mut tool_history: Vec<String> = Vec::new();
         // 跟踪最后一次成功的工具调用结果（用于强制终止）
         let mut last_successful_tool_result: Option<String> = None;
+        // Track total time spent in tool execution (including HITL wait).
+        // Subtracted from elapsed time in the timeout check so that
+        // human-in-the-loop approval time does not count toward the timeout.
+        let mut tool_pause_duration = Duration::ZERO;
 
         loop {
             // 检查迭代限制
@@ -231,8 +242,9 @@ impl SubAgentExecutor {
                 return Err(ServerError::MaxIterationsExceeded(max_iterations));
             }
 
-            // 检查超时
-            if start_time.elapsed() > timeout {
+            // 检查超时（排除工具执行/HITL 等待时间）
+            let effective_elapsed = start_time.elapsed().saturating_sub(tool_pause_duration);
+            if effective_elapsed > timeout {
                 return Err(ServerError::SubAgentTimeout {
                     id: id.to_string(),
                     timeout_secs: timeout.as_secs(),
@@ -346,6 +358,12 @@ impl SubAgentExecutor {
                         .await;
 
                     let tool_duration = tool_start.elapsed();
+                    // Exclude tool execution time (incl. HITL wait) from timeout
+                    tool_pause_duration += tool_duration;
+                    // Also report to plan-level time budget tracker
+                    if let Some(ref tracker) = plan_pause_tracker {
+                        tracker.fetch_add(tool_duration.as_nanos() as u64, Ordering::Relaxed);
+                    }
 
                     // 记录工具调用历史
                     let tool_record = format!(
@@ -911,7 +929,15 @@ pub async fn execute_spawn_sub_agent(
 
     // 执行
     let result = executor
-        .execute(&id, context, timeout, max_iter, &cancel_token, emitter)
+        .execute(
+            &id,
+            context,
+            timeout,
+            max_iter,
+            &cancel_token,
+            emitter,
+            None,
+        )
         .await;
 
     match result {

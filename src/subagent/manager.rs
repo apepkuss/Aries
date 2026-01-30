@@ -840,6 +840,7 @@ impl SubAgentManager {
                     max_iterations,
                     &cancel_token,
                     emitter.as_ref(),
+                    None,
                 )
                 .await;
 
@@ -936,7 +937,15 @@ impl SubAgentManager {
 
         // 执行 Sub-Agent
         executor
-            .execute(id, context, timeout, max_iterations, &cancel_token, emitter)
+            .execute(
+                id,
+                context,
+                timeout,
+                max_iterations,
+                &cancel_token,
+                emitter,
+                None,
+            )
             .await
     }
 

@@ -133,6 +133,10 @@ pub struct SubAgentMetrics {
     pub completion_tokens: u64,
     /// 执行时长（毫秒）
     pub duration_ms: u64,
+    /// Time spent in tool execution / HITL wait (nanoseconds).
+    /// Used to propagate pause duration from executor to plan-level time budget.
+    #[serde(default)]
+    pub tool_pause_nanos: u64,
 }
 
 impl SubAgentMetrics {

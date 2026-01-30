@@ -6,7 +6,10 @@
 
 use std::{
     collections::HashSet,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant, SystemTime},
 };
 
@@ -512,6 +515,7 @@ pub(crate) async fn chat(
             emitter.as_ref(),
             &mut trace,
             total_subtasks,
+            time_budget.pause_tracker(),
         )
         .await?;
     } else {
@@ -662,6 +666,7 @@ pub(crate) async fn chat(
                             &model_name,
                             emitter.as_ref(),
                             subagent_config.as_ref(),
+                            Some(time_budget.pause_tracker()),
                         )
                         .await
                     } else {
@@ -686,6 +691,7 @@ pub(crate) async fn chat(
                             &mut subtask_trace,
                             &model_name,
                             emitter.as_ref(),
+                            Some(time_budget.pause_tracker()),
                         )
                         .await
                     };
@@ -1676,6 +1682,7 @@ async fn execute_chat_plan_realtime(
             emitter.as_ref(),
             &mut trace,
             total_subtasks,
+            time_budget.pause_tracker(),
         )
         .await
         {
@@ -1888,6 +1895,7 @@ async fn execute_chat_plan_realtime(
                             &model_name,
                             emitter.as_ref(),
                             subagent_config.as_ref(),
+                            Some(time_budget.pause_tracker()),
                         )
                         .await
                     } else {
@@ -1912,6 +1920,7 @@ async fn execute_chat_plan_realtime(
                             &mut subtask_trace,
                             &model_name,
                             emitter.as_ref(),
+                            Some(time_budget.pause_tracker()),
                         )
                         .await
                     };
@@ -2549,8 +2558,13 @@ async fn execute_subtask_with_react(
     subtask_trace: &mut SubtaskTrace,
     model: &str,
     emitter: &dyn EventEmitter,
+    plan_pause_tracker: Option<Arc<AtomicU64>>,
 ) -> ServerResult<String> {
     let start_time = Instant::now();
+    // Track total time spent in tool execution (including HITL wait).
+    // This is subtracted from elapsed time in the timeout check so that
+    // human-in-the-loop approval time does not count toward the subtask timeout.
+    let mut tool_pause_duration = Duration::ZERO;
     let tool_call_retry_delay = Duration::from_millis(tool_call_retry_delay_ms);
 
     // Get max_reference_size from config
@@ -2608,12 +2622,15 @@ async fn execute_subtask_with_react(
             return Err(ServerError::MaxIterationsExceeded(max_iterations));
         }
 
-        // Check timeout
-        if start_time.elapsed() > timeout {
+        // Check timeout (excludes time spent in tool execution / HITL wait)
+        let effective_elapsed = start_time.elapsed().saturating_sub(tool_pause_duration);
+        if effective_elapsed > timeout {
             dual_warn!(
-                "Subtask {} React loop timeout after {:?} - request_id: {}",
+                "Subtask {} React loop timeout after {:?} (effective {:?}, tool pause {:?}) - request_id: {}",
                 subtask.id,
                 start_time.elapsed(),
+                effective_elapsed,
+                tool_pause_duration,
                 request_id
             );
             subtask_trace.timeout();
@@ -2782,6 +2799,12 @@ async fn execute_subtask_with_react(
 
                     // Emit tool_result event after execution
                     let tool_duration = tool_call_start.elapsed();
+                    // Exclude tool execution time (incl. HITL wait) from subtask timeout
+                    tool_pause_duration += tool_duration;
+                    // Also report to plan-level time budget tracker
+                    if let Some(ref tracker) = plan_pause_tracker {
+                        tracker.fetch_add(tool_duration.as_nanos() as u64, Ordering::Relaxed);
+                    }
                     match &tool_result {
                         Ok(result) => {
                             emitter
@@ -2908,6 +2931,12 @@ async fn execute_subtask_with_react(
 
                     // Emit tool_result event after execution
                     let tool_duration = tool_call_start.elapsed();
+                    // Exclude tool execution time (incl. HITL wait) from subtask timeout
+                    tool_pause_duration += tool_duration;
+                    // Also report to plan-level time budget tracker
+                    if let Some(ref tracker) = plan_pause_tracker {
+                        tracker.fetch_add(tool_duration.as_nanos() as u64, Ordering::Relaxed);
+                    }
                     match &tool_result {
                         Ok(result) => {
                             emitter
@@ -5125,6 +5154,7 @@ async fn execute_subtask_via_subagent(
     model: &str,
     emitter: &dyn EventEmitter,
     subagent_config: Option<&SubAgentSystemConfig>,
+    plan_pause_tracker: Option<Arc<AtomicU64>>,
 ) -> ServerResult<String> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation(
@@ -5259,6 +5289,7 @@ async fn execute_subtask_via_subagent(
             config.default_max_iterations,
             cancel_token,
             emitter,
+            plan_pause_tracker,
         )
         .await;
 
@@ -5393,6 +5424,7 @@ pub async fn execute_subtask_with_retry(
     model: &str,
     emitter: &dyn EventEmitter,
     subagent_config: Option<&SubAgentSystemConfig>,
+    plan_pause_tracker: Option<Arc<AtomicU64>>,
 ) -> ServerResult<RetryableSubtaskResult> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation("Sub-Agent configuration required for retry execution".to_string())
@@ -5474,6 +5506,7 @@ pub async fn execute_subtask_with_retry(
             emitter,
             subagent_config,
             failure_context.as_deref(),
+            plan_pause_tracker.clone(),
         )
         .await;
 
@@ -5578,6 +5611,7 @@ async fn execute_subtask_via_subagent_with_context(
     emitter: &dyn EventEmitter,
     subagent_config: Option<&SubAgentSystemConfig>,
     failure_context: Option<&str>,
+    plan_pause_tracker: Option<Arc<AtomicU64>>,
 ) -> ServerResult<String> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation(
@@ -5707,6 +5741,7 @@ async fn execute_subtask_via_subagent_with_context(
             config.default_max_iterations,
             cancel_token,
             emitter,
+            plan_pause_tracker,
         )
         .await;
 
@@ -6036,6 +6071,7 @@ pub async fn execute_subtasks_parallel(
     emitter: &dyn EventEmitter,
     trace: &mut PlanTrace,
     total_subtasks: usize,
+    plan_pause_tracker: Arc<AtomicU64>,
 ) -> ServerResult<()> {
     let config = ctx.subagent_config.as_ref().ok_or_else(|| {
         ServerError::Operation(
@@ -6097,6 +6133,7 @@ pub async fn execute_subtasks_parallel(
             max_parallel,
             time_budget,
             emitter,
+            plan_pause_tracker.clone(),
         )
         .await;
 
@@ -6216,6 +6253,7 @@ async fn execute_parallel_group(
     max_parallel: usize,
     time_budget: &TimeBudget,
     _emitter: &dyn EventEmitter,
+    plan_pause_tracker: Arc<AtomicU64>,
 ) -> Vec<SubtaskExecutionResult> {
     use tokio::sync::Semaphore;
 
@@ -6249,6 +6287,8 @@ async fn execute_parallel_group(
         let timeout = group_timeout;
         // Use the emitter from context for streaming events
         let emitter_arc: Arc<dyn EventEmitter> = ctx.emitter.clone();
+        // Clone pause tracker for the spawned task
+        let task_pause_tracker = plan_pause_tracker.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = permit; // Hold until done
@@ -6282,6 +6322,7 @@ async fn execute_parallel_group(
                 &ctx.model_name,
                 emitter_arc.as_ref(),
                 ctx.subagent_config.as_ref(),
+                Some(task_pause_tracker),
             )
             .await;
 
