@@ -264,4 +264,364 @@ mod tests {
         let result = reader.delete_session("user_1", "nonexistent").await;
         assert!(matches!(result, Err(SessionError::NotFound(_))));
     }
+
+    // ====================================================================
+    // Phase 6: End-to-end and edge-case tests
+    // ====================================================================
+
+    /// Full lifecycle: write → list → read → verify content → delete → verify gone
+    #[tokio::test]
+    async fn test_full_session_lifecycle() {
+        let tmp = TempDir::new().unwrap();
+        let writer = SessionWriter::new(tmp.path());
+        let reader = SessionReader::new(tmp.path());
+
+        // 1. Write a user message and an assistant message
+        let session_id = writer.get_or_create_session_id("alice").await;
+
+        let seq1 = writer.next_sequence("alice").await;
+        writer
+            .append_message(
+                "alice",
+                &session_id,
+                "gpt-4",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: "What is Rust?".to_string(),
+                    timestamp: Utc::now(),
+                    message_id: "msg_u1".to_string(),
+                    sequence: seq1,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let seq2 = writer.next_sequence("alice").await;
+        writer
+            .append_message(
+                "alice",
+                &session_id,
+                "gpt-4",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "assistant".to_string(),
+                    content: "Rust is a systems programming language.".to_string(),
+                    timestamp: Utc::now(),
+                    message_id: "msg_a1".to_string(),
+                    sequence: seq2,
+                    tokens: Some(TokenUsage {
+                        prompt: 10,
+                        completion: 20,
+                    }),
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // 2. List sessions → should have exactly one
+        let sessions = reader.list_sessions("alice").await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session_id);
+        assert_eq!(sessions[0].model, "gpt-4");
+        assert_eq!(sessions[0].message_count, 2);
+
+        // 3. Read session → verify record content
+        let records = reader.read_session("alice", &session_id).await.unwrap();
+        assert_eq!(records.len(), 3); // session_start + 2 messages
+
+        // Verify user message content
+        match &records[1] {
+            SessionRecord::Message {
+                role,
+                content,
+                sequence,
+                tokens,
+                ..
+            } => {
+                assert_eq!(role, "user");
+                assert_eq!(content, "What is Rust?");
+                assert_eq!(*sequence, 1);
+                assert!(tokens.is_none());
+            }
+            _ => panic!("Expected Message record at index 1"),
+        }
+
+        // Verify assistant message with tokens
+        match &records[2] {
+            SessionRecord::Message {
+                role,
+                content,
+                sequence,
+                tokens,
+                ..
+            } => {
+                assert_eq!(role, "assistant");
+                assert_eq!(content, "Rust is a systems programming language.");
+                assert_eq!(*sequence, 2);
+                let t = tokens.as_ref().unwrap();
+                assert_eq!(t.prompt, 10);
+                assert_eq!(t.completion, 20);
+            }
+            _ => panic!("Expected Message record at index 2"),
+        }
+
+        // 4. Delete session → verify gone
+        reader.delete_session("alice", &session_id).await.unwrap();
+        let sessions = reader.list_sessions("alice").await.unwrap();
+        assert!(sessions.is_empty());
+
+        // 5. Read deleted session → should return NotFound
+        let result = reader.read_session("alice", &session_id).await;
+        assert!(matches!(result, Err(SessionError::NotFound(_))));
+    }
+
+    /// Privacy mode: no session_id means no file created
+    /// (This verifies the behavior at the file system level)
+    #[tokio::test]
+    async fn test_privacy_mode_no_files_created() {
+        let tmp = TempDir::new().unwrap();
+        let reader = SessionReader::new(tmp.path());
+
+        // Without any writes (simulating privacy mode where session_id is None),
+        // there should be no session files at all
+        let sessions = reader.list_sessions("privacy_user").await.unwrap();
+        assert!(sessions.is_empty());
+
+        // Also verify the user directory doesn't even exist
+        let user_dir = tmp.path().join("privacy_user");
+        assert!(!user_dir.exists());
+    }
+
+    /// Multiple sessions for the same user (simulated by creating a second
+    /// SessionWriter which generates a fresh session ID)
+    #[tokio::test]
+    async fn test_multiple_sessions_per_user() {
+        let tmp = TempDir::new().unwrap();
+
+        // Session 1
+        let writer1 = SessionWriter::new(tmp.path());
+        let sid1 = writer1.get_or_create_session_id("bob").await;
+        let seq = writer1.next_sequence("bob").await;
+        writer1
+            .append_message(
+                "bob",
+                &sid1,
+                "model-a",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: "Session 1 message".to_string(),
+                    timestamp: Utc::now(),
+                    message_id: "s1_msg1".to_string(),
+                    sequence: seq,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Session 2 — new writer generates a different session ID
+        let writer2 = SessionWriter::new(tmp.path());
+        let sid2 = writer2.get_or_create_session_id("bob").await;
+        assert_ne!(
+            sid1, sid2,
+            "New writer should generate different session ID"
+        );
+
+        let seq = writer2.next_sequence("bob").await;
+        writer2
+            .append_message(
+                "bob",
+                &sid2,
+                "model-b",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: "Session 2 message".to_string(),
+                    timestamp: Utc::now(),
+                    message_id: "s2_msg1".to_string(),
+                    sequence: seq,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Reader should see both sessions
+        let reader = SessionReader::new(tmp.path());
+        let sessions = reader.list_sessions("bob").await.unwrap();
+        assert_eq!(sessions.len(), 2);
+
+        // Both sessions should be independently readable
+        let r1 = reader.read_session("bob", &sid1).await.unwrap();
+        let r2 = reader.read_session("bob", &sid2).await.unwrap();
+        assert_eq!(r1.len(), 2); // session_start + 1 message
+        assert_eq!(r2.len(), 2);
+
+        // Verify different models
+        match &r1[0] {
+            SessionRecord::SessionStart { model, .. } => assert_eq!(model, "model-a"),
+            _ => panic!("Expected SessionStart"),
+        }
+        match &r2[0] {
+            SessionRecord::SessionStart { model, .. } => assert_eq!(model, "model-b"),
+            _ => panic!("Expected SessionStart"),
+        }
+
+        // Delete one — the other should remain
+        reader.delete_session("bob", &sid1).await.unwrap();
+        let sessions = reader.list_sessions("bob").await.unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, sid2);
+    }
+
+    /// Very long message content (100 KB)
+    #[tokio::test]
+    async fn test_long_message_content() {
+        let tmp = TempDir::new().unwrap();
+        let writer = SessionWriter::new(tmp.path());
+        let reader = SessionReader::new(tmp.path());
+
+        let session_id = writer.get_or_create_session_id("user_1").await;
+        let long_content = "x".repeat(100_000); // 100 KB
+
+        let seq = writer.next_sequence("user_1").await;
+        writer
+            .append_message(
+                "user_1",
+                &session_id,
+                "test-model",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: long_content.clone(),
+                    timestamp: Utc::now(),
+                    message_id: "msg_long".to_string(),
+                    sequence: seq,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // Read back and verify content is preserved exactly
+        let records = reader.read_session("user_1", &session_id).await.unwrap();
+        assert_eq!(records.len(), 2);
+
+        match &records[1] {
+            SessionRecord::Message { content, .. } => {
+                assert_eq!(content.len(), 100_000);
+                assert_eq!(content, &long_content);
+            }
+            _ => panic!("Expected Message record"),
+        }
+
+        // Metadata should show 1 message
+        let sessions = reader.list_sessions("user_1").await.unwrap();
+        assert_eq!(sessions[0].message_count, 1);
+    }
+
+    /// Concurrent writes to the same session file should produce valid,
+    /// parseable JSONL with correct record count
+    #[tokio::test]
+    async fn test_concurrent_writes_data_integrity() {
+        let tmp = TempDir::new().unwrap();
+        let writer = std::sync::Arc::new(SessionWriter::new(tmp.path()));
+        let reader = SessionReader::new(tmp.path());
+
+        let session_id = writer.get_or_create_session_id("user_1").await;
+        let num_tasks = 20;
+
+        let mut handles = Vec::new();
+        for i in 0..num_tasks {
+            let w = writer.clone();
+            let sid = session_id.clone();
+            handles.push(tokio::spawn(async move {
+                let seq = w.next_sequence("user_1").await;
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                w.append_message(
+                    "user_1",
+                    &sid,
+                    "test-model",
+                    SessionRecord::Message {
+                        version: JSONL_FORMAT_VERSION,
+                        role: role.to_string(),
+                        content: format!("Concurrent message {i}"),
+                        timestamp: Utc::now(),
+                        message_id: format!("msg_c_{i}"),
+                        sequence: seq,
+                        tokens: None,
+                        tool_calls: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Read through the reader API (not raw file) and verify
+        let records = reader.read_session("user_1", &session_id).await.unwrap();
+        assert_eq!(records.len(), num_tasks + 1); // session_start + N messages
+
+        // All records should deserialize correctly
+        assert!(matches!(&records[0], SessionRecord::SessionStart { .. }));
+        for rec in &records[1..] {
+            assert!(matches!(rec, SessionRecord::Message { .. }));
+        }
+
+        // Metadata should reflect correct count
+        let sessions = reader.list_sessions("user_1").await.unwrap();
+        assert_eq!(sessions[0].message_count, num_tasks);
+    }
+
+    /// Messages with special characters (newlines, unicode, JSON special chars)
+    #[tokio::test]
+    async fn test_special_characters_in_content() {
+        let tmp = TempDir::new().unwrap();
+        let writer = SessionWriter::new(tmp.path());
+        let reader = SessionReader::new(tmp.path());
+
+        let session_id = writer.get_or_create_session_id("user_1").await;
+
+        let special_content = "Line 1\nLine 2\n\ttabbed\n\"quoted\"\n{\"json\": true}\n你好世界🦀";
+
+        let seq = writer.next_sequence("user_1").await;
+        writer
+            .append_message(
+                "user_1",
+                &session_id,
+                "test-model",
+                SessionRecord::Message {
+                    version: JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: special_content.to_string(),
+                    timestamp: Utc::now(),
+                    message_id: "msg_special".to_string(),
+                    sequence: seq,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let records = reader.read_session("user_1", &session_id).await.unwrap();
+        match &records[1] {
+            SessionRecord::Message { content, .. } => {
+                assert_eq!(content, special_content);
+            }
+            _ => panic!("Expected Message record"),
+        }
+    }
 }

@@ -173,3 +173,125 @@ impl IntoResponse for SessionApiError {
         }
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use axum::{http::StatusCode, response::IntoResponse};
+
+    use super::*;
+    use crate::session::types::SessionError;
+
+    #[test]
+    fn test_session_api_error_disabled_returns_503() {
+        let err = SessionApiError::Disabled;
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_session_api_error_not_found_returns_404() {
+        let err = SessionApiError::Session(SessionError::NotFound("test-id".to_string()));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_session_api_error_io_returns_500() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let err = SessionApiError::Session(SessionError::Io(io_err));
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_session_api_error_from_session_error() {
+        let session_err = SessionError::NotFound("abc".to_string());
+        let api_err: SessionApiError = session_err.into();
+        assert!(matches!(
+            api_err,
+            SessionApiError::Session(SessionError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn test_get_reader_returns_disabled_when_no_writer() {
+        let state = AppState::new(
+            crate::config::Config::default(),
+            crate::info::ServerInfo::default(),
+        );
+        let result = get_reader(&state);
+        assert!(matches!(result, Err(SessionApiError::Disabled)));
+    }
+
+    #[tokio::test]
+    async fn test_get_reader_returns_reader_when_writer_present() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let writer = crate::session::writer::SessionWriter::new(tmp.path());
+        let state = AppState::new(
+            crate::config::Config::default(),
+            crate::info::ServerInfo::default(),
+        )
+        .with_session_writer(writer);
+
+        let result = get_reader(&state);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_response_format() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let writer = crate::session::writer::SessionWriter::new(tmp.path());
+
+        // Write a session
+        let sid = writer.get_or_create_session_id("test_user").await;
+        let seq = writer.next_sequence("test_user").await;
+        writer
+            .append_message(
+                "test_user",
+                &sid,
+                "gpt-4",
+                super::super::types::SessionRecord::Message {
+                    version: super::super::types::JSONL_FORMAT_VERSION,
+                    role: "user".to_string(),
+                    content: "Hello".to_string(),
+                    timestamp: chrono::Utc::now(),
+                    message_id: "msg_1".to_string(),
+                    sequence: seq,
+                    tokens: None,
+                    tool_calls: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let reader = super::super::reader::SessionReader::new(tmp.path());
+        let sessions = reader.list_sessions("test_user").await.unwrap();
+        let total = sessions.len();
+
+        let response = ListSessionsResponse { sessions, total };
+        let json = serde_json::to_value(&response).unwrap();
+
+        // Verify response structure
+        assert!(json["sessions"].is_array());
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["sessions"][0]["model"], "gpt-4");
+        assert_eq!(json["sessions"][0]["message_count"], 1);
+    }
+
+    #[test]
+    fn test_delete_response_serialization() {
+        let response = DeleteSessionResponse {
+            success: true,
+            session_id: "test-session".to_string(),
+            message: "Session deleted successfully".to_string(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["success"], true);
+        assert_eq!(json["session_id"], "test-session");
+        assert!(json["message"].as_str().unwrap().contains("deleted"));
+    }
+}

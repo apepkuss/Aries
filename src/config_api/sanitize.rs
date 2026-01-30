@@ -7,12 +7,12 @@ use super::types::{
     SanitizedArtifactsConfig, SanitizedChatConfig, SanitizedConfig, SanitizedEmbeddingConfig,
     SanitizedHitlConfig, SanitizedMcpConfig, SanitizedMcpServerConfig,
     SanitizedMcpToolServerConfig, SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig,
-    SanitizedSkillConfig, SanitizedSubagentConfig, UPDATABLE_FIELDS,
+    SanitizedSessionConfig, SanitizedSkillConfig, SanitizedSubagentConfig, UPDATABLE_FIELDS,
 };
 use crate::{
     config::{
         ArtifactsConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, McpServerConfig,
-        McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SkillConfig,
+        McpToolServerConfig, MemoryConfig, RagConfig, ServerConfig, SessionConfig, SkillConfig,
     },
     services::hitl::HitlConfig,
     subagent::SubAgentSystemConfig,
@@ -42,6 +42,7 @@ impl Sanitize for Config {
             artifacts: self.artifacts.as_ref().map(|a| a.sanitize()),
             subagent: self.subagent.as_ref().map(|s| s.sanitize()),
             hitl: self.hitl.as_ref().map(|h| h.sanitize()),
+            session: self.session.as_ref().map(|s| s.sanitize()),
             updatable_fields: UPDATABLE_FIELDS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -215,6 +216,17 @@ impl Sanitize for HitlConfig {
             confirmation_threshold: format!("{:?}", self.confirmation_threshold).to_lowercase(),
             tool_overrides_count: self.tool_overrides.len(),
             runtime_learning_enabled: self.runtime_learning.is_some(),
+        }
+    }
+}
+
+impl Sanitize for SessionConfig {
+    type Output = SanitizedSessionConfig;
+
+    fn sanitize(&self) -> SanitizedSessionConfig {
+        SanitizedSessionConfig {
+            enable: self.enable,
+            storage_path: self.storage_path.clone(),
         }
     }
 }

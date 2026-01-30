@@ -94,6 +94,10 @@ pub struct SanitizedConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hitl: Option<SanitizedHitlConfig>,
 
+    /// Session history configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<SanitizedSessionConfig>,
+
     /// List of fields that can be updated at runtime
     pub updatable_fields: Vec<String>,
 }
@@ -239,6 +243,15 @@ pub struct SanitizedHitlConfig {
     pub tool_overrides_count: usize,
     /// Whether runtime learning is enabled
     pub runtime_learning_enabled: bool,
+}
+
+/// Sanitized session history configuration
+#[derive(Debug, Clone, Serialize)]
+pub struct SanitizedSessionConfig {
+    /// Whether session history is enabled
+    pub enable: bool,
+    /// Storage directory path
+    pub storage_path: String,
 }
 
 // ============================================================================
@@ -569,6 +582,7 @@ mod tests {
             artifacts: None,
             subagent: None,
             hitl: None,
+            session: None,
             updatable_fields: vec!["server.max_tools_per_iteration".to_string()],
         };
 
