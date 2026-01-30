@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { Send, Square, Shield, ShieldCheck } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { ArrowUp, Square, Shield, ShieldCheck } from 'lucide-react';
 import { useChatStore, useUIStore } from '@/stores';
 import { ExecutionModeSelector } from './ExecutionModeSelector';
 import { ModelSelector } from './ModelSelector';
@@ -20,7 +18,6 @@ export function ChatInput() {
   // Re-focus when streaming ends (answer received)
   useEffect(() => {
     if (!isStreaming) {
-      // Small delay to ensure UI updates are complete
       const timer = setTimeout(() => {
         textareaRef.current?.focus();
       }, 100);
@@ -37,79 +34,89 @@ export function ChatInput() {
     }
   }, [input]);
 
-  // Handle send
   const handleSend = () => {
     if (!input.trim() || isStreaming) return;
     sendMessage(input);
     setInput('');
   };
 
-  // Handle key press
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Cmd/Ctrl + Enter to send
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-    // Escape to stop generation
     if (e.key === 'Escape' && isStreaming) {
       stopGeneration();
     }
   };
 
+  // Focus the textarea when clicking the container background
+  const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) {
+      textareaRef.current?.focus();
+    }
+  };
+
+  const canSend = input.trim().length > 0 && !isStreaming;
+
   return (
-    <div className="border-t p-4 shrink-0 bg-background">
-      <div className="max-w-4xl mx-auto space-y-2">
-        <div className="flex gap-2 items-end">
-          <div className="flex-1 relative">
-            <Textarea
+    <div className="p-4 shrink-0 bg-background">
+      <div className="max-w-4xl mx-auto">
+        <div
+          className="rounded-lg border border-border/60 bg-muted/30 shadow-sm focus-within:border-border focus-within:ring-1 focus-within:ring-ring/20 transition-[border-color,box-shadow]"
+          onClick={handleContainerClick}
+        >
+          {/* Textarea */}
+          <div className="px-4 pt-3 pb-1">
+            <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message..."
-              className="min-h-[44px] max-h-[200px] resize-none pl-10 pr-3"
+              className="w-full min-h-[28px] max-h-[200px] resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-50"
               rows={1}
               disabled={isStreaming}
             />
-            <div
-              className="absolute left-1 top-1/2 -translate-y-1/2 p-1"
-              title={privacyMode ? 'Privacy mode enabled' : 'Privacy mode disabled'}
-            >
-              {privacyMode ? (
-                <ShieldCheck className="h-6 w-6 text-emerald-500 fill-emerald-500/20" />
-              ) : (
-                <Shield className="h-6 w-6 text-muted-foreground/40" />
-              )}
-            </div>
           </div>
 
-          {isStreaming ? (
-            <Button
-              variant="destructive"
-              size="icon"
-              onClick={stopGeneration}
-              title="Stop generation (Esc)"
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              size="icon"
-              onClick={handleSend}
-              disabled={!input.trim()}
-              title="Send message (Cmd+Enter)"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+            {/* Left: controls */}
+            <div className="flex items-center gap-1">
+              <div
+                className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-muted/80 transition-colors cursor-default"
+                title={privacyMode ? 'Privacy mode enabled' : 'Privacy mode disabled'}
+              >
+                {privacyMode ? (
+                  <ShieldCheck className="h-[18px] w-[18px] text-emerald-500 fill-emerald-500/20" />
+                ) : (
+                  <Shield className="h-[18px] w-[18px] text-muted-foreground/50" />
+                )}
+              </div>
+              <ExecutionModeSelector />
+              <ModelSelector />
+            </div>
 
-        {/* Mode and Model Selectors */}
-        <div className="flex items-center">
-          <div className="flex items-center gap-4">
-            <ExecutionModeSelector />
-            <ModelSelector />
+            {/* Right: send / stop button */}
+            {isStreaming ? (
+              <button
+                onClick={stopGeneration}
+                title="Stop generation (Esc)"
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-destructive text-white hover:bg-destructive/90 transition-colors"
+              >
+                <Square className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                title="Send message (Enter)"
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
       </div>

@@ -28,7 +28,15 @@ export function ModelSelector() {
         setIsLoading(true);
         setError(null);
         const response = await fetchModels(serviceKey);
-        setModels(response.data);
+        // Deduplicate by model id (backend may return duplicates
+        // when multiple servers are registered for the same service)
+        const seen = new Set<string>();
+        const unique = response.data.filter((m) => {
+          if (seen.has(m.id)) return false;
+          seen.add(m.id);
+          return true;
+        });
+        setModels(unique);
       } catch (err) {
         console.error('Failed to fetch models:', err);
         setError('Failed to load models');

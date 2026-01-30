@@ -256,21 +256,16 @@ export const useServiceStore = create<ServiceState>()(
         }));
       },
 
-      // Auto-register saved configs on app startup
+      // Auto-register saved configs on app startup.
+      // Does NOT unregister first — after backend restart the old IDs are
+      // stale and unregister returns 500, which the browser always logs
+      // regardless of try/catch.  Duplicate models from multiple
+      // registrations are handled by ModelSelector's dedup logic.
       autoRegister: async () => {
         const { chat, privacyChat } = get();
 
         if (chat?.url) {
           try {
-            // Unregister old ID first (may be stale after restart)
-            if (chat.serverId) {
-              try {
-                await unregisterServer(chat.serverId);
-              } catch {
-                // Expected after backend restart
-              }
-            }
-
             const result = await registerServer({
               url: chat.url,
               kind: 'chat',
@@ -291,14 +286,6 @@ export const useServiceStore = create<ServiceState>()(
 
         if (privacyChat?.url) {
           try {
-            if (privacyChat.serverId) {
-              try {
-                await unregisterServer(privacyChat.serverId);
-              } catch {
-                // Expected after backend restart
-              }
-            }
-
             const result = await registerServer({
               url: privacyChat.url,
               kind: 'privacy_chat',
