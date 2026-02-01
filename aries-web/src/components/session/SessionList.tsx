@@ -67,7 +67,7 @@ interface SessionItemProps {
 function SessionItem({ session, isActive, onSelect, onDelete }: SessionItemProps) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const displayTitle = session.model || session.session_id.slice(0, 8);
+  const displayTitle = session.title || session.model || session.session_id.slice(0, 8);
   const timeStr = formatRelativeTime(session.updated_at);
   const countStr = `${session.message_count} 条消息`;
 

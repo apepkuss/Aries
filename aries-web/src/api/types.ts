@@ -315,6 +315,7 @@ export interface SessionMeta {
   session_id: string;
   user_id: string;
   model: string;
+  title: string;
   created_at: string;
   updated_at: string;
   message_count: number;

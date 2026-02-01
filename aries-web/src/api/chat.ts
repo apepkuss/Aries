@@ -159,7 +159,7 @@ export async function* streamChatCompletion(
 export async function* streamChatCompletionEnhanced(
   request: ChatCompletionRequest,
   signal?: AbortSignal,
-  options?: { privacyMode?: boolean }
+  options?: { privacyMode?: boolean; sessionId?: string }
 ): AsyncGenerator<EnhancedStreamEvent, void, unknown> {
   const response = await fetch('/v1/chat/completions', {
     method: 'POST',
@@ -169,6 +169,7 @@ export async function* streamChatCompletionEnhanced(
       'X-Request-ID': `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       'X-Enhanced-Stream': 'all', // Enable all enhanced stream events
       ...(options?.privacyMode ? { 'X-Privacy-Mode': 'true' } : {}),
+      ...(options?.sessionId ? { 'X-Session-ID': options.sessionId } : {}),
     },
     body: JSON.stringify({ ...request, stream: true }),
     signal,

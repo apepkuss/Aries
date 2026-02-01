@@ -9,7 +9,9 @@ import type {
   UISubtask,
   UISubAgent,
 } from '@/api/types';
+import { useConfigStore } from './config';
 import { useServiceStore } from './service';
+import { useSessionsStore } from './sessions';
 import { useUIStore } from './ui';
 import { useHitlStore } from './hitl';
 
@@ -39,6 +41,9 @@ interface ChatState {
   // Current conversation
   currentConversationId: string | null;
 
+  // Current session ID for JSONL history
+  sessionId: string | null;
+
   // Error
   error: string | null;
 
@@ -47,6 +52,7 @@ interface ChatState {
   stopGeneration: () => void;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
+  setSessionId: (id: string | null) => void;
   loadMessages: (messages: UIMessage[]) => void;
 
   // Sub-Agent actions
@@ -58,6 +64,11 @@ interface ChatState {
 // Generate unique message ID
 function generateMessageId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+}
+
+// Generate unique session ID (matches backend format)
+function generateSessionId(): string {
+  return `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
 // Convert UI messages to API format
@@ -104,14 +115,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   executionStatus: initialExecutionStatus,
   subAgents: new Map(),
   currentConversationId: null,
+  sessionId: null,
   error: null,
 
   // Send a message
   sendMessage: async (content: string) => {
-    const { messages, isStreaming } = get();
+    const { messages, isStreaming, sessionId } = get();
 
     if (isStreaming || !content.trim()) {
       return;
+    }
+
+    // Ensure we have a session ID for this conversation
+    const currentSessionId = sessionId ?? generateSessionId();
+    if (!sessionId) {
+      set({ sessionId: currentSessionId });
     }
 
     // Create user message
@@ -166,7 +184,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       for await (const event of streamChatCompletionEnhanced(
         request,
         abortController.signal,
-        { privacyMode }
+        { privacyMode, sessionId: currentSessionId }
       )) {
         console.log('[Chat Store] Processing event:', event.type, event.data);
         switch (event.type) {
@@ -727,6 +745,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         abortController: null,
         executionStatus: initialExecutionStatus,
       }));
+
+      // Refresh session list so the sidebar shows the new/updated session
+      if (useConfigStore.getState().config?.session?.enable) {
+        useSessionsStore.getState().fetchSessions();
+      }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         // User cancelled
@@ -766,11 +789,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
-  // Clear all messages
+  // Clear all messages (also aborts active stream and clears HITL state)
   clearMessages: () => {
+    const { abortController } = get();
+    if (abortController) {
+      abortController.abort();
+    }
+    // Clear HITL pending requests to avoid stale banners after session switch
+    useHitlStore.getState().clearRequests();
     set({
       messages: [],
+      isStreaming: false,
+      abortController: null,
       currentConversationId: null,
+      sessionId: null,
       executionStatus: initialExecutionStatus,
       subAgents: new Map(),
       error: null,
@@ -780,6 +812,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Set current conversation ID
   setConversationId: (id) => {
     set({ currentConversationId: id });
+  },
+
+  // Set current session ID for JSONL history
+  setSessionId: (id) => {
+    set({ sessionId: id });
   },
 
   // Load messages (e.g., from history)

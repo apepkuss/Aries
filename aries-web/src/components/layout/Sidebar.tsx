@@ -1,4 +1,4 @@
-import { Plus, MessageSquare, Trash2, Edit2, MoreHorizontal } from 'lucide-react';
+import { MessageSquare, Trash2, Edit2, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -36,7 +36,7 @@ export function Sidebar() {
     selectSession,
     deleteSession: removeSession,
   } = useSessionsStore();
-  const { clearMessages, loadMessages, setConversationId } = useChatStore();
+  const { clearMessages, loadMessages, setConversationId, setSessionId } = useChatStore();
   const { config } = useConfigStore();
 
   // Feature flags
@@ -55,20 +55,18 @@ export function Sidebar() {
     }
   }, [fetchSessions, fetchConversations, useSessionHistory, memoryEnabled]);
 
-  const handleNewChat = () => {
-    clearMessages();
-    useSessionsStore.getState().clearCurrent();
-    useConversationsStore.getState().clearCurrent();
-  };
-
   // --- Session history handlers ---
   const handleSelectSession = async (id: string) => {
     // Clear memory conversation selection
     useConversationsStore.getState().clearCurrent();
 
+    // Abort any active stream and clear HITL state before loading new session
+    clearMessages();
+
     const messages = await selectSession(id);
     loadMessages(messages);
     setConversationId(null);
+    setSessionId(id); // Continue appending to this session
   };
 
   const handleDeleteSession = async (id: string) => {
@@ -82,6 +80,9 @@ export function Sidebar() {
   const handleSelectConversation = async (id: string) => {
     // Clear session selection
     useSessionsStore.getState().clearCurrent();
+
+    // Abort any active stream and clear HITL state before loading new conversation
+    clearMessages();
 
     const messages = await selectConversation(id);
     loadMessages(messages);
@@ -103,17 +104,6 @@ export function Sidebar() {
 
   return (
     <aside className="w-64 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
-      {/* New chat button */}
-      <div className="p-4">
-        <Button
-          onClick={handleNewChat}
-          className="w-full justify-start gap-2 shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4" />
-          <span>新对话</span>
-        </Button>
-      </div>
-
       {/* History list */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 py-2">
