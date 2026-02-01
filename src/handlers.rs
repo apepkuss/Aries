@@ -87,9 +87,17 @@ pub async fn chat_handler(
         .unwrap_or("unknown")
         .to_string();
 
-    // check if the user id is provided
+    // Resolve user identity: request body > X-User-ID header > generated ID
     if request.user.is_none() {
-        request.user = Some(gen_chat_id());
+        if let Some(header_uid) = headers
+            .get("x-user-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| !v.is_empty())
+        {
+            request.user = Some(header_uid.to_string());
+        } else {
+            request.user = Some(gen_chat_id());
+        }
     };
     dual_info!(
         "Received a new chat request from user: {} - request_id: {}",
@@ -186,13 +194,20 @@ pub async fn chat_handler(
         .is_some_and(|v| v == "true");
 
     let session_id = if !is_privacy {
-        if let Some(ref writer) = state.session_writer {
-            let uid = request.user.as_deref().unwrap_or("anonymous");
-            if let Some(ref cid) = conv_id {
+        if let Some(session_writer) = &state.session_writer {
+            // Priority: X-Session-ID header > memory conv_id > auto-generated
+            if let Some(header_sid) = headers
+                .get("x-session-id")
+                .and_then(|v| v.to_str().ok())
+                .filter(|v| !v.is_empty())
+            {
+                Some(header_sid.to_string())
+            } else if let Some(ref cid) = conv_id {
                 // Reuse memory's conv_id as session_id
                 Some(cid.clone())
             } else {
-                Some(writer.get_or_create_session_id(uid).await)
+                let uid = request.user.as_deref().unwrap_or("anonymous");
+                Some(session_writer.get_or_create_session_id(uid).await)
             }
         } else {
             None

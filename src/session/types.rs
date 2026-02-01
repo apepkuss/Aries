@@ -47,6 +47,8 @@ pub struct SessionMeta {
     pub session_id: String,
     pub user_id: String,
     pub model: String,
+    /// Display title derived from the first user message content
+    pub title: String,
     pub created_at: DateTime<Utc>,
     /// Derived from file modification time
     pub updated_at: DateTime<Utc>,

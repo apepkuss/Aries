@@ -351,6 +351,21 @@ confirmation_threshold = "medium"     # Minimum risk level that requires confirm
 
 
 # ============================================================================
+# SECTION 1.11: SESSION HISTORY CONFIGURATION
+# ============================================================================
+# The session system provides JSONL-based chat history persistence for
+# normal (non-privacy) sessions. Each session is stored as a JSONL file
+# organized by user ID.
+#
+# Storage layout: {storage_path}/{user_id}/{session_id}.jsonl
+
+[session]
+enable = true                         # Enable session history recording (default: true)
+storage_path = "~/.aries/history"     # Directory for storing session JSONL files
+                                      # Supports ~ for home directory expansion
+
+
+# ============================================================================
 # SECTION 2: AI SERVICE CONFIGURATION
 # ============================================================================
 # This section contains configuration for AI services including chat and

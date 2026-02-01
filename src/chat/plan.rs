@@ -1403,35 +1403,8 @@ async fn execute_chat_plan_realtime(
         }
     }
 
-    // Write user message to session history (JSONL) - realtime mode
-    if let Some(ref sid) = session_id
-        && let Some(ref writer) = state.session_writer
-        && let Some(ref user_msg) = user_message
-    {
-        let uid = request.user.as_deref().unwrap_or("anonymous");
-        let model_name = request
-            .model
-            .clone()
-            .unwrap_or_else(|| "default".to_string());
-        let seq = writer.next_sequence(uid).await;
-        let record = crate::session::types::SessionRecord::Message {
-            version: crate::session::types::JSONL_FORMAT_VERSION,
-            role: "user".to_string(),
-            content: user_msg.clone(),
-            timestamp: chrono::Utc::now(),
-            message_id: format!("msg_{}", uuid::Uuid::new_v4()),
-            sequence: seq,
-            tokens: None,
-            tool_calls: None,
-        };
-        if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
-            dual_warn!(
-                "Failed to write user message to session: {} - request_id: {}",
-                e,
-                request_id
-            );
-        }
-    }
+    // NOTE: User message is already written to session in the parent `chat()` function
+    // before branching into realtime mode. No duplicate write needed here.
 
     // Get plan mode configuration
     let (
@@ -4652,17 +4625,15 @@ fn build_tools_json(
                     },
                     "required": ["asset_name"]
                 })
+            } else if let Some(ref params) = tool.parameters {
+                // Use actual tool parameters from MCP schema
+                params.clone()
             } else {
-                // Default schema for MCP tools
+                // Fallback for tools without schema
                 serde_json::json!({
                     "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The query or input for the tool"
-                        }
-                    },
-                    "required": ["query"]
+                    "properties": {},
+                    "required": []
                 })
             };
 

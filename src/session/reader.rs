@@ -5,6 +5,19 @@ use tokio::fs;
 
 use super::types::*;
 
+/// Truncate a string to a maximum character count, appending "..." if truncated.
+/// Handles multi-byte characters correctly by operating on char boundaries.
+fn truncate_title(s: &str, max_chars: usize) -> String {
+    // Collapse newlines and extra whitespace into single space
+    let normalized: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= max_chars {
+        normalized
+    } else {
+        let truncated: String = normalized.chars().take(max_chars).collect();
+        format!("{truncated}...")
+    }
+}
+
 /// JSONL session reader for listing, reading, and deleting session files.
 pub struct SessionReader {
     /// Root directory for session files (same as SessionWriter)
@@ -104,6 +117,7 @@ impl SessionReader {
         let mut session_id = String::new();
         let mut user_id = String::new();
         let mut model = String::new();
+        let mut title = String::new();
         let mut created_at = Utc::now();
         let mut message_count = 0usize;
         let mut found_start = false;
@@ -127,8 +141,12 @@ impl SessionReader {
                     created_at = ca;
                     found_start = true;
                 }
-                SessionRecord::Message { .. } => {
+                SessionRecord::Message { role, content, .. } => {
                     message_count += 1;
+                    // Use first user message as title
+                    if title.is_empty() && role == "user" {
+                        title = truncate_title(&content, 50);
+                    }
                 }
             }
         }
@@ -140,10 +158,16 @@ impl SessionReader {
             )));
         }
 
+        // Fallback to model name if no user message found
+        if title.is_empty() {
+            title = model.clone();
+        }
+
         Ok(SessionMeta {
             session_id,
             user_id,
             model,
+            title,
             created_at,
             updated_at,
             message_count,
