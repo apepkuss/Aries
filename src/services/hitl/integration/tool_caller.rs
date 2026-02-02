@@ -372,7 +372,9 @@ impl HitlToolCaller {
                 }
             }
 
-            HitlResponse::Clarify { .. } | HitlResponse::ProvideFeedback { .. } => {
+            HitlResponse::Clarify { .. }
+            | HitlResponse::ProvideFeedback { .. }
+            | HitlResponse::PrivacyModeChoice { .. } => {
                 // 这些响应类型不应该用于确认请求
                 Err(HitlError::InvalidResponse(
                     "Unexpected response type for confirmation request".to_string(),

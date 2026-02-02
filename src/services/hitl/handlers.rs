@@ -101,6 +101,11 @@ impl From<&HitlRequest> for HitlRequestSummary {
             super::types::HitlRequestType::Pause(pause) => {
                 ("pause".to_string(), None, format!("{:?}", pause.reason))
             }
+            super::types::HitlRequestType::PrivacyModeConfirmation(privacy) => (
+                "privacy_mode_confirmation".to_string(),
+                None,
+                privacy.recommendation.clone(),
+            ),
         };
 
         Self {
@@ -169,6 +174,8 @@ pub enum RequestDetails {
     Feedback(FeedbackDetails),
     /// 暂停请求详情
     Pause(PauseDetails),
+    /// 隐私模式确认请求详情
+    PrivacyModeConfirmation(PrivacyModeConfirmationDetails),
 }
 
 /// 确认请求详情
@@ -244,6 +251,33 @@ pub struct PauseDetails {
     pub pending_steps: Vec<String>,
 }
 
+/// 隐私模式确认请求详情
+#[derive(Debug, Serialize)]
+pub struct PrivacyModeConfirmationDetails {
+    /// 用户查询摘要（已脱敏）
+    pub query_summary: String,
+    /// 检测到的隐私模式列表
+    pub detected_patterns: Vec<DetectedPrivacyPatternResponse>,
+    /// 检测方法
+    pub detection_method: String,
+    /// 综合置信度 (0.0 - 1.0)
+    pub confidence: f32,
+    /// 推荐操作
+    pub recommendation: String,
+}
+
+/// 检测到的隐私模式响应
+#[derive(Debug, Serialize)]
+pub struct DetectedPrivacyPatternResponse {
+    /// 隐私类别
+    pub category: String,
+    /// 描述
+    pub description: String,
+    /// 脱敏后的文本（可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub masked_text: Option<String>,
+}
+
 impl From<&HitlRequest> for HitlRequestDetailResponse {
     fn from(request: &HitlRequest) -> Self {
         let (request_type, details) = match &request.request_type {
@@ -294,6 +328,24 @@ impl From<&HitlRequest> for HitlRequestDetailResponse {
                     current_state: pause.current_state.clone(),
                     completed_steps: pause.completed_steps.clone(),
                     pending_steps: pause.pending_steps.clone(),
+                }),
+            ),
+            super::types::HitlRequestType::PrivacyModeConfirmation(privacy) => (
+                "privacy_mode_confirmation".to_string(),
+                RequestDetails::PrivacyModeConfirmation(PrivacyModeConfirmationDetails {
+                    query_summary: privacy.query_summary.clone(),
+                    detected_patterns: privacy
+                        .detected_patterns
+                        .iter()
+                        .map(|p| DetectedPrivacyPatternResponse {
+                            category: p.category.clone(),
+                            description: p.description.clone(),
+                            masked_text: p.masked_text.clone(),
+                        })
+                        .collect(),
+                    detection_method: privacy.detection_method.clone(),
+                    confidence: privacy.confidence,
+                    recommendation: privacy.recommendation.clone(),
                 }),
             ),
         };

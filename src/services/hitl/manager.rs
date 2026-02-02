@@ -623,6 +623,12 @@ impl HitlManager {
                 Ok(())
             }
 
+            // 隐私模式确认请求允许：PrivacyModeChoice, Abort
+            (
+                HitlRequestType::PrivacyModeConfirmation(_),
+                HitlResponse::PrivacyModeChoice { .. } | HitlResponse::Abort { .. },
+            ) => Ok(()),
+
             _ => Err(HitlError::InvalidResponse(format!(
                 "Response {:?} is not valid for request type",
                 response
@@ -637,9 +643,9 @@ impl HitlManager {
             HitlResponse::Reject { .. } => HitlRequestStatus::Rejected,
             HitlResponse::Modify { .. } => HitlRequestStatus::Modified,
             HitlResponse::Abort { .. } => HitlRequestStatus::Cancelled,
-            HitlResponse::Clarify { .. } | HitlResponse::ProvideFeedback { .. } => {
-                HitlRequestStatus::Completed
-            }
+            HitlResponse::Clarify { .. }
+            | HitlResponse::ProvideFeedback { .. }
+            | HitlResponse::PrivacyModeChoice { .. } => HitlRequestStatus::Completed,
         }
     }
 

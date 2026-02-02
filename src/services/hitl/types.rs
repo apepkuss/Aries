@@ -22,6 +22,8 @@ pub enum HitlRequestType {
     Feedback(FeedbackRequest),
     /// 执行暂停
     Pause(PauseRequest),
+    /// 隐私模式确认
+    PrivacyModeConfirmation(PrivacyModeConfirmationRequest),
 }
 
 /// HITL 请求状态
@@ -437,6 +439,35 @@ pub enum PauseReason {
     ResourceLimit,
 }
 
+/// 隐私模式确认请求
+///
+/// 当系统检测到用户查询可能包含隐私信息时，发送此请求让用户确认是否使用隐私模式。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrivacyModeConfirmationRequest {
+    /// 用户查询摘要（已脱敏）
+    pub query_summary: String,
+    /// 检测到的隐私模式列表
+    pub detected_patterns: Vec<DetectedPrivacyPattern>,
+    /// 检测方法
+    pub detection_method: String,
+    /// 综合置信度 (0.0 - 1.0)
+    pub confidence: f32,
+    /// 建议说明
+    pub recommendation: String,
+}
+
+/// 检测到的隐私模式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetectedPrivacyPattern {
+    /// 隐私类别
+    pub category: String,
+    /// 类别描述
+    pub description: String,
+    /// 匹配到的文本（已脱敏，可选）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub masked_text: Option<String>,
+}
+
 /// HITL 响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -463,6 +494,14 @@ pub enum HitlResponse {
     Resume,
     /// 终止执行
     Abort { reason: Option<String> },
+    /// 隐私模式选择
+    PrivacyModeChoice {
+        /// 是否使用隐私模式
+        use_privacy_mode: bool,
+        /// 是否记住本次会话的选择
+        #[serde(default)]
+        remember_choice: bool,
+    },
 }
 
 /// HITL 错误类型
@@ -615,5 +654,75 @@ mod tests {
         let json = serde_json::to_string(&reject).unwrap();
         assert!(json.contains("reject"));
         assert!(json.contains("Test"));
+    }
+
+    #[test]
+    fn test_privacy_mode_confirmation_request_serialization() {
+        let request = PrivacyModeConfirmationRequest {
+            query_summary: "查询手机号...".to_string(),
+            detected_patterns: vec![DetectedPrivacyPattern {
+                category: "contact".to_string(),
+                description: "联系方式".to_string(),
+                masked_text: Some("138****5678".to_string()),
+            }],
+            detection_method: "rule_based".to_string(),
+            confidence: 0.9,
+            recommendation: "建议使用隐私模式".to_string(),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("query_summary"));
+        assert!(json.contains("detected_patterns"));
+        assert!(json.contains("contact"));
+        assert!(json.contains("138****5678"));
+
+        // Test deserialization
+        let parsed: PrivacyModeConfirmationRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.detected_patterns.len(), 1);
+        assert!((parsed.confidence - 0.9).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_privacy_mode_choice_response_serialization() {
+        let response = HitlResponse::PrivacyModeChoice {
+            use_privacy_mode: true,
+            remember_choice: false,
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("privacy_mode_choice"));
+        assert!(json.contains("use_privacy_mode"));
+        assert!(json.contains("true"));
+
+        // Test deserialization
+        let parsed: HitlResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            HitlResponse::PrivacyModeChoice {
+                use_privacy_mode,
+                remember_choice,
+            } => {
+                assert!(use_privacy_mode);
+                assert!(!remember_choice);
+            }
+            _ => panic!("Expected PrivacyModeChoice"),
+        }
+    }
+
+    #[test]
+    fn test_hitl_request_type_privacy_mode_confirmation() {
+        let request_type =
+            HitlRequestType::PrivacyModeConfirmation(PrivacyModeConfirmationRequest {
+                query_summary: "test".to_string(),
+                detected_patterns: vec![],
+                detection_method: "rule_based".to_string(),
+                confidence: 0.8,
+                recommendation: "test".to_string(),
+            });
+
+        let json = serde_json::to_string(&request_type).unwrap();
+        assert!(json.contains("privacy_mode_confirmation"));
+
+        let parsed: HitlRequestType = serde_json::from_str(&json).unwrap();
+        matches!(parsed, HitlRequestType::PrivacyModeConfirmation(_));
     }
 }

@@ -208,9 +208,9 @@ pub fn response_to_status(response: &HitlResponse) -> HitlRequestStatus {
         HitlResponse::Reject { .. } => HitlRequestStatus::Rejected,
         HitlResponse::Modify { .. } => HitlRequestStatus::Modified,
         HitlResponse::Abort { .. } => HitlRequestStatus::Cancelled,
-        HitlResponse::Clarify { .. } | HitlResponse::ProvideFeedback { .. } => {
-            HitlRequestStatus::Completed
-        }
+        HitlResponse::Clarify { .. }
+        | HitlResponse::ProvideFeedback { .. }
+        | HitlResponse::PrivacyModeChoice { .. } => HitlRequestStatus::Completed,
     }
 }
 

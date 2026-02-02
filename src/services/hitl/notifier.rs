@@ -135,6 +135,12 @@ impl HitlNotifier {
                     HitlRequestType::Pause(pause) => {
                         ("pause", None, None, format!("{:?}", pause.reason))
                     }
+                    HitlRequestType::PrivacyModeConfirmation(privacy) => (
+                        "privacy_mode_confirmation",
+                        None,
+                        None,
+                        privacy.recommendation.clone(),
+                    ),
                 };
 
                 emitter
