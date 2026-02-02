@@ -12,7 +12,6 @@ import type {
 import { useConfigStore } from './config';
 import { useServiceStore } from './service';
 import { useSessionsStore } from './sessions';
-import { useUIStore } from './ui';
 import { useHitlStore } from './hitl';
 
 // Execution status for task planning mode
@@ -165,10 +164,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       // Build API request with model from service store
       const apiMessages = toApiMessages([...messages, userMessage]);
-      const privacyMode = useUIStore.getState().privacyMode;
       const serviceStore = useServiceStore.getState();
-      const serviceConfig = privacyMode ? serviceStore.privacyChat : serviceStore.chat;
-      const model = serviceConfig?.model;
+      const model = serviceStore.chat?.model;
       const request = buildChatRequest(apiMessages, { stream: true, model });
 
       // Track state during streaming
@@ -184,7 +181,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       for await (const event of streamChatCompletionEnhanced(
         request,
         abortController.signal,
-        { privacyMode, sessionId: currentSessionId }
+        { sessionId: currentSessionId }
       )) {
         console.log('[Chat Store] Processing event:', event.type, event.data);
         switch (event.type) {

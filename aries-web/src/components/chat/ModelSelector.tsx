@@ -1,20 +1,18 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { useServiceStore, useUIStore } from '@/stores';
+import { useServiceStore } from '@/stores';
 import { fetchModels, type Model } from '@/api/models';
 
 export function ModelSelector() {
   const [models, setModels] = useState<Model[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { chat, privacyChat, setChatModel, setPrivacyChatModel } = useServiceStore();
-  const { privacyMode } = useUIStore();
+  const { chat, setChatModel } = useServiceStore();
 
-  // Select config based on privacy mode
-  const serviceKey = privacyMode ? 'privacy_chat' : 'chat';
-  const serviceConfig = privacyMode ? privacyChat : chat;
-  const currentModel = serviceConfig?.model;
-  const serviceUrl = serviceConfig?.url;
+  // Always use chat service config - backend handles privacy routing via smart detection
+  const serviceKey = 'chat';
+  const currentModel = chat?.model;
+  const serviceUrl = chat?.url;
 
   // Fetch models when service URL or mode changes
   useEffect(() => {
@@ -51,12 +49,7 @@ export function ModelSelector() {
   const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newModel = e.target.value;
     if (newModel === currentModel) return;
-
-    if (privacyMode) {
-      setPrivacyChatModel(newModel);
-    } else {
-      setChatModel(newModel);
-    }
+    setChatModel(newModel);
   };
 
   // Don't render if service not configured

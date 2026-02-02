@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useHitlStore, useActiveHitlRequest, usePendingHitlRequests } from '@/stores';
 import { HitlConfirmationDialog } from './HitlConfirmationDialog';
+import { PrivacyModeConfirmationDialog } from './PrivacyModeConfirmationDialog';
 import { HitlNotificationBanner } from './HitlNotificationBanner';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +24,7 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
 
   const activeRequest = useActiveHitlRequest();
   const pendingRequests = usePendingHitlRequests();
-  const { approve, reject, abort, setActiveRequest } = useHitlStore();
+  const { approve, reject, abort, privacyModeChoice, setActiveRequest } = useHitlStore();
 
   // Dialog is open only when user explicitly clicks "View Details"
   // This allows users to quickly approve/reject from the banner without extra clicks
@@ -108,6 +109,14 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
     [setActiveRequest]
   );
 
+  const handlePrivacyModeChoice = useCallback(
+    async (requestId: string, usePrivacyMode: boolean, rememberChoice: boolean) => {
+      await privacyModeChoice(requestId, usePrivacyMode, rememberChoice);
+      setDialogOpenForRequest(null);
+    },
+    [privacyModeChoice]
+  );
+
   // No pending requests, don't render anything
   if (relevantRequests.length === 0) {
     return null;
@@ -130,15 +139,24 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
           ))}
       </div>
 
-      {/* Confirmation dialog */}
-      <HitlConfirmationDialog
-        request={activeRequest || null}
-        open={dialogOpen}
-        onOpenChange={handleDialogOpenChange}
-        onApprove={handleApprove}
-        onReject={handleReject}
-        onAbort={handleAbort}
-      />
+      {/* Confirmation dialog - render based on request type */}
+      {activeRequest?.request_type.type === 'privacy_mode_confirmation' ? (
+        <PrivacyModeConfirmationDialog
+          request={activeRequest || null}
+          open={dialogOpen}
+          onOpenChange={handleDialogOpenChange}
+          onChoosePrivacyMode={handlePrivacyModeChoice}
+        />
+      ) : (
+        <HitlConfirmationDialog
+          request={activeRequest || null}
+          open={dialogOpen}
+          onOpenChange={handleDialogOpenChange}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onAbort={handleAbort}
+        />
+      )}
     </>
   );
 }

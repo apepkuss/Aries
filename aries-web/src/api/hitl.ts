@@ -215,3 +215,20 @@ export async function provideFeedback(
 export async function resumeRequest(requestId: string): Promise<HitlRespondResponse> {
   return respondToRequest(requestId, 'resume');
 }
+
+/**
+ * Helper: Respond to privacy mode confirmation request
+ */
+export async function respondPrivacyModeChoice(
+  requestId: string,
+  usePrivacyMode: boolean,
+  rememberChoice?: boolean
+): Promise<HitlRespondResponse> {
+  const data: Record<string, unknown> = {
+    use_privacy_mode: usePrivacyMode,
+  };
+  if (rememberChoice !== undefined) {
+    data.remember_choice = rememberChoice;
+  }
+  return respondToRequest(requestId, 'privacy_mode_choice', data);
+}

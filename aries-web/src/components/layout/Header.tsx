@@ -1,4 +1,4 @@
-import { Settings, PanelLeftClose, PanelLeft, Moon, Sun, Monitor, Shield, SquarePen } from 'lucide-react';
+import { Settings, PanelLeftClose, PanelLeft, Moon, Sun, Monitor, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -10,12 +10,11 @@ import { useUIStore, useChatStore, useServiceStore } from '@/stores';
 import { toast } from 'sonner';
 
 export function Header() {
-  const { sidebarOpen, toggleSidebar, theme, setTheme, setSettingsOpen, setPrivacyMode } = useUIStore();
+  const { sidebarOpen, toggleSidebar, theme, setTheme, setSettingsOpen } = useUIStore();
   const { clearMessages } = useChatStore();
-  const { chat, privacyChat } = useServiceStore();
+  const { chat } = useServiceStore();
 
   const isChatConfigured = !!chat?.url;
-  const isPrivacyChatConfigured = !!privacyChat?.url;
 
   return (
     <header className="h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4">
@@ -41,31 +40,11 @@ export function Header() {
                 return;
               }
               clearMessages();
-              setPrivacyMode(false);
             }}
             className={`p-2 transition-colors ${isChatConfigured ? 'hover:bg-muted/60' : 'opacity-40 cursor-not-allowed'}`}
             title={isChatConfigured ? 'New chat' : 'Chat service not configured'}
           >
             <SquarePen className="h-[18px] w-[18px] text-foreground/80" />
-          </button>
-          <div className="w-px h-5 bg-border/60" />
-          <button
-            onClick={() => {
-              if (!isPrivacyChatConfigured) {
-                toast.info('请先在设置中配置 Privacy Chat Service');
-                setSettingsOpen(true);
-                return;
-              }
-              clearMessages();
-              setPrivacyMode(true);
-            }}
-            className={`p-2 transition-colors ${isPrivacyChatConfigured ? 'hover:bg-muted/60' : 'opacity-40 cursor-not-allowed'}`}
-            title={isPrivacyChatConfigured ? 'New chat in privacy mode' : 'Privacy chat service not configured'}
-          >
-            <div className="relative h-[18px] w-[18px]">
-              <SquarePen className="h-[18px] w-[18px] text-foreground/80" />
-              <Shield className="absolute -bottom-[3px] -right-[3px] h-[10px] w-[10px] text-emerald-500 fill-emerald-500" />
-            </div>
           </button>
         </div>
         <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent italic">

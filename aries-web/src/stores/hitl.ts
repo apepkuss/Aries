@@ -21,6 +21,7 @@ import {
   provideFeedback,
   resumeRequest,
   cancelRequest,
+  respondPrivacyModeChoice,
 } from '@/api/hitl';
 
 interface HitlState {
@@ -60,6 +61,11 @@ interface HitlState {
     comment?: string
   ) => Promise<HitlRespondResponse | null>;
   resume: (requestId: string) => Promise<HitlRespondResponse | null>;
+  privacyModeChoice: (
+    requestId: string,
+    usePrivacyMode: boolean,
+    rememberChoice?: boolean
+  ) => Promise<HitlRespondResponse | null>;
   cancel: (requestId: string) => Promise<boolean>;
 
   // SSE event handlers
@@ -96,7 +102,7 @@ function toUIRequest(request: HitlRequest): UIHitlRequest {
 
 // Create a placeholder request type for SSE events (full data fetched separately)
 function createPlaceholderRequestType(
-  type: 'confirmation' | 'clarification' | 'feedback' | 'pause',
+  type: 'confirmation' | 'clarification' | 'feedback' | 'pause' | 'privacy_mode_confirmation',
   eventData?: {
     summary?: string;
     tool_name?: string;
@@ -144,6 +150,16 @@ function createPlaceholderRequestType(
           current_state: '',
           completed_steps: [],
           pending_steps: [],
+        },
+      };
+    case 'privacy_mode_confirmation':
+      return {
+        type: 'privacy_mode_confirmation',
+        data: {
+          query_summary: eventData?.summary || '',
+          detected_patterns: [],
+          confidence: 0,
+          recommendation: '',
         },
       };
   }
@@ -337,6 +353,13 @@ export const useHitlStore = create<HitlState>((set, get) => ({
     return get()._respond(requestId, () => resumeRequest(requestId));
   },
 
+  // Privacy mode choice
+  privacyModeChoice: async (requestId: string, usePrivacyMode: boolean, rememberChoice?: boolean) => {
+    return get()._respond(requestId, () =>
+      respondPrivacyModeChoice(requestId, usePrivacyMode, rememberChoice)
+    );
+  },
+
   // Cancel request
   cancel: async (requestId: string) => {
     try {
@@ -365,7 +388,7 @@ export const useHitlStore = create<HitlState>((set, get) => ({
   handleRequestEvent: (event: HitlRequestEvent) => {
     // Create a minimal request from the event
     // Note: Some fields are populated from event, rest will be filled when fetchRequestDetail completes
-    const requestType = event.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause';
+    const requestType = event.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause' | 'privacy_mode_confirmation';
     const request: UIHitlRequest = {
       id: event.request_id,
       conversation_id: event.conversation_id,

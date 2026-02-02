@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { ArrowUp, Square, Shield, ShieldCheck } from 'lucide-react';
-import { useChatStore, useUIStore } from '@/stores';
+import { ArrowUp, Square } from 'lucide-react';
+import { useChatStore } from '@/stores';
 import { ExecutionModeSelector } from './ExecutionModeSelector';
 import { ModelSelector } from './ModelSelector';
 
@@ -8,7 +8,6 @@ export function ChatInput() {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, stopGeneration, isStreaming } = useChatStore();
-  const { privacyMode } = useUIStore();
 
   // Auto-focus on mount
   useEffect(() => {
@@ -84,16 +83,6 @@ export function ChatInput() {
           <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
             {/* Left: controls */}
             <div className="flex items-center gap-1">
-              <div
-                className="flex items-center justify-center w-7 h-7 rounded-md hover:bg-muted/80 transition-colors cursor-default"
-                title={privacyMode ? 'Privacy mode enabled' : 'Privacy mode disabled'}
-              >
-                {privacyMode ? (
-                  <ShieldCheck className="h-[18px] w-[18px] text-emerald-500 fill-emerald-500/20" />
-                ) : (
-                  <Shield className="h-[18px] w-[18px] text-muted-foreground/50" />
-                )}
-              </div>
               <ExecutionModeSelector />
               <ModelSelector />
             </div>

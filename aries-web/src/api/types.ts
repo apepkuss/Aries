@@ -830,20 +830,35 @@ export interface HitlPauseRequest {
   pending_steps: string[];
 }
 
+/** Privacy mode confirmation request details */
+export interface HitlPrivacyModeConfirmationRequest {
+  query_summary: string;
+  detected_patterns: DetectedPrivacyPattern[];
+  confidence: number;
+  recommendation: string;
+}
+
+/** Detected privacy pattern */
+export interface DetectedPrivacyPattern {
+  category: string;
+  description: string;
+}
+
 /** HITL request type union */
 export type HitlRequestType =
   | { type: 'confirmation'; data: HitlConfirmationRequest }
   | { type: 'clarification'; data: HitlClarificationRequest }
   | { type: 'feedback'; data: HitlFeedbackRequest }
-  | { type: 'pause'; data: HitlPauseRequest };
+  | { type: 'pause'; data: HitlPauseRequest }
+  | { type: 'privacy_mode_confirmation'; data: HitlPrivacyModeConfirmationRequest };
 
 /** HITL request from API (matches backend HitlRequestDetailResponse) */
 export interface HitlRequestFromApi {
   id: string;
   conversation_id: string;
   user_id: string;
-  request_type: string; // "confirmation" | "clarification" | "feedback" | "pause"
-  details: HitlConfirmationRequest | HitlClarificationRequest | HitlFeedbackRequest | HitlPauseRequest;
+  request_type: string; // "confirmation" | "clarification" | "feedback" | "pause" | "privacy_mode_confirmation"
+  details: HitlConfirmationRequest | HitlClarificationRequest | HitlFeedbackRequest | HitlPauseRequest | HitlPrivacyModeConfirmationRequest;
   status: HitlRequestStatus;
   created_at: string;
   updated_at?: string;
@@ -883,7 +898,8 @@ export type HitlResponseAction =
   | { action: 'abort'; reason?: string }
   | { action: 'clarify'; selected_option?: number; input?: string }
   | { action: 'provide_feedback'; rating?: number; comment?: string }
-  | { action: 'resume' };
+  | { action: 'resume' }
+  | { action: 'privacy_mode_choice'; use_privacy_mode: boolean; remember_choice?: boolean };
 
 /** Request to respond to a HITL request */
 export interface HitlRespondRequest {
