@@ -476,10 +476,15 @@ mod tests {
     #[test]
     fn test_update_result_add_side_effect_field() {
         let mut result = UpdateResult::new();
-        result.add_updated("chat.url");
+        // embedding.url is in SIDE_EFFECT_FIELDS and triggers service reload
+        result.add_updated("embedding.url");
         assert_eq!(result.updated_fields.len(), 1);
         assert_eq!(result.side_effect_fields.len(), 1);
-        assert!(result.side_effect_fields.contains(&"chat.url".to_string()));
+        assert!(
+            result
+                .side_effect_fields
+                .contains(&"embedding.url".to_string())
+        );
     }
 
     #[test]
@@ -497,12 +502,13 @@ mod tests {
     #[test]
     fn test_update_result_into_response_with_side_effects() {
         let mut result = UpdateResult::new();
-        result.add_updated("chat.url");
+        // embedding.url is in SIDE_EFFECT_FIELDS and triggers service reload
+        result.add_updated("embedding.url");
 
         let response = result.into_response();
         assert!(response.success);
         assert!(!response.requires_action.is_empty());
-        assert!(response.requires_action.contains_key("chat.url"));
+        assert!(response.requires_action.contains_key("embedding.url"));
     }
 
     #[test]

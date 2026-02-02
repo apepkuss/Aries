@@ -1067,4 +1067,237 @@ mod tests {
             HitlRequestStatus::Cancelled
         );
     }
+
+    // ============================================================================
+    // Privacy Mode Confirmation Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_create_privacy_confirmation_request() {
+        use crate::services::hitl::types::DetectedPrivacyPattern;
+
+        let manager = create_test_manager();
+
+        let patterns = vec![
+            DetectedPrivacyPattern {
+                category: "contact".to_string(),
+                description: "Phone number detected".to_string(),
+                masked_text: Some("138****5678".to_string()),
+            },
+            DetectedPrivacyPattern {
+                category: "personal_identification".to_string(),
+                description: "ID number detected".to_string(),
+                masked_text: Some("3101**********1234".to_string()),
+            },
+        ];
+
+        let request = manager
+            .create_privacy_confirmation_request(
+                "我的手机号是138****5678",
+                patterns,
+                "rule_based",
+                0.85,
+                "建议使用隐私模式以保护您的敏感信息",
+                "conv1",
+                "user1",
+            )
+            .await
+            .unwrap();
+
+        assert!(request.id.starts_with("hitl_"));
+        assert_eq!(request.status, HitlRequestStatus::Pending);
+        assert_eq!(request.conversation_id, "conv1");
+        assert_eq!(request.user_id, "user1");
+
+        // Verify request type is PrivacyModeConfirmation
+        match &request.request_type {
+            HitlRequestType::PrivacyModeConfirmation(privacy_req) => {
+                assert_eq!(privacy_req.query_summary, "我的手机号是138****5678");
+                assert_eq!(privacy_req.detection_method, "rule_based");
+                assert!((privacy_req.confidence - 0.85).abs() < f32::EPSILON);
+                assert_eq!(privacy_req.detected_patterns.len(), 2);
+                assert_eq!(privacy_req.detected_patterns[0].category, "contact");
+            }
+            _ => panic!("Expected PrivacyModeConfirmation request type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_privacy_mode_choice_response() {
+        use crate::services::hitl::types::DetectedPrivacyPattern;
+
+        let manager = create_test_manager();
+
+        let request = manager
+            .create_privacy_confirmation_request(
+                "测试隐私内容",
+                vec![DetectedPrivacyPattern {
+                    category: "credentials".to_string(),
+                    description: "API key detected".to_string(),
+                    masked_text: None,
+                }],
+                "rule_based",
+                0.9,
+                "建议使用隐私模式",
+                "conv1",
+                "user1",
+            )
+            .await
+            .unwrap();
+
+        // Test choosing privacy mode
+        let updated = manager
+            .handle_response(
+                &request.id,
+                "user1",
+                HitlResponse::PrivacyModeChoice {
+                    use_privacy_mode: true,
+                    remember_choice: false,
+                },
+            )
+            .await
+            .unwrap();
+
+        // PrivacyModeChoice uses Completed status (not Approved/Rejected)
+        assert_eq!(updated.status, HitlRequestStatus::Completed);
+        match &updated.response {
+            Some(HitlResponse::PrivacyModeChoice {
+                use_privacy_mode,
+                remember_choice,
+            }) => {
+                assert!(*use_privacy_mode);
+                assert!(!*remember_choice);
+            }
+            _ => panic!("Expected PrivacyModeChoice response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_privacy_mode_choice_normal_mode() {
+        use crate::services::hitl::types::DetectedPrivacyPattern;
+
+        let manager = create_test_manager();
+
+        let request = manager
+            .create_privacy_confirmation_request(
+                "可能包含隐私的消息",
+                vec![DetectedPrivacyPattern {
+                    category: "contact".to_string(),
+                    description: "Email detected".to_string(),
+                    masked_text: Some("t***@example.com".to_string()),
+                }],
+                "rule_based",
+                0.65,
+                "检测到可能包含敏感信息",
+                "conv1",
+                "user1",
+            )
+            .await
+            .unwrap();
+
+        // Test choosing normal mode with remember
+        let updated = manager
+            .handle_response(
+                &request.id,
+                "user1",
+                HitlResponse::PrivacyModeChoice {
+                    use_privacy_mode: false,
+                    remember_choice: true,
+                },
+            )
+            .await
+            .unwrap();
+
+        // PrivacyModeChoice uses Completed status regardless of choice
+        assert_eq!(updated.status, HitlRequestStatus::Completed);
+        match &updated.response {
+            Some(HitlResponse::PrivacyModeChoice {
+                use_privacy_mode,
+                remember_choice,
+            }) => {
+                assert!(!*use_privacy_mode);
+                assert!(*remember_choice);
+            }
+            _ => panic!("Expected PrivacyModeChoice response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_privacy_mode_response() {
+        use crate::services::hitl::types::{
+            DetectedPrivacyPattern, PrivacyModeConfirmationRequest,
+        };
+
+        let manager = create_test_manager();
+
+        let privacy_request =
+            HitlRequestType::PrivacyModeConfirmation(PrivacyModeConfirmationRequest {
+                query_summary: "测试消息".to_string(),
+                detected_patterns: vec![DetectedPrivacyPattern {
+                    category: "contact".to_string(),
+                    description: "Phone detected".to_string(),
+                    masked_text: None,
+                }],
+                detection_method: "rule_based".to_string(),
+                confidence: 0.8,
+                recommendation: "建议使用隐私模式".to_string(),
+            });
+
+        // PrivacyModeConfirmation + PrivacyModeChoice = OK
+        assert!(
+            manager
+                .validate_response(
+                    &privacy_request,
+                    &HitlResponse::PrivacyModeChoice {
+                        use_privacy_mode: true,
+                        remember_choice: false,
+                    },
+                )
+                .is_ok()
+        );
+
+        // PrivacyModeConfirmation + Abort = OK
+        assert!(
+            manager
+                .validate_response(&privacy_request, &HitlResponse::Abort { reason: None },)
+                .is_ok()
+        );
+
+        // PrivacyModeConfirmation + Approve = Error (wrong response type)
+        assert!(
+            manager
+                .validate_response(&privacy_request, &HitlResponse::Approve,)
+                .is_err()
+        );
+
+        // PrivacyModeConfirmation + Reject = Error (should use PrivacyModeChoice)
+        assert!(
+            manager
+                .validate_response(&privacy_request, &HitlResponse::Reject { reason: None },)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_response_to_status_privacy_mode() {
+        let manager = create_test_manager();
+
+        // PrivacyModeChoice always maps to Completed status
+        // (The actual choice is stored in the response, not the status)
+        assert_eq!(
+            manager.response_to_status(&HitlResponse::PrivacyModeChoice {
+                use_privacy_mode: true,
+                remember_choice: false,
+            }),
+            HitlRequestStatus::Completed
+        );
+
+        assert_eq!(
+            manager.response_to_status(&HitlResponse::PrivacyModeChoice {
+                use_privacy_mode: false,
+                remember_choice: true,
+            }),
+            HitlRequestStatus::Completed
+        );
+    }
 }

@@ -445,4 +445,59 @@ mod tests {
         // 由于规则未检测到，应该使用模型结果
         assert!(result.is_private);
     }
+
+    #[test]
+    fn test_config_toml_deserialization() {
+        // Test default config from TOML
+        let toml_str = r#"
+            enabled = true
+            mode = "rules_then_model"
+            rule_confidence_threshold = 0.7
+            enable_model_fallback = true
+            model_confidence_threshold = 0.85
+            custom_keywords = ["机密", "内部"]
+            min_text_length = 10
+        "#;
+
+        let config: PrivacyDetectorConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.mode, DetectionMode::RulesThenModel);
+        assert!((config.rule_confidence_threshold - 0.7).abs() < f32::EPSILON);
+        assert!(config.enable_model_fallback);
+        assert!((config.model_confidence_threshold - 0.85).abs() < f32::EPSILON);
+        assert_eq!(config.custom_keywords.len(), 2);
+        assert_eq!(config.min_text_length, 10);
+    }
+
+    #[test]
+    fn test_config_toml_mode_variants() {
+        // Test rules_only mode
+        let toml_str = r#"mode = "rules_only""#;
+        let config: PrivacyDetectorConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mode, DetectionMode::RulesOnly);
+
+        // Test model_only mode
+        let toml_str = r#"mode = "model_only""#;
+        let config: PrivacyDetectorConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mode, DetectionMode::ModelOnly);
+
+        // Test combined mode
+        let toml_str = r#"mode = "combined""#;
+        let config: PrivacyDetectorConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.mode, DetectionMode::Combined);
+    }
+
+    #[test]
+    fn test_config_toml_defaults() {
+        // Test minimal config uses defaults
+        let toml_str = r#""#;
+        let config: PrivacyDetectorConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.enabled);
+        assert_eq!(config.mode, DetectionMode::RulesThenModel);
+        assert!((config.rule_confidence_threshold - 0.6).abs() < f32::EPSILON);
+        assert!(config.enable_model_fallback);
+        assert!((config.model_confidence_threshold - 0.8).abs() < f32::EPSILON);
+        assert!(config.custom_keywords.is_empty());
+        assert_eq!(config.min_text_length, 5);
+    }
 }

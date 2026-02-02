@@ -7228,6 +7228,7 @@ mod tests {
 
     #[test]
     fn test_build_tools_json_structure() {
+        // Test with default (no parameters) - uses fallback empty schema
         let tools = vec![ToolDescription {
             name: "test-tool---test-server".to_string(),
             description: "A test tool".to_string(),
@@ -7240,6 +7241,28 @@ mod tests {
         assert_eq!(tool["type"], "function");
         assert_eq!(tool["function"]["name"], "test-tool---test-server");
         assert_eq!(tool["function"]["description"], "A test tool");
+        // Default fallback schema has empty properties
+        assert_eq!(tool["function"]["parameters"]["type"], "object");
+        assert!(tool["function"]["parameters"]["properties"].is_object());
+
+        // Test with actual MCP parameters schema
+        let tools_with_params = vec![ToolDescription {
+            name: "search---mcp-server".to_string(),
+            description: "Search tool".to_string(),
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    }
+                },
+                "required": ["query"]
+            })),
+        }];
+
+        let tools_json = build_tools_json(&tools_with_params, None);
+        let tool = &tools_json[0];
         assert!(tool["function"]["parameters"]["properties"]["query"].is_object());
         assert_eq!(tool["function"]["parameters"]["required"][0], "query");
     }

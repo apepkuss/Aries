@@ -1009,12 +1009,16 @@ mod tests {
 
     #[test]
     fn test_is_updatable_field() {
+        // Hot-updatable fields
         assert!(is_updatable_field("server.max_tools_per_iteration"));
-        assert!(is_updatable_field("chat.url"));
-        assert!(is_updatable_field("chat.api_key"));
         assert!(is_updatable_field("memory.auto_summarize"));
         assert!(is_updatable_field("rag.enable"));
+        assert!(is_updatable_field("embedding.url"));
+        assert!(is_updatable_field("embedding.api_key"));
 
+        // Non-updatable fields (require restart or not supported)
+        assert!(!is_updatable_field("chat.url"));
+        assert!(!is_updatable_field("chat.api_key"));
         assert!(!is_updatable_field("server.host"));
         assert!(!is_updatable_field("server.port"));
         assert!(!is_updatable_field("memory.enable"));

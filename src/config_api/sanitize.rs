@@ -324,7 +324,14 @@ mod tests {
                 .updatable_fields
                 .contains(&"server.max_tools_per_iteration".to_string())
         );
-        assert!(sanitized.updatable_fields.contains(&"chat.url".to_string()));
+        // chat.url is NOT in UPDATABLE_FIELDS (requires restart)
+        assert!(!sanitized.updatable_fields.contains(&"chat.url".to_string()));
+        // embedding.url IS in UPDATABLE_FIELDS
+        assert!(
+            sanitized
+                .updatable_fields
+                .contains(&"embedding.url".to_string())
+        );
         assert!(
             !sanitized
                 .updatable_fields
