@@ -64,6 +64,7 @@ use crate::{
         ReplanContext, ReplanTrigger, SubtaskInfo,
     },
     server::{RoutingPolicy, ServerKind},
+    services::hitl::types::{DetectedPrivacyPattern, HitlResponse},
     skills::{
         LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
         SkillSummary,
@@ -113,7 +114,7 @@ fn parse_internal_tool_name(full_name: &str) -> Option<&str> {
 pub(crate) async fn chat(
     State(state): State<Arc<AppState>>,
     Extension(cancel_token): Extension<CancellationToken>,
-    headers: HeaderMap,
+    mut headers: HeaderMap,
     Json(mut request): Json<ChatCompletionRequest>,
     conv_id: Option<String>,
     session_id: Option<String>,
@@ -121,15 +122,43 @@ pub(crate) async fn chat(
 ) -> ServerResult<axum::response::Response> {
     let request_id = request_id.as_ref();
 
-    // Get target server (route based on X-Privacy-Mode header)
-    let server_kind = resolve_chat_server_kind(&headers);
-    let chat_server = get_chat_server(&state, request_id, server_kind).await?;
-
-    // Extract user message for planning
+    // Extract user message for planning and privacy detection
     let user_message = extract_user_message(&request);
 
     // Extract system message for memory storage
     let system_message = extract_system_message(&request);
+
+    // Get user ID from request
+    let user_id = request.user.as_deref().unwrap_or("anonymous");
+
+    // Determine server kind with smart privacy detection
+    // This checks X-Privacy-Mode header first, then runs privacy detection if needed
+    let effective_conv_id = conv_id.as_deref().unwrap_or("default");
+    let server_kind = detect_and_confirm_privacy(
+        &state,
+        &headers,
+        user_message.as_deref(),
+        effective_conv_id,
+        user_id,
+        &cancel_token,
+    )
+    .await?;
+
+    // If smart detection determined privacy mode, set the header for downstream consistency
+    // This ensures that background tasks (like execute_chat_plan_realtime) see the correct mode
+    if server_kind == ServerKind::privacy_chat
+        && headers
+            .get("x-privacy-mode")
+            .and_then(|v| v.to_str().ok())
+            .is_none_or(|v| v != "true")
+    {
+        headers.insert(
+            "x-privacy-mode",
+            axum::http::HeaderValue::from_static("true"),
+        );
+    }
+
+    let chat_server = get_chat_server(&state, request_id, server_kind).await?;
 
     // Store the latest user message to memory
     if let Some(memory) = &state.memory
@@ -2536,6 +2565,202 @@ fn resolve_chat_server_kind(headers: &HeaderMap) -> ServerKind {
         ServerKind::privacy_chat
     } else {
         ServerKind::chat
+    }
+}
+
+/// Detects privacy content and confirms with user via HITL if needed.
+///
+/// This function implements the smart privacy detection flow:
+/// 1. Check if X-Privacy-Mode header is set (backward compatibility)
+/// 2. If not, run privacy detection on the user message
+/// 3. If privacy content detected, create HITL confirmation request
+/// 4. Wait for user response and return appropriate ServerKind
+///
+/// # Arguments
+/// * `state` - Application state containing privacy detector
+/// * `headers` - HTTP headers (for X-Privacy-Mode check)
+/// * `user_message` - The user's message to analyze
+/// * `conv_id` - Conversation ID for HITL request
+/// * `user_id` - User ID for HITL request
+/// * `cancel_token` - Cancellation token for async operations
+///
+/// # Returns
+/// * `ServerKind::privacy_chat` if privacy mode should be used
+/// * `ServerKind::chat` for normal mode
+async fn detect_and_confirm_privacy(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    user_message: Option<&str>,
+    conv_id: &str,
+    user_id: &str,
+    cancel_token: &CancellationToken,
+) -> ServerResult<ServerKind> {
+    // 1. Check if X-Privacy-Mode header is explicitly set (backward compatibility)
+    let manual_privacy = headers
+        .get("x-privacy-mode")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == "true");
+
+    if manual_privacy {
+        dual_debug!("Privacy mode enabled via X-Privacy-Mode header");
+        return Ok(ServerKind::privacy_chat);
+    }
+
+    // 2. Check if privacy detection is enabled and we have a message to analyze
+    let Some(detector) = state.privacy_detector() else {
+        dual_debug!("Privacy detection not configured, using normal chat");
+        return Ok(ServerKind::chat);
+    };
+
+    let Some(message) = user_message else {
+        dual_debug!("No user message to analyze, using normal chat");
+        return Ok(ServerKind::chat);
+    };
+
+    // 3. Run privacy detection
+    let detection_result = match detector.detect(message) {
+        Ok(result) => result,
+        Err(crate::services::privacy::PrivacyDetectionError::NotEnabled) => {
+            dual_debug!("Privacy detection not enabled");
+            return Ok(ServerKind::chat);
+        }
+        Err(e) => {
+            dual_warn!("Privacy detection failed: {}, using normal chat", e);
+            return Ok(ServerKind::chat);
+        }
+    };
+
+    // 5. If no privacy content detected, use normal chat
+    if !detection_result.is_private {
+        dual_debug!("No privacy content detected, using normal chat");
+        return Ok(ServerKind::chat);
+    }
+
+    dual_info!(
+        "Privacy content detected (confidence: {:.2}), requesting user confirmation",
+        detection_result.confidence
+    );
+
+    // 6. Check if HITL is available
+    let Some(hitl_manager) = hitl::global() else {
+        dual_warn!("HITL not available, defaulting to privacy mode for safety");
+        return Ok(ServerKind::privacy_chat);
+    };
+
+    // 7. Convert detection patterns to HITL format
+    let detected_patterns: Vec<DetectedPrivacyPattern> = detection_result
+        .matched_patterns
+        .iter()
+        .map(|p| {
+            let category_str = format!("{:?}", p.category).to_lowercase();
+            DetectedPrivacyPattern {
+                category: category_str,
+                description: p.pattern_type.clone(),
+                masked_text: p.matched_text.clone(),
+            }
+        })
+        .collect();
+
+    // 8. Create summarized/masked query for display
+    let query_summary = if message.len() > 100 {
+        format!("{}...", &message[..100])
+    } else {
+        message.to_string()
+    };
+
+    // 9. Determine detection method string
+    let detection_method = match detection_result.detection_method {
+        crate::services::privacy::DetectionMethod::RuleBased => "rule_based",
+        crate::services::privacy::DetectionMethod::ModelInference => "model_inference",
+        crate::services::privacy::DetectionMethod::Combined => "combined",
+    };
+
+    // 10. Generate recommendation
+    let recommendation = if detection_result.confidence > 0.8 {
+        "建议使用隐私模式以保护您的敏感信息"
+    } else {
+        "检测到可能包含敏感信息，您可以选择是否使用隐私模式"
+    };
+
+    // 11. Create HITL privacy confirmation request
+    let request = match hitl_manager
+        .create_privacy_confirmation_request(
+            &query_summary,
+            detected_patterns,
+            detection_method,
+            detection_result.confidence,
+            recommendation,
+            conv_id,
+            user_id,
+        )
+        .await
+    {
+        Ok(req) => req,
+        Err(e) => {
+            dual_error!("Failed to create HITL privacy confirmation: {}", e);
+            // Default to privacy mode for safety on error
+            return Ok(ServerKind::privacy_chat);
+        }
+    };
+
+    let hitl_request_id = request.id.clone();
+    dual_info!(
+        "Waiting for user privacy mode choice - request_id: {}",
+        hitl_request_id
+    );
+
+    // 12. Wait for user response (with cancellation support)
+    let response = match hitl_manager
+        .wait_for_response_with_cancel(&hitl_request_id, Some(cancel_token))
+        .await
+    {
+        Ok(resp) => resp,
+        Err(hitl::HitlError::Cancelled(_)) => {
+            dual_info!("Privacy confirmation cancelled, using normal chat");
+            return Ok(ServerKind::chat);
+        }
+        Err(hitl::HitlError::Timeout(behavior)) => {
+            dual_warn!("Privacy confirmation timed out (behavior: {:?})", behavior);
+            // Default to privacy mode on timeout for safety
+            return Ok(ServerKind::privacy_chat);
+        }
+        Err(e) => {
+            dual_error!("HITL wait failed: {}, defaulting to privacy mode", e);
+            return Ok(ServerKind::privacy_chat);
+        }
+    };
+
+    // 13. Process user response
+    match response {
+        HitlResponse::PrivacyModeChoice {
+            use_privacy_mode,
+            remember_choice,
+        } => {
+            if remember_choice {
+                dual_debug!(
+                    "User chose to remember privacy mode choice: {}",
+                    use_privacy_mode
+                );
+                // TODO: Store user preference for session
+            }
+
+            if use_privacy_mode {
+                dual_info!("User confirmed privacy mode");
+                Ok(ServerKind::privacy_chat)
+            } else {
+                dual_info!("User chose normal mode");
+                Ok(ServerKind::chat)
+            }
+        }
+        HitlResponse::Abort { reason } => {
+            dual_info!("User aborted privacy confirmation: {:?}", reason);
+            // Default to normal chat on abort
+            Ok(ServerKind::chat)
+        }
+        _ => {
+            dual_warn!("Unexpected HITL response for privacy confirmation, using privacy mode");
+            Ok(ServerKind::privacy_chat)
+        }
     }
 }
 

@@ -366,6 +366,38 @@ storage_path = "~/.aries/history"     # Directory for storing session JSONL file
 
 
 # ============================================================================
+# SECTION 1.12: SMART PRIVACY DETECTION CONFIGURATION
+# ============================================================================
+# The smart privacy detection system automatically detects privacy-sensitive
+# content in user queries and prompts users to confirm whether to use privacy
+# mode. This replaces the manual "New Chat In Privacy" button with intelligent
+# detection.
+#
+# Detection modes:
+#   - "rules_only": Use only rule-based detection (keywords + regex patterns)
+#   - "rules_then_model": Rules first, model fallback if rules uncertain (default)
+#   - "model_only": Use only LLM-based detection
+#   - "combined": Use both rules and model, merge results
+#
+# When privacy content is detected, a HITL confirmation request is sent to the
+# user. Users can choose to:
+#   - Use privacy mode (routes to privacy_chat service)
+#   - Continue with normal mode (routes to chat service)
+#   - Remember choice for the session
+
+[privacy_detection]
+enabled = true                        # Enable smart privacy detection (default: true)
+mode = "rules_then_model"             # Detection mode (default: rules_then_model)
+rule_confidence_threshold = 0.6       # Minimum confidence for rule-based detection (0.0-1.0)
+enable_model_fallback = true          # Enable LLM fallback when rules are uncertain
+model_confidence_threshold = 0.8      # Minimum confidence for model-based detection (0.0-1.0)
+min_text_length = 5                   # Skip detection for very short texts (default: 5 chars)
+
+# Custom keywords to detect as privacy-sensitive (in addition to built-in keywords)
+# custom_keywords = ["机密", "internal only", "confidential"]
+
+
+# ============================================================================
 # SECTION 2: AI SERVICE CONFIGURATION
 # ============================================================================
 # This section contains configuration for AI services including chat and

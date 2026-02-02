@@ -34,6 +34,11 @@ pub struct PrivacyDetectorConfig {
     pub enabled: bool,
 
     /// 检测模式
+    ///
+    /// - `rules_only`: 仅使用规则检测（关键词 + 正则模式），不调用模型
+    /// - `rules_then_model`: 规则优先检测，若规则未匹配或置信度不足则调用模型兜底（默认）
+    /// - `model_only`: 仅使用 LLM 模型检测，跳过规则检测
+    /// - `combined`: 规则和模型并行执行，合并两者结果（取并集）
     #[serde(default)]
     pub mode: DetectionMode,
 
@@ -52,10 +57,6 @@ pub struct PrivacyDetectorConfig {
     /// 自定义敏感词列表
     #[serde(default)]
     pub custom_keywords: Vec<String>,
-
-    /// 白名单用户（跳过检测）
-    #[serde(default)]
-    pub whitelist_users: Vec<String>,
 
     /// 最小文本长度（低于此长度跳过检测）
     #[serde(default = "default_min_text_length")]
@@ -91,7 +92,6 @@ impl Default for PrivacyDetectorConfig {
             enable_model_fallback: default_enable_model_fallback(),
             model_confidence_threshold: default_model_confidence_threshold(),
             custom_keywords: Vec::new(),
-            whitelist_users: Vec::new(),
             min_text_length: default_min_text_length(),
         }
     }
@@ -124,11 +124,6 @@ impl PrivacyDetector {
         Self::new(PrivacyDetectorConfig::default())
     }
 
-    /// 检查用户是否在白名单中
-    pub fn is_user_whitelisted(&self, user_id: &str) -> bool {
-        self.config.whitelist_users.iter().any(|u| u == user_id)
-    }
-
     /// 执行隐私检测（仅规则）
     ///
     /// # 参数
@@ -144,33 +139,21 @@ impl PrivacyDetector {
     ///
     /// # 参数
     /// - `text`: 待检测的文本
-    /// - `user_id`: 用户 ID（可选，用于白名单检查）
     ///
     /// # 返回
     /// 隐私检测结果或错误
-    pub fn detect(
-        &self,
-        text: &str,
-        user_id: Option<&str>,
-    ) -> Result<PrivacyDetectionResult, PrivacyDetectionError> {
+    pub fn detect(&self, text: &str) -> Result<PrivacyDetectionResult, PrivacyDetectionError> {
         // 1. 检查是否启用
         if !self.config.enabled {
             return Err(PrivacyDetectionError::NotEnabled);
         }
 
-        // 2. 检查白名单
-        if let Some(uid) = user_id
-            && self.is_user_whitelisted(uid)
-        {
-            return Ok(PrivacyDetectionResult::not_private());
-        }
-
-        // 3. 检查文本长度
+        // 2. 检查文本长度
         if text.chars().count() < self.config.min_text_length {
             return Ok(PrivacyDetectionResult::not_private());
         }
 
-        // 4. 根据检测模式执行检测
+        // 3. 根据检测模式执行检测
         match self.config.mode {
             DetectionMode::RulesOnly => Ok(self.detect_rules_only(text)),
             DetectionMode::RulesThenModel | DetectionMode::Combined | DetectionMode::ModelOnly => {
@@ -217,7 +200,6 @@ impl PrivacyDetector {
     ///
     /// # 参数
     /// - `text`: 待检测的文本
-    /// - `user_id`: 用户 ID（可选）
     /// - `model_response`: 模型检测的响应（如果需要模型检测）
     ///
     /// # 返回
@@ -225,7 +207,6 @@ impl PrivacyDetector {
     pub fn detect_with_model(
         &self,
         text: &str,
-        user_id: Option<&str>,
         model_response: Option<&str>,
     ) -> Result<PrivacyDetectionResult, PrivacyDetectionError> {
         // 1. 检查是否启用
@@ -233,19 +214,12 @@ impl PrivacyDetector {
             return Err(PrivacyDetectionError::NotEnabled);
         }
 
-        // 2. 检查白名单
-        if let Some(uid) = user_id
-            && self.is_user_whitelisted(uid)
-        {
-            return Ok(PrivacyDetectionResult::not_private());
-        }
-
-        // 3. 检查文本长度
+        // 2. 检查文本长度
         if text.chars().count() < self.config.min_text_length {
             return Ok(PrivacyDetectionResult::not_private());
         }
 
-        // 4. 根据检测模式执行检测
+        // 3. 根据检测模式执行检测
         match self.config.mode {
             DetectionMode::RulesOnly => Ok(self.detect_rules_only(text)),
 
@@ -296,24 +270,12 @@ impl PrivacyDetector {
     ///
     /// # 参数
     /// - `text`: 待检测的文本
-    /// - `user_id`: 用户 ID（可选）
     ///
     /// # 返回
     /// 是否需要调用模型进行检测
-    pub fn needs_model_detection(
-        &self,
-        text: &str,
-        user_id: Option<&str>,
-    ) -> Result<bool, PrivacyDetectionError> {
+    pub fn needs_model_detection(&self, text: &str) -> Result<bool, PrivacyDetectionError> {
         // 检查是否启用
         if !self.config.enabled {
-            return Ok(false);
-        }
-
-        // 检查白名单
-        if let Some(uid) = user_id
-            && self.is_user_whitelisted(uid)
-        {
             return Ok(false);
         }
 
@@ -381,20 +343,8 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let result = detector.detect("我的手机号是13812345678", None);
+        let result = detector.detect("我的手机号是13812345678");
         assert!(matches!(result, Err(PrivacyDetectionError::NotEnabled)));
-    }
-
-    #[test]
-    fn test_detect_whitelisted_user() {
-        let config = PrivacyDetectorConfig {
-            whitelist_users: vec!["admin".to_string()],
-            ..Default::default()
-        };
-        let detector = PrivacyDetector::new(config);
-
-        let result = detector.detect("我的身份证号是...", Some("admin")).unwrap();
-        assert!(!result.is_private);
     }
 
     #[test]
@@ -405,7 +355,7 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let result = detector.detect("hi", None).unwrap();
+        let result = detector.detect("hi").unwrap();
         assert!(!result.is_private);
     }
 
@@ -417,7 +367,7 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let result = detector.detect("我的手机号是13812345678", None).unwrap();
+        let result = detector.detect("我的手机号是13812345678").unwrap();
         assert!(result.is_private);
     }
 
@@ -429,7 +379,7 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let result = detector.detect("这是机密文档", None).unwrap();
+        let result = detector.detect("这是机密文档").unwrap();
         assert!(result.is_private);
     }
 
@@ -441,7 +391,7 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let needs_model = detector.needs_model_detection("some text", None).unwrap();
+        let needs_model = detector.needs_model_detection("some text").unwrap();
         assert!(!needs_model);
     }
 
@@ -453,9 +403,7 @@ mod tests {
         };
         let detector = PrivacyDetector::new(config);
 
-        let needs_model = detector
-            .needs_model_detection("some text here", None)
-            .unwrap();
+        let needs_model = detector.needs_model_detection("some text here").unwrap();
         assert!(needs_model);
     }
 
@@ -470,14 +418,12 @@ mod tests {
 
         // 规则检测到隐私，不需要模型
         let needs_model = detector
-            .needs_model_detection("我的手机号是13812345678", None)
+            .needs_model_detection("我的手机号是13812345678")
             .unwrap();
         assert!(!needs_model);
 
         // 规则未检测到，需要模型
-        let needs_model = detector
-            .needs_model_detection("今天天气很好啊", None)
-            .unwrap();
+        let needs_model = detector.needs_model_detection("今天天气很好啊").unwrap();
         assert!(needs_model);
     }
 
@@ -493,23 +439,10 @@ mod tests {
         let model_response = r#"{"is_private": true, "confidence": 0.9, "categories": ["financial"], "reason": "包含财务信息"}"#;
 
         let result = detector
-            .detect_with_model("请帮我处理一些事情", None, Some(model_response))
+            .detect_with_model("请帮我处理一些事情", Some(model_response))
             .unwrap();
 
         // 由于规则未检测到，应该使用模型结果
         assert!(result.is_private);
-    }
-
-    #[test]
-    fn test_is_user_whitelisted() {
-        let config = PrivacyDetectorConfig {
-            whitelist_users: vec!["admin".to_string(), "system".to_string()],
-            ..Default::default()
-        };
-        let detector = PrivacyDetector::new(config);
-
-        assert!(detector.is_user_whitelisted("admin"));
-        assert!(detector.is_user_whitelisted("system"));
-        assert!(!detector.is_user_whitelisted("user1"));
     }
 }

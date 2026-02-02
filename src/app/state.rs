@@ -17,6 +17,7 @@ use crate::{
     config::Config,
     error::{ServerError, ServerResult},
     handlers, info, memory, server,
+    services::privacy::PrivacyDetector,
 };
 
 /// Application state
@@ -32,10 +33,18 @@ pub struct AppState {
     pub(crate) session_writer: Option<crate::session::writer::SessionWriter>,
     /// Timestamp of the last API-based config update (for conflict detection with file watcher)
     pub(crate) last_config_update_time: RwLock<Option<Instant>>,
+    /// Privacy detector for smart privacy mode detection
+    pub(crate) privacy_detector: Option<PrivacyDetector>,
 }
 
 impl AppState {
     pub fn new(config: Config, server_info: info::ServerInfo) -> Self {
+        // Initialize privacy detector if configured
+        let privacy_detector = config
+            .privacy_detection
+            .as_ref()
+            .map(|config| PrivacyDetector::new(config.clone()));
+
         Self {
             server_group: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(config)),
@@ -45,6 +54,7 @@ impl AppState {
             memory: None,
             session_writer: None,
             last_config_update_time: RwLock::new(None),
+            privacy_detector,
         }
     }
 
@@ -87,6 +97,16 @@ impl AppState {
     /// Check if session history writer is enabled
     pub fn has_session_writer(&self) -> bool {
         self.session_writer.is_some()
+    }
+
+    /// Check if privacy detection is enabled
+    pub fn has_privacy_detector(&self) -> bool {
+        self.privacy_detector.is_some()
+    }
+
+    /// Get the privacy detector reference (if enabled)
+    pub fn privacy_detector(&self) -> Option<&PrivacyDetector> {
+        self.privacy_detector.as_ref()
     }
 
     pub async fn register_downstream_server(&self, server: server::Server) -> ServerResult<()> {

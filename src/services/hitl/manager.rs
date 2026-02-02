@@ -165,6 +165,45 @@ impl HitlManager {
         .await
     }
 
+    /// 创建隐私模式确认请求
+    ///
+    /// 当检测到用户查询包含隐私内容时，创建此请求让用户确认是否使用隐私模式。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_privacy_confirmation_request(
+        &self,
+        query_summary: &str,
+        detected_patterns: Vec<super::types::DetectedPrivacyPattern>,
+        detection_method: &str,
+        confidence: f32,
+        recommendation: &str,
+        conversation_id: &str,
+        user_id: &str,
+    ) -> Result<HitlRequest, HitlError> {
+        let privacy_request = super::types::PrivacyModeConfirmationRequest {
+            query_summary: query_summary.to_string(),
+            detected_patterns,
+            detection_method: detection_method.to_string(),
+            confidence,
+            recommendation: recommendation.to_string(),
+        };
+
+        // 使用配置的默认超时时间和行为
+        let timeout_secs = self.config.default_timeout_secs;
+        let timeout_behavior = self.config.default_timeout_behavior;
+
+        self.create_request(
+            HitlRequestType::PrivacyModeConfirmation(privacy_request),
+            conversation_id,
+            user_id,
+            timeout_secs,
+            timeout_behavior,
+            std::collections::HashMap::new(),
+            None,
+            None,
+        )
+        .await
+    }
+
     /// 创建 HITL 请求
     #[allow(clippy::too_many_arguments)]
     pub async fn create_request(

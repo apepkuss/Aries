@@ -77,6 +77,9 @@ pub struct Config {
     /// Session history configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionConfig>,
+    /// Privacy detection configuration for smart privacy mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub privacy_detection: Option<crate::services::privacy::PrivacyDetectorConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -140,6 +143,7 @@ impl Default for Config {
             subagent: None,
             hitl: None,
             session: None,
+            privacy_detection: None,
         }
     }
 }
