@@ -2,12 +2,17 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 type Theme = 'light' | 'dark' | 'system';
+type ActiveView = 'chat' | 'skills';
 
 interface UIState {
   // Sidebar
   sidebarOpen: boolean;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
+
+  // Active view
+  activeView: ActiveView;
+  setActiveView: (view: ActiveView) => void;
 
   // Artifacts panel
   artifactsPanelOpen: boolean;
@@ -34,6 +39,10 @@ export const useUIStore = create<UIState>()(
       sidebarOpen: false,
       toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
+
+      // Active view
+      activeView: 'chat',
+      setActiveView: (view) => set({ activeView: view }),
 
       // Artifacts panel
       artifactsPanelOpen: false,

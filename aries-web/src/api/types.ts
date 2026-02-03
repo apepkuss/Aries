@@ -379,21 +379,28 @@ export interface BatchDeleteSessionsResponse {
 // Skills API Types
 // ============================================================================
 
-export interface Skill {
+export interface SkillSummary {
+  name: string;
+  description: string;
+  allowed_tools: string[];
+  parameters?: Record<string, unknown>;
+}
+
+export interface SkillDetail {
   name: string;
   description: string;
   enabled: boolean;
-  tools: string[];
+  license?: string;
+  allowed_tools: string[];
+  allowed_scripts?: string[];
+  scripts: string[];
+  content: string;
+  parameters?: Record<string, unknown>;
 }
 
-export interface SkillDetail extends Skill {
-  version?: string;
-  author?: string;
-  source_path?: string;
-}
-
-export interface SkillsListResponse {
-  skills: Skill[];
+export interface SkillListResponse {
+  skills: SkillSummary[];
+  total: number;
 }
 
 // ============================================================================

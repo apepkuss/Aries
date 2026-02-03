@@ -10,3 +10,4 @@ export {
   usePendingHitlRequests,
   useHitlRequestCount,
 } from './hitl';
+export { useSkillsStore } from './skills';
