@@ -87,6 +87,11 @@ async fn main() -> ServerResult<()> {
         if memory_config.enable {
             aries::dual_info!("Memory system is enabled");
 
+            // Expand tilde in database path
+            let mut memory_config = memory_config.clone();
+            memory_config.database_path =
+                shellexpand::tilde(&memory_config.database_path).to_string();
+
             // Ensure data directory exists
             if let Some(parent) = std::path::Path::new(&memory_config.database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
@@ -96,7 +101,7 @@ async fn main() -> ServerResult<()> {
                 })?;
             }
 
-            match memory::CompleteChatMemory::new(memory_config.clone()).await {
+            match memory::CompleteChatMemory::new(memory_config).await {
                 Ok(memory_system) => {
                     aries::dual_info!("Memory system initialized successfully");
                     Some(Arc::new(memory_system))

@@ -266,11 +266,12 @@ impl DockerExecutor {
             .iter()
             .filter_map(|data_dir| {
                 let (host_path, container_path) = if let Some(pos) = data_dir.find(':') {
-                    let host = &data_dir[..pos];
+                    let host = shellexpand::tilde(&data_dir[..pos]).to_string();
                     let container = &data_dir[pos + 1..];
                     (PathBuf::from(host), PathBuf::from(container))
                 } else {
-                    (PathBuf::from(data_dir), PathBuf::from(data_dir))
+                    let expanded = shellexpand::tilde(data_dir).to_string();
+                    (PathBuf::from(&expanded), PathBuf::from(&expanded))
                 };
 
                 debug!(

@@ -33,7 +33,7 @@ port = 3389          # The port to listen on.
 # Memory configuration
 [memory]
 enable = false                                    # Enable/disable memory functionality
-database_path = "data/memory.db"                 # Path to SQLite database file or URL
+database_path = "~/.aries/data/memory.db"                 # Path to SQLite database file or URL
                                                  # Examples:
                                                  #   - Simple path: "data/memory.db", "/tmp/app.db"
                                                  #   - SQLite URL: "sqlite:data/memory.db?mode=rwc"
@@ -130,7 +130,7 @@ file_access_mode = "auto"
 # Format: "/host/path" or "/host/path:/container/path"
 # Files in these directories can be accessed directly via absolute paths
 data_dirs = [
-    "/path/to/skills",  # Skills directory (for accessing example files)
+    "~/aries/skills",  # Skills directory (for accessing example files)
     "/path/to/data:/data",               # Custom data directory
 ]
 
@@ -361,7 +361,7 @@ confirmation_threshold = "medium"     # Minimum risk level that requires confirm
 
 [session]
 enable = true                         # Enable session history recording (default: true)
-storage_path = "~/.aries/history"     # Directory for storing session JSONL files
+storage_path = "~/.aries/sessions"     # Directory for storing session JSONL files
                                       # Supports ~ for home directory expansion
 
 

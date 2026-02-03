@@ -1343,6 +1343,15 @@ pub struct SkillMarketConfig {
     pub cache_dir: Option<String>,
 }
 
+impl SkillMarketConfig {
+    /// Returns the cache directory with tilde expanded, if configured.
+    pub fn expanded_cache_dir(&self) -> Option<String> {
+        self.cache_dir
+            .as_ref()
+            .map(|dir| shellexpand::tilde(dir).to_string())
+    }
+}
+
 impl Default for SkillMarketConfig {
     fn default() -> Self {
         Self {
