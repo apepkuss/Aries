@@ -181,6 +181,14 @@ export const useHitlStore = create<HitlState>((set, get) => ({
       const response = await getPendingRequests(conversationId);
       const requests = new Map<string, UIHitlRequest>();
 
+      // Debug: log fetched requests
+      if (response.requests.length > 0) {
+        console.log('[HITL Store] Fetched requests:', response.requests.length);
+        response.requests.forEach((req) => {
+          console.log('[HITL Store] Request:', req.id, 'type:', req.request_type.type, 'status:', req.status);
+        });
+      }
+
       for (const req of response.requests) {
         requests.set(req.id, toUIRequest(req));
       }

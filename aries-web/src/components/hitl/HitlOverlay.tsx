@@ -66,6 +66,11 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
     ? pendingRequests.filter((r) => r.conversation_id === conversationId)
     : pendingRequests;
 
+  // Debug logging
+  console.log('[HitlOverlay] Pending requests:', pendingRequests.length);
+  console.log('[HitlOverlay] Relevant requests:', relevantRequests.length);
+  console.log('[HitlOverlay] Request types:', relevantRequests.map(r => r.request_type.type));
+
   const handleDialogOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
@@ -122,13 +127,27 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
     return null;
   }
 
+  // Separate privacy confirmation requests from regular requests
+  const pendingRegularRequests = relevantRequests.filter(
+    (r) => r.status === 'pending' && r.request_type.type !== 'privacy_mode_confirmation'
+  );
+  const pendingPrivacyRequest = relevantRequests.find(
+    (r) => r.status === 'pending' && r.request_type.type === 'privacy_mode_confirmation'
+  );
+
+  // Privacy confirmation dialog should auto-open (no banner needed)
+  const privacyDialogOpen = pendingPrivacyRequest !== undefined;
+
+  console.log('[HitlOverlay] Regular requests:', pendingRegularRequests.length);
+  console.log('[HitlOverlay] Privacy request found:', !!pendingPrivacyRequest);
+  console.log('[HitlOverlay] Privacy dialog should be open:', privacyDialogOpen);
+
   return (
     <>
-      {/* Notification banners for pending requests */}
-      <div className={cn('space-y-2', className)}>
-        {relevantRequests
-          .filter((r) => r.status === 'pending')
-          .map((request) => (
+      {/* Notification banners for regular pending requests only */}
+      {pendingRegularRequests.length > 0 && (
+        <div className={cn('space-y-2', className)}>
+          {pendingRegularRequests.map((request) => (
             <HitlNotificationBanner
               key={request.id}
               request={request}
@@ -137,19 +156,28 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
               onViewDetails={() => handleViewDetails(request.id)}
             />
           ))}
-      </div>
+        </div>
+      )}
 
-      {/* Confirmation dialog - render based on request type */}
-      {activeRequest?.request_type.type === 'privacy_mode_confirmation' ? (
+      {/* Privacy mode confirmation dialog - auto-opens when there's a pending request */}
+      {pendingPrivacyRequest && (
         <PrivacyModeConfirmationDialog
-          request={activeRequest || null}
-          open={dialogOpen}
-          onOpenChange={handleDialogOpenChange}
+          request={pendingPrivacyRequest}
+          open={privacyDialogOpen}
+          onOpenChange={(open) => {
+            // If user closes dialog without choosing, treat as "continue normally"
+            if (!open && pendingPrivacyRequest) {
+              handlePrivacyModeChoice(pendingPrivacyRequest.id, false, false);
+            }
+          }}
           onChoosePrivacyMode={handlePrivacyModeChoice}
         />
-      ) : (
+      )}
+
+      {/* Regular confirmation dialog - only for non-privacy requests */}
+      {activeRequest && activeRequest.request_type.type !== 'privacy_mode_confirmation' && (
         <HitlConfirmationDialog
-          request={activeRequest || null}
+          request={activeRequest}
           open={dialogOpen}
           onOpenChange={handleDialogOpenChange}
           onApprove={handleApprove}

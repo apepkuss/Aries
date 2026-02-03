@@ -16,12 +16,16 @@ export function MessageList() {
 
   if (messages.length === 0) {
     return (
-      <div className="flex-1 min-h-0 flex items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <p className="text-lg font-medium">Welcome to Aries</p>
-          <p className="text-sm">Start a conversation by typing a message below</p>
+      <>
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+          <div className="text-center text-muted-foreground">
+            <p className="text-lg font-medium">Welcome to Aries</p>
+            <p className="text-sm">Start a conversation by typing a message below</p>
+          </div>
         </div>
-      </div>
+        {/* HITL overlay needs to be rendered even when no messages */}
+        <HitlOverlay />
+      </>
     );
   }
 

@@ -13,11 +13,16 @@ import type {
  * Convert backend API response to frontend HitlRequest format
  */
 function convertApiResponseToHitlRequest(apiResponse: HitlRequestFromApi): HitlRequest {
+  // Debug: log raw API response
+  console.log('[HITL API] Raw API response for', apiResponse.id, ':', JSON.stringify(apiResponse, null, 2));
+
   // Convert request_type string + details to the { type, data } format
   const requestType: HitlRequestType = {
-    type: apiResponse.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause',
+    type: apiResponse.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause' | 'privacy_mode_confirmation',
     data: apiResponse.details,
   } as HitlRequestType;
+
+  console.log('[HITL API] Converted request_type:', requestType);
 
   return {
     id: apiResponse.id,
@@ -42,6 +47,12 @@ interface BackendRespondRequest {
   data?: Record<string, unknown>;
 }
 
+/** Raw API response from list pending requests */
+interface HitlPendingListResponseFromApi {
+  requests: HitlRequestFromApi[];
+  total: number;
+}
+
 /**
  * Get all pending HITL requests for the current conversation
  * @param conversationId - Optional conversation ID to filter by
@@ -53,9 +64,15 @@ export async function getPendingRequests(
     ? { conversation_id: conversationId }
     : undefined;
 
-  return apiClient
+  const apiResponse = await apiClient
     .get('api/hitl/pending', { searchParams })
-    .json<HitlPendingListResponse>();
+    .json<HitlPendingListResponseFromApi>();
+
+  // Convert API format to frontend format
+  return {
+    requests: apiResponse.requests.map(convertApiResponseToHitlRequest),
+    total: apiResponse.total,
+  };
 }
 
 /**

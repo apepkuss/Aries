@@ -3,12 +3,15 @@ import { Toaster } from '@/components/ui/sonner';
 import { Layout } from '@/components/layout';
 import { ChatContainer } from '@/components/chat';
 import { ConfigPanel } from '@/components/settings';
-import { useTheme } from '@/hooks';
+import { useTheme, useHitlEventSource } from '@/hooks';
 import { useConfigStore, useServiceStore } from '@/stores';
 
 function App() {
   // Apply theme
   useTheme();
+
+  // Subscribe to HITL SSE events
+  useHitlEventSource();
 
   // Load config on app startup
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
