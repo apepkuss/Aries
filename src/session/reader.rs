@@ -101,6 +101,52 @@ impl SessionReader {
         Ok(())
     }
 
+    /// Delete multiple sessions by ID. Returns which ones succeeded and which failed.
+    pub async fn delete_sessions(
+        &self,
+        user_id: &str,
+        session_ids: &[String],
+    ) -> BatchDeleteResult {
+        let mut deleted = Vec::new();
+        let mut failed = Vec::new();
+
+        for sid in session_ids {
+            let path = self.session_file_path(user_id, sid);
+            if path.exists() {
+                match fs::remove_file(&path).await {
+                    Ok(()) => deleted.push(sid.clone()),
+                    Err(_) => failed.push(sid.clone()),
+                }
+            } else {
+                failed.push(sid.clone());
+            }
+        }
+
+        BatchDeleteResult { deleted, failed }
+    }
+
+    /// Delete all sessions for a user. Returns the number of deleted files.
+    pub async fn delete_all_sessions(&self, user_id: &str) -> SessionResult<usize> {
+        let user_dir = self.base_dir.join(user_id);
+        if !user_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        let mut entries = fs::read_dir(&user_dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                && fs::remove_file(&path).await.is_ok()
+            {
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
     /// Extract metadata from a session JSONL file.
     ///
     /// Reads the first line for `session_start` data, counts message lines,
@@ -206,6 +252,7 @@ mod tests {
                 sequence: seq,
                 tokens: None,
                 tool_calls: None,
+                privacy_mode: false,
             };
             writer
                 .append_message("user_1", &session_id, "test-model", record)
@@ -318,6 +365,7 @@ mod tests {
                     sequence: seq1,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await
@@ -341,6 +389,7 @@ mod tests {
                         completion: 20,
                     }),
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await
@@ -444,6 +493,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await
@@ -472,6 +522,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await
@@ -530,6 +581,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await
@@ -583,6 +635,7 @@ mod tests {
                         sequence: seq,
                         tokens: None,
                         tool_calls: None,
+                        privacy_mode: false,
                     },
                 )
                 .await
@@ -635,6 +688,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await

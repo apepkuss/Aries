@@ -51,6 +51,24 @@ pub struct DeleteSessionResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BatchDeleteSessionsRequest {
+    pub user_id: String,
+    /// If provided and non-empty, delete only these sessions.
+    /// If absent or empty, delete ALL sessions for the user.
+    #[serde(default)]
+    pub session_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchDeleteSessionsResponse {
+    pub success: bool,
+    pub deleted_count: usize,
+    pub deleted_ids: Vec<String>,
+    pub failed_ids: Vec<String>,
+    pub message: String,
+}
+
 // ============================================================================
 // Handlers
 // ============================================================================
@@ -99,6 +117,43 @@ pub async fn delete_session_handler(
         session_id,
         message: "Session deleted successfully".to_string(),
     }))
+}
+
+/// POST /v1/sessions/batch-delete
+///
+/// Batch delete sessions.
+/// - If `session_ids` is non-empty, delete only those sessions.
+/// - If `session_ids` is empty, delete ALL sessions for the user.
+pub async fn batch_delete_sessions_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<BatchDeleteSessionsRequest>,
+) -> Result<Json<BatchDeleteSessionsResponse>, SessionApiError> {
+    let reader = get_reader(&state)?;
+
+    if body.session_ids.is_empty() {
+        // Delete all sessions
+        let count = reader.delete_all_sessions(&body.user_id).await?;
+        Ok(Json(BatchDeleteSessionsResponse {
+            success: true,
+            deleted_count: count,
+            deleted_ids: vec![],
+            failed_ids: vec![],
+            message: format!("Deleted all sessions ({count})"),
+        }))
+    } else {
+        // Batch delete specified sessions
+        let result = reader
+            .delete_sessions(&body.user_id, &body.session_ids)
+            .await;
+        let count = result.deleted.len();
+        Ok(Json(BatchDeleteSessionsResponse {
+            success: result.failed.is_empty(),
+            deleted_count: count,
+            deleted_ids: result.deleted,
+            failed_ids: result.failed,
+            message: format!("Deleted {count} session(s)"),
+        }))
+    }
 }
 
 // ============================================================================
@@ -263,6 +318,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 },
             )
             .await

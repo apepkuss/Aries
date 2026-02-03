@@ -398,6 +398,10 @@ async fn main() -> ServerResult<()> {
                 get(aries::session::handlers::list_sessions_handler),
             )
             .route(
+                "/v1/sessions/batch-delete",
+                post(aries::session::handlers::batch_delete_sessions_handler),
+            )
+            .route(
                 "/v1/sessions/{id}",
                 get(aries::session::handlers::get_session_handler)
                     .delete(aries::session::handlers::delete_session_handler),

@@ -74,3 +74,10 @@ pub enum SessionError {
 }
 
 pub type SessionResult<T> = Result<T, SessionError>;
+
+/// Result of a batch delete operation.
+#[derive(Debug, Clone, Serialize)]
+pub struct BatchDeleteResult {
+    pub deleted: Vec<String>,
+    pub failed: Vec<String>,
+}

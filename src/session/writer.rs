@@ -216,6 +216,7 @@ mod tests {
             sequence: seq,
             tokens: None,
             tool_calls: None,
+            privacy_mode: false,
         };
 
         writer
@@ -287,6 +288,7 @@ mod tests {
                 sequence: seq,
                 tokens: None,
                 tool_calls: None,
+                privacy_mode: false,
             };
             writer
                 .append_message("user_1", &session_id, "test-model", record)
@@ -352,6 +354,7 @@ mod tests {
                     sequence: seq,
                     tokens: None,
                     tool_calls: None,
+                    privacy_mode: false,
                 };
                 w.append_message("user_1", &sid, "test-model", record)
                     .await
