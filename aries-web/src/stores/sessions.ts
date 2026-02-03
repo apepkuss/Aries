@@ -1,11 +1,21 @@
 import { create } from 'zustand';
-import { getSessions, getSessionDetail, deleteSession } from '@/api/session';
+import {
+  getSessions,
+  getSessionDetail,
+  deleteSession,
+  batchDeleteSessions,
+  deleteAllSessions,
+} from '@/api/session';
 import type { SessionMeta, UIMessage } from '@/api/types';
 
 interface SessionsState {
   // Data
   sessions: SessionMeta[];
   currentId: string | null;
+
+  // Multi-select
+  isSelectMode: boolean;
+  selectedIds: Set<string>;
 
   // Loading states
   isLoading: boolean;
@@ -20,12 +30,22 @@ interface SessionsState {
   deleteSession: (id: string) => Promise<void>;
   setCurrentId: (id: string | null) => void;
   clearCurrent: () => void;
+
+  // Multi-select actions
+  toggleSelectMode: () => void;
+  toggleSelect: (id: string) => void;
+  selectAll: () => void;
+  deselectAll: () => void;
+  batchDelete: () => Promise<void>;
+  deleteAll: () => Promise<void>;
 }
 
 export const useSessionsStore = create<SessionsState>((set, get) => ({
   // Initial state
   sessions: [],
   currentId: null,
+  isSelectMode: false,
+  selectedIds: new Set(),
   isLoading: false,
   isLoadingDetail: false,
   error: null,
@@ -104,5 +124,76 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   // Clear current selection
   clearCurrent: () => {
     set({ currentId: null });
+  },
+
+  // Toggle multi-select mode
+  toggleSelectMode: () => {
+    const { isSelectMode } = get();
+    set({
+      isSelectMode: !isSelectMode,
+      selectedIds: new Set(),
+    });
+  },
+
+  // Toggle selection of a single item
+  toggleSelect: (id: string) => {
+    const { selectedIds } = get();
+    const next = new Set(selectedIds);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    set({ selectedIds: next });
+  },
+
+  // Select all sessions
+  selectAll: () => {
+    const { sessions } = get();
+    set({ selectedIds: new Set(sessions.map((s) => s.session_id)) });
+  },
+
+  // Deselect all
+  deselectAll: () => {
+    set({ selectedIds: new Set() });
+  },
+
+  // Batch delete selected sessions
+  batchDelete: async () => {
+    const { selectedIds, sessions, currentId } = get();
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+
+    try {
+      await batchDeleteSessions(ids);
+      const remaining = sessions.filter((s) => !selectedIds.has(s.session_id));
+      set({
+        sessions: remaining,
+        selectedIds: new Set(),
+        isSelectMode: false,
+        currentId: selectedIds.has(currentId ?? '') ? null : currentId,
+      });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to batch delete sessions',
+      });
+    }
+  },
+
+  // Delete all sessions
+  deleteAll: async () => {
+    try {
+      await deleteAllSessions();
+      set({
+        sessions: [],
+        selectedIds: new Set(),
+        isSelectMode: false,
+        currentId: null,
+      });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : 'Failed to delete all sessions',
+      });
+    }
   },
 }));

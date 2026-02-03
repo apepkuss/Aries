@@ -1,4 +1,5 @@
-import { MessageSquare, Trash2, Edit2, MoreHorizontal } from 'lucide-react';
+import { useState } from 'react';
+import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/stores';
 import { useEffect } from 'react';
 import { SessionList } from '@/components/session/SessionList';
+import { SessionBatchDeleteDialog } from '@/components/session/SessionBatchDeleteDialog';
 
 export function Sidebar() {
   const { sidebarOpen } = useUIStore();
@@ -32,12 +34,21 @@ export function Sidebar() {
     sessions,
     currentId: currentSessionId,
     isLoading: isLoadingSessions,
+    isSelectMode,
+    selectedIds,
     fetchSessions,
     selectSession,
     deleteSession: removeSession,
+    toggleSelectMode,
+    toggleSelect,
+    selectAll,
+    batchDelete,
+    deleteAll,
   } = useSessionsStore();
   const { clearMessages, loadMessages, setConversationId, setSessionId } = useChatStore();
   const { config } = useConfigStore();
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
 
   // Feature flags
   const memoryEnabled = config?.memory?.enable ?? false;
@@ -102,8 +113,76 @@ export function Sidebar() {
 
   const historyDisabled = !useSessionHistory && !memoryEnabled;
 
+  const handleBatchDelete = async () => {
+    await batchDelete();
+    clearMessages();
+  };
+
+  const handleDeleteAll = async () => {
+    await deleteAll();
+    clearMessages();
+  };
+
   return (
     <aside className="w-64 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
+      {/* Toolbar for session actions */}
+      {useSessionHistory && sessions.length > 0 && (
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-border/50">
+          {isSelectMode ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={selectAll}
+              >
+                全选
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-destructive hover:text-destructive"
+                onClick={() => setBatchDeleteOpen(true)}
+                disabled={selectedIds.size === 0}
+              >
+                删除 ({selectedIds.size})
+              </Button>
+              <div className="flex-1" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={toggleSelectMode}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={toggleSelectMode}
+              >
+                <CheckSquare className="h-3.5 w-3.5 mr-1" />
+                选择
+              </Button>
+              <div className="flex-1" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-destructive hover:text-destructive"
+                onClick={() => setDeleteAllOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1" />
+                清空
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* History list */}
       <ScrollArea className="flex-1 px-2">
         <div className="space-y-1 py-2">
@@ -118,6 +197,9 @@ export function Sidebar() {
               isLoading={isLoadingSessions}
               onSelect={handleSelectSession}
               onDelete={handleDeleteSession}
+              isSelectMode={isSelectMode}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleSelect}
             />
           ) : isLoadingConv ? (
             <div className="text-sm text-muted-foreground text-center py-8">
@@ -141,6 +223,22 @@ export function Sidebar() {
           )}
         </div>
       </ScrollArea>
+
+      {/* Batch delete dialog */}
+      <SessionBatchDeleteDialog
+        open={batchDeleteOpen}
+        onOpenChange={setBatchDeleteOpen}
+        onConfirm={handleBatchDelete}
+        count={selectedIds.size}
+      />
+
+      {/* Delete all dialog */}
+      <SessionBatchDeleteDialog
+        open={deleteAllOpen}
+        onOpenChange={setDeleteAllOpen}
+        onConfirm={handleDeleteAll}
+        count={0}
+      />
     </aside>
   );
 }

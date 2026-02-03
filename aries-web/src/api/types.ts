@@ -367,6 +367,14 @@ export interface SessionDeleteResponse {
   message: string;
 }
 
+export interface BatchDeleteSessionsResponse {
+  success: boolean;
+  deleted_count: number;
+  deleted_ids: string[];
+  failed_ids: string[];
+  message: string;
+}
+
 // ============================================================================
 // Skills API Types
 // ============================================================================

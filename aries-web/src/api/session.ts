@@ -3,6 +3,7 @@ import type {
   SessionListResponse,
   SessionDetailResponse,
   SessionDeleteResponse,
+  BatchDeleteSessionsResponse,
 } from './types';
 
 /**
@@ -53,4 +54,30 @@ export async function deleteSession(
       searchParams: { user_id: userId },
     })
     .json<SessionDeleteResponse>();
+}
+
+/**
+ * Batch delete specified sessions.
+ */
+export async function batchDeleteSessions(
+  sessionIds: string[]
+): Promise<BatchDeleteSessionsResponse> {
+  const userId = getCurrentUserId();
+  return apiClient
+    .post('v1/sessions/batch-delete', {
+      json: { user_id: userId, session_ids: sessionIds },
+    })
+    .json<BatchDeleteSessionsResponse>();
+}
+
+/**
+ * Delete all sessions for the current user.
+ */
+export async function deleteAllSessions(): Promise<BatchDeleteSessionsResponse> {
+  const userId = getCurrentUserId();
+  return apiClient
+    .post('v1/sessions/batch-delete', {
+      json: { user_id: userId, session_ids: [] },
+    })
+    .json<BatchDeleteSessionsResponse>();
 }
