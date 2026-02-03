@@ -52,8 +52,8 @@ fn default_limit() -> usize {
 /// 待处理请求列表响应
 #[derive(Debug, Serialize)]
 pub struct ListPendingResponse {
-    /// 请求列表
-    pub requests: Vec<HitlRequestSummary>,
+    /// 请求列表（完整详情，用于前端渲染）
+    pub requests: Vec<HitlRequestDetailResponse>,
     /// 总数
     pub total: usize,
 }
@@ -499,11 +499,14 @@ pub async fn list_pending_handler(
     );
 
     let total = requests.len();
-    let summaries: Vec<HitlRequestSummary> =
-        requests.iter().map(HitlRequestSummary::from).collect();
+    // Return full request details for proper frontend rendering
+    let details: Vec<HitlRequestDetailResponse> = requests
+        .iter()
+        .map(HitlRequestDetailResponse::from)
+        .collect();
 
     let response = ListPendingResponse {
-        requests: summaries,
+        requests: details,
         total,
     };
 
@@ -730,6 +733,20 @@ fn parse_response(
             Ok(HitlResponse::ProvideFeedback { rating, comment })
         }
         "resume" => Ok(HitlResponse::Resume),
+        "privacy_mode_choice" => {
+            let use_privacy_mode = data
+                .as_ref()
+                .and_then(|d| d.get("use_privacy_mode").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            let remember_choice = data
+                .as_ref()
+                .and_then(|d| d.get("remember_choice").and_then(|v| v.as_bool()))
+                .unwrap_or(false);
+            Ok(HitlResponse::PrivacyModeChoice {
+                use_privacy_mode,
+                remember_choice,
+            })
+        }
         _ => Err(format!("Unknown response type: {}", response_type)),
     }
 }
