@@ -1,4 +1,4 @@
-import { User, Bot, Copy, Check, AlertCircle, Loader2 } from 'lucide-react';
+import { User, Bot, Copy, Check, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -42,6 +42,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
   };
 
   const isUser = message.role === 'user';
+  const isPrivacy = message.privacyMode === true;
   const isDark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
   return (
@@ -76,9 +77,22 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
               'transition-all duration-300 w-fit',
               isUser
                 ? 'bg-secondary text-secondary-foreground px-4 py-2.5 rounded-2xl'
-                : 'bg-transparent px-0 py-1' // Assistant has no bubble
+                : 'bg-transparent px-0 py-1', // Assistant has no bubble
+              isPrivacy && (isUser
+                ? 'border-r-2 border-emerald-500/60 pr-3.5'
+                : 'border-l-2 border-emerald-500/60 pl-3')
             )}
           >
+            {/* Privacy mode indicator */}
+            {isPrivacy && (
+              <div className="flex items-center gap-1 mb-1">
+                <ShieldCheck className="h-3 w-3 text-emerald-500" />
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  隐私模式
+                </span>
+              </div>
+            )}
+
             {/* Content Container */}
             <div className="space-y-4">
               {/* Error state */}

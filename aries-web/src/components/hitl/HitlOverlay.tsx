@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useHitlStore, useActiveHitlRequest, usePendingHitlRequests } from '@/stores';
+import { useHitlStore, useActiveHitlRequest, usePendingHitlRequests, useChatStore } from '@/stores';
 import { HitlConfirmationDialog } from './HitlConfirmationDialog';
 import { PrivacyModeConfirmationDialog } from './PrivacyModeConfirmationDialog';
 import { HitlNotificationBanner } from './HitlNotificationBanner';
@@ -114,12 +114,15 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
     [setActiveRequest]
   );
 
+  const markLastMessagesPrivacy = useChatStore((s) => s.markLastMessagesPrivacy);
+
   const handlePrivacyModeChoice = useCallback(
     async (requestId: string, usePrivacyMode: boolean, rememberChoice: boolean) => {
       await privacyModeChoice(requestId, usePrivacyMode, rememberChoice);
+      markLastMessagesPrivacy(usePrivacyMode);
       setDialogOpenForRequest(null);
     },
-    [privacyModeChoice]
+    [privacyModeChoice, markLastMessagesPrivacy]
   );
 
   // No pending requests, don't render anything

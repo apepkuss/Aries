@@ -453,6 +453,8 @@ export interface UIMessage {
   /** Execution events in chronological order for timeline display */
   executionEvents?: ExecutionEvent[];
   error?: string;
+  /** Whether this message was processed via privacy mode */
+  privacyMode?: boolean;
 }
 
 /** Task plan for UI display */

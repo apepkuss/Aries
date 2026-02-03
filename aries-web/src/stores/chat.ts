@@ -53,6 +53,7 @@ interface ChatState {
   setConversationId: (id: string | null) => void;
   setSessionId: (id: string | null) => void;
   loadMessages: (messages: UIMessage[]) => void;
+  markLastMessagesPrivacy: (privacy: boolean) => void;
 
   // Sub-Agent actions
   getSubAgent: (id: string) => UISubAgent | undefined;
@@ -819,6 +820,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // Load messages (e.g., from history)
   loadMessages: (messages) => {
     set({ messages, error: null });
+  },
+
+  // Mark the last user message and the current streaming assistant message as privacy
+  markLastMessagesPrivacy: (privacy) => {
+    set((state) => {
+      const msgs = [...state.messages];
+      // Find the last user message and the last assistant message
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant' && msgs[i].privacyMode === undefined) {
+          msgs[i] = { ...msgs[i], privacyMode: privacy };
+        }
+        if (msgs[i].role === 'user' && msgs[i].privacyMode === undefined) {
+          msgs[i] = { ...msgs[i], privacyMode: privacy };
+          break; // Stop after marking the user message (it comes before the assistant message)
+        }
+      }
+      return { messages: msgs };
+    });
   },
 
   // Get a specific Sub-Agent by ID
