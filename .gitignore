@@ -5,3 +5,8 @@ data/memory.db
 
 /docx
 /.claude
+
+# Electron
+aries-electron/node_modules/
+aries-electron/out/
+aries-electron/release/
