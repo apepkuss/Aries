@@ -66,11 +66,6 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
     ? pendingRequests.filter((r) => r.conversation_id === conversationId)
     : pendingRequests;
 
-  // Debug logging
-  console.log('[HitlOverlay] Pending requests:', pendingRequests.length);
-  console.log('[HitlOverlay] Relevant requests:', relevantRequests.length);
-  console.log('[HitlOverlay] Request types:', relevantRequests.map(r => r.request_type.type));
-
   const handleDialogOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
@@ -140,10 +135,6 @@ export function HitlOverlay({ conversationId, className }: HitlOverlayProps) {
 
   // Privacy confirmation dialog should auto-open (no banner needed)
   const privacyDialogOpen = pendingPrivacyRequest !== undefined;
-
-  console.log('[HitlOverlay] Regular requests:', pendingRegularRequests.length);
-  console.log('[HitlOverlay] Privacy request found:', !!pendingPrivacyRequest);
-  console.log('[HitlOverlay] Privacy dialog should be open:', privacyDialogOpen);
 
   return (
     <>

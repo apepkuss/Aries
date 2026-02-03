@@ -184,11 +184,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         abortController.signal,
         { sessionId: currentSessionId }
       )) {
-        console.log('[Chat Store] Processing event:', event.type, event.data);
         switch (event.type) {
           case 'status':
             // Update execution status
-            console.log('[Chat Store] Setting execution status:', event.data);
             // Update subtask status in task plan if we have subtask info
             if (taskPlan && event.data.subtask_id !== undefined) {
               const subtaskIndex = taskPlan.subtasks.findIndex(
@@ -227,7 +225,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           case 'plan':
             // Store task plan with subtask list
-            console.log('[Chat Store] Received plan event:', event.data.goal);
             taskPlan = {
               goal: event.data.goal,
               subtasks: event.data.subtasks.map((s) => ({
@@ -250,7 +247,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             // Accumulate thought content
             if (event.data.content) {
               thinking += (thinking ? '\n' : '') + event.data.content;
-              console.log('[Chat Store] Updated thinking:', thinking.slice(0, 100));
               // Add thought event to execution timeline
               executionEvents.push({
                 id: `thought_${eventSeq++}`,
@@ -271,7 +267,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           case 'tool_call': {
             // Add new tool call
-            console.log('[Chat Store] Adding tool call:', event.data.tool_name);
             const newToolCall: UIToolCall = {
               id: event.data.tool_call_id,
               name: event.data.tool_name,
@@ -302,7 +297,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const tcIndex = toolCalls.findIndex(
               (tc) => tc.id === event.data.tool_call_id
             );
-            console.log('[Chat Store] Tool result for:', event.data.tool_call_id, 'index:', tcIndex);
             if (tcIndex >= 0) {
               const updatedToolCall = {
                 ...toolCalls[tcIndex],
@@ -337,7 +331,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'text':
             // Accumulate final text content
             fullContent += event.data.content;
-            console.log('[Chat Store] Text content length:', fullContent.length);
             // Update message
             set((state) => ({
               messages: state.messages.map((msg) =>
@@ -350,14 +343,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           case 'finish':
             // Streaming complete
-            console.log('[Chat Store] Finish event received');
             break;
 
           // Sub-Agent events
           case 'subagent_spawned':
             {
               const { subagent_id, name, task, depth, parent_id } = event.data;
-              console.log('[Chat Store] Sub-Agent spawned:', name, subagent_id);
               const newSubAgent: UISubAgent = {
                 id: subagent_id,
                 name,
@@ -412,7 +403,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'subagent_started':
             {
               const { subagent_id, timestamp } = event.data;
-              console.log('[Chat Store] Sub-Agent started:', subagent_id);
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
@@ -431,7 +421,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'subagent_progress':
             {
               const { subagent_id, iteration, message, tool_name } = event.data;
-              console.log('[Chat Store] Sub-Agent progress:', subagent_id, iteration);
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
@@ -483,12 +472,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'subagent_tool_call':
             {
               const { subagent_id, tool_call_id, tool_name, args, iteration } = event.data;
-              console.log('[Chat Store] Sub-Agent tool call:', subagent_id, tool_name, 'iteration:', iteration);
-              console.log('[Chat Store] Tool call args:', JSON.stringify(args).slice(0, 200));
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
-                console.log('[Chat Store] Agent found:', !!agent, 'name:', agent?.name);
 
                 // Find associated subtask ID from the agent name
                 const subtaskId = agent ? extractSubtaskIdFromName(agent.name) : null;
@@ -499,8 +485,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 const currentMessage = state.messages.find(msg => msg.id === assistantMessage.id);
                 const currentTaskPlan = currentMessage?.taskPlan;
 
-                console.log('[Chat Store] Extracted subtaskId:', subtaskId, 'taskPlan exists:', !!currentTaskPlan);
-
                 if (subtaskId !== null && currentTaskPlan) {
                   // Get existing tool calls or create new array
                   const existingSubtask = currentTaskPlan.subtasks.find((s) => s.id === subtaskId);
@@ -509,7 +493,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                   // Check if this tool call already exists (deduplication)
                   const alreadyExists = existingToolCalls.some((tc) => tc.id === tool_call_id);
                   if (alreadyExists) {
-                    console.log('[Chat Store] Tool call already exists, skipping:', tool_call_id);
                     return { subAgents: newSubAgents, messages: updatedMessages };
                   }
 
@@ -542,7 +525,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'subagent_completed':
             {
               const { subagent_id, output, metrics } = event.data;
-              console.log('[Chat Store] Sub-Agent completed:', subagent_id);
               set((state) => {
                 const newSubAgents = new Map(state.subAgents);
                 const agent = newSubAgents.get(subagent_id);
@@ -589,8 +571,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           case 'subagent_failed':
             {
               const { subagent_id, error: errorMsg, metrics } = event.data;
-              console.log('[Chat Store] Sub-Agent failed:', subagent_id, errorMsg);
-
               // Check if this is a user interruption
               const wasInterruptedByUser =
                 errorMsg?.includes('User interrupted') ||
@@ -648,24 +628,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           // HITL events - delegate to hitl store
           case 'hitl_request':
-            console.log('[Chat Store] HITL request event:', event.data.request_id);
             useHitlStore.getState().handleRequestEvent(event.data);
             break;
 
           case 'hitl_status':
-            console.log('[Chat Store] HITL status event:', event.data.request_id, event.data.status);
             useHitlStore.getState().handleStatusEvent(event.data);
             break;
 
           case 'hitl_timeout_warning':
-            console.log('[Chat Store] HITL timeout warning:', event.data.request_id, event.data.remaining_seconds);
             useHitlStore.getState().handleTimeoutWarning(event.data);
             break;
 
           case 'error':
             {
               const { message, type: errorType } = event.data;
-              console.log('[Chat Store] Error event:', errorType, message);
               // Check if this is a user interruption error
               if (errorType === 'user_interrupted') {
                 isUserInterrupted = true;

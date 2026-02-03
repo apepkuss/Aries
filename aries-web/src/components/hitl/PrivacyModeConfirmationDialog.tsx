@@ -4,6 +4,7 @@ import type { UIHitlRequest, HitlPrivacyModeConfirmationRequest } from '@/api/ty
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -78,9 +79,9 @@ export function PrivacyModeConfirmationDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">
+          <DialogDescription className="text-sm text-muted-foreground">
             您的查询中可能包含敏感信息，建议使用隐私模式，以保护您的隐私。
-          </p>
+          </DialogDescription>
 
           {/* Remember Choice Switch */}
           <div className="flex items-center space-x-2">

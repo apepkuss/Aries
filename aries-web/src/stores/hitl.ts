@@ -181,14 +181,6 @@ export const useHitlStore = create<HitlState>((set, get) => ({
       const response = await getPendingRequests(conversationId);
       const requests = new Map<string, UIHitlRequest>();
 
-      // Debug: log fetched requests
-      if (response.requests.length > 0) {
-        console.log('[HITL Store] Fetched requests:', response.requests.length);
-        response.requests.forEach((req) => {
-          console.log('[HITL Store] Request:', req.id, 'type:', req.request_type.type, 'status:', req.status);
-        });
-      }
-
       for (const req of response.requests) {
         requests.set(req.id, toUIRequest(req));
       }
@@ -298,7 +290,7 @@ export const useHitlStore = create<HitlState>((set, get) => ({
         if (isGoneError) {
           // Request expired or not found - remove it from pending
           newRequests.delete(requestId);
-          console.log(`[HITL] Request ${requestId} expired or not found (status: ${errorStatus}), removing from pending list`);
+          console.warn(`[HITL] Request ${requestId} expired or not found (status: ${errorStatus}), removing from pending list`);
         } else {
           // Other error - keep request but reset responding state
           const req = newRequests.get(requestId);

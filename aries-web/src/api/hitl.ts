@@ -13,16 +13,11 @@ import type {
  * Convert backend API response to frontend HitlRequest format
  */
 function convertApiResponseToHitlRequest(apiResponse: HitlRequestFromApi): HitlRequest {
-  // Debug: log raw API response
-  console.log('[HITL API] Raw API response for', apiResponse.id, ':', JSON.stringify(apiResponse, null, 2));
-
   // Convert request_type string + details to the { type, data } format
   const requestType: HitlRequestType = {
     type: apiResponse.request_type as 'confirmation' | 'clarification' | 'feedback' | 'pause' | 'privacy_mode_confirmation',
     data: apiResponse.details,
   } as HitlRequestType;
-
-  console.log('[HITL API] Converted request_type:', requestType);
 
   return {
     id: apiResponse.id,

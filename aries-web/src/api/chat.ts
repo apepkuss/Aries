@@ -191,8 +191,6 @@ export async function* streamChatCompletionEnhanced(
 
   // Check if enhanced stream is enabled in response
   const isEnhanced = response.headers.get('X-Enhanced-Stream') === 'true';
-  console.log('[Enhanced Stream] Response header X-Enhanced-Stream:', isEnhanced);
-
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -210,7 +208,6 @@ export async function* streamChatCompletionEnhanced(
         // Parse event type
         if (trimmed.startsWith('event: ')) {
           currentEventType = trimmed.slice(7);
-          console.log('[Enhanced Stream] Event type:', currentEventType);
           continue;
         }
 
@@ -221,7 +218,6 @@ export async function* streamChatCompletionEnhanced(
               const data = JSON.parse(trimmed.slice(6));
               const event = parseEnhancedEvent(currentEventType, data);
               if (event) {
-                console.log('[Enhanced Stream] Parsed event:', event.type);
                 yield event;
               }
             } catch {
@@ -230,7 +226,7 @@ export async function* streamChatCompletionEnhanced(
             currentEventType = null;
           } else {
             // Fallback: try to parse as OpenAI format chunk and convert to text event
-            console.log('[Enhanced Stream] Data without event type:', trimmed.slice(0, 100));
+            // Fallback data without event type - skip
           }
         }
       }
@@ -286,7 +282,6 @@ function parseEnhancedEvent(
     case 'error':
       return { type: 'error', data: data as ErrorEvent };
     default:
-      console.log('[Enhanced Stream] Unknown event type:', eventType);
       return null;
   }
 }
