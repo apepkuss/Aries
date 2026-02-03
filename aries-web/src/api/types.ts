@@ -352,6 +352,7 @@ export interface SessionMessageRecord {
   sequence: number;
   tokens?: SessionTokenUsage;
   tool_calls?: unknown[];
+  privacy_mode?: boolean;
 }
 
 export type SessionRecord = SessionStartRecord | SessionMessageRecord;

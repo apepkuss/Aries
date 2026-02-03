@@ -66,6 +66,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
           role: r.role as 'user' | 'assistant',
           content: r.content,
           timestamp: new Date(r.timestamp),
+          privacyMode: r.privacy_mode === true ? true : undefined,
         }));
 
       set({ isLoadingDetail: false });

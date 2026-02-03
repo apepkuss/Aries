@@ -88,7 +88,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
               <div className="flex items-center gap-1 mb-1">
                 <ShieldCheck className="h-3 w-3 text-emerald-500" />
                 <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  隐私模式
+                  隐私保护
                 </span>
               </div>
             )}
