@@ -70,6 +70,7 @@ impl MessageStore {
                 sequence INTEGER NOT NULL,
                 tokens INTEGER,
                 tool_calls TEXT,
+                privacy_mode INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
             );
             "#,
@@ -156,18 +157,23 @@ impl MessageStore {
         let role = message.role.to_string();
         let tokens = message.tokens.map(|t| t as i64);
 
-        sqlx::query!(
-            "INSERT INTO messages (id, conversation_id, role, content, timestamp, sequence, tokens, tool_calls)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            message.id,
-            message.conversation_id,
-            role,
-            message.content,
-            message.timestamp,
-            message.sequence,
-            tokens,
-            tool_calls_json
-        ).execute(&self.pool).await?;
+        let privacy_mode = message.privacy_mode as i32;
+
+        sqlx::query(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp, sequence, tokens, tool_calls, privacy_mode)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&message.id)
+        .bind(&message.conversation_id)
+        .bind(&role)
+        .bind(&message.content)
+        .bind(message.timestamp)
+        .bind(message.sequence)
+        .bind(tokens)
+        .bind(&tool_calls_json)
+        .bind(privacy_mode)
+        .execute(&self.pool)
+        .await?;
 
         // 更新会话统计
         self.update_conversation_stats(&message.conversation_id)
@@ -343,37 +349,46 @@ impl MessageStore {
     /// 返回对话中的所有消息，按照序列号升序排列。
     /// 工具调用信息会从 JSON 格式反序列化为结构化数据。
     pub async fn get_full_history(&self, conv_id: &str) -> MemoryResult<Vec<StoredMessage>> {
-        let rows = sqlx::query!(
-            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence",
-            conv_id
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT * FROM messages WHERE conversation_id = ? ORDER BY sequence")
+                .bind(conv_id)
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut messages = Vec::new();
         for row in rows {
-            let tool_calls: Vec<StoredToolCall> = if let Some(tool_calls_json) = row.tool_calls {
-                serde_json::from_str(&tool_calls_json)?
+            let tool_calls_json: Option<String> = row.try_get("tool_calls").ok();
+            let tool_calls: Vec<StoredToolCall> = if let Some(json_str) = tool_calls_json
+                && !json_str.is_empty()
+            {
+                serde_json::from_str(&json_str)?
             } else {
                 Vec::new()
             };
 
-            let id = row.id.unwrap();
-            let timestamp = DateTime::<Utc>::from_naive_utc_and_offset(row.timestamp.unwrap(), Utc);
+            let id: String = row.try_get("id")?;
+            let conversation_id: String = row.try_get("conversation_id")?;
+            let role_str: String = row.try_get("role")?;
+            let content: String = row.try_get("content")?;
+            let timestamp = row.try_get::<chrono::NaiveDateTime, _>("timestamp")?;
+            let sequence: i64 = row.try_get("sequence")?;
+            let tokens: Option<i64> = row.try_get("tokens").ok();
+            let privacy_mode_val: i32 = row.try_get("privacy_mode").unwrap_or(0);
 
             messages.push(StoredMessage {
                 id,
-                conversation_id: row.conversation_id,
-                role: MessageRole::from_str(&row.role).map_err(|e| {
+                conversation_id,
+                role: MessageRole::from_str(&role_str).map_err(|e| {
                     let err_msg = format!("Failed to parse message role: {e}");
                     dual_error!("{err_msg}");
                     MemoryError::InvalidData(err_msg)
                 })?,
-                content: row.content,
-                timestamp,
-                sequence: row.sequence,
-                tokens: row.tokens.map(|t| t as usize),
+                content,
+                timestamp: DateTime::<Utc>::from_naive_utc_and_offset(timestamp, Utc),
+                sequence,
+                tokens: tokens.map(|t| t as usize),
                 tool_calls,
+                privacy_mode: privacy_mode_val != 0,
             });
         }
 
@@ -425,6 +440,7 @@ impl MessageStore {
             let timestamp = row.try_get::<chrono::NaiveDateTime, _>("timestamp")?;
             let sequence: i64 = row.try_get("sequence")?;
             let tokens: Option<i64> = row.try_get("tokens").ok();
+            let privacy_mode_val: i32 = row.try_get("privacy_mode").unwrap_or(0);
 
             messages.push(StoredMessage {
                 id,
@@ -439,6 +455,7 @@ impl MessageStore {
                 sequence,
                 tokens: tokens.map(|t| t as usize),
                 tool_calls,
+                privacy_mode: privacy_mode_val != 0,
             });
         }
 
@@ -463,40 +480,48 @@ impl MessageStore {
         conv_id: &str,
         from_sequence: i64,
     ) -> MemoryResult<Vec<StoredMessage>> {
-        let rows = sqlx::query!(
+        let rows = sqlx::query(
             "SELECT * FROM messages WHERE conversation_id = ? AND sequence >= ? ORDER BY sequence",
-            conv_id,
-            from_sequence
         )
+        .bind(conv_id)
+        .bind(from_sequence)
         .fetch_all(&self.pool)
         .await?;
 
         let mut messages = Vec::new();
         for row in rows {
-            let tool_calls: Vec<StoredToolCall> = if let Some(tool_calls_json) = &row.tool_calls {
-                serde_json::from_str(tool_calls_json)?
+            let tool_calls_json: Option<String> = row.try_get("tool_calls").ok();
+            let tool_calls: Vec<StoredToolCall> = if let Some(json_str) = tool_calls_json
+                && !json_str.is_empty()
+            {
+                serde_json::from_str(&json_str)?
             } else {
                 Vec::new()
             };
 
-            let id = row.id.unwrap();
-            let role = MessageRole::from_str(&row.role).map_err(|e| {
-                let err_msg = format!("Failed to parse message role: {e}");
-                dual_error!("{err_msg}");
-                MemoryError::InvalidData(err_msg)
-            })?;
-            let timestamp = DateTime::<Utc>::from_naive_utc_and_offset(row.timestamp.unwrap(), Utc);
-            let tokens = row.tokens.map(|t| t as usize);
+            let id: String = row.try_get("id")?;
+            let conversation_id: String = row.try_get("conversation_id")?;
+            let role_str: String = row.try_get("role")?;
+            let content: String = row.try_get("content")?;
+            let timestamp = row.try_get::<chrono::NaiveDateTime, _>("timestamp")?;
+            let sequence: i64 = row.try_get("sequence")?;
+            let tokens: Option<i64> = row.try_get("tokens").ok();
+            let privacy_mode_val: i32 = row.try_get("privacy_mode").unwrap_or(0);
 
             messages.push(StoredMessage {
                 id,
-                conversation_id: row.conversation_id,
-                role,
-                content: row.content,
-                timestamp,
-                sequence: row.sequence,
-                tokens,
+                conversation_id,
+                role: MessageRole::from_str(&role_str).map_err(|e| {
+                    let err_msg = format!("Failed to parse message role: {e}");
+                    dual_error!("{err_msg}");
+                    MemoryError::InvalidData(err_msg)
+                })?,
+                content,
+                timestamp: DateTime::<Utc>::from_naive_utc_and_offset(timestamp, Utc),
+                sequence,
+                tokens: tokens.map(|t| t as usize),
                 tool_calls,
+                privacy_mode: privacy_mode_val != 0,
             });
         }
 

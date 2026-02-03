@@ -273,6 +273,7 @@ impl CompleteChatMemory {
         &self,
         conv_id: &str,
         content: String,
+        privacy_mode: bool,
     ) -> MemoryResult<MessageResult> {
         let sequence = self.store.get_next_sequence(conv_id).await?;
         let message = StoredMessage {
@@ -284,6 +285,7 @@ impl CompleteChatMemory {
             sequence,
             tokens: None,
             tool_calls: Vec::new(),
+            privacy_mode,
         };
 
         // First layer: complete storage
@@ -331,6 +333,7 @@ impl CompleteChatMemory {
         conv_id: &str,
         content: &str,
         tool_calls: Vec<StoredToolCall>,
+        privacy_mode: bool,
     ) -> MemoryResult<MessageResult> {
         let sequence = self.store.get_next_sequence(conv_id).await?;
         let message = StoredMessage {
@@ -342,6 +345,7 @@ impl CompleteChatMemory {
             sequence,
             tokens: None,
             tool_calls,
+            privacy_mode,
         };
 
         // First layer: complete storage
@@ -974,6 +978,7 @@ impl CompleteChatMemory {
                     sequence: 0, // System message sequence number is 0
                     tokens: None,
                     tool_calls: Vec::new(),
+                    privacy_mode: false,
                 };
 
                 messages.insert(0, system_msg);
@@ -1310,7 +1315,7 @@ mod tests {
 
         // Add a message to populate the cache
         memory
-            .add_user_message(&conv_id, "Hello".to_string())
+            .add_user_message(&conv_id, "Hello".to_string(), false)
             .await
             .unwrap();
 

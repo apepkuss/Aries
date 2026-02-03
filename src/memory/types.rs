@@ -56,6 +56,7 @@ pub struct StoredMessage {
     pub sequence: i64,
     pub tokens: Option<usize>,
     pub tool_calls: Vec<StoredToolCall>,
+    pub privacy_mode: bool,
 }
 
 // 完整存储的工具调用

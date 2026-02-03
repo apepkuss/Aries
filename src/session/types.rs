@@ -31,6 +31,7 @@ pub enum SessionRecord {
         tokens: Option<TokenUsage>,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<serde_json::Value>>,
+        privacy_mode: bool,
     },
 }
 

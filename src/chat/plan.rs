@@ -159,6 +159,7 @@ pub(crate) async fn chat(
     }
 
     let chat_server = get_chat_server(&state, request_id, server_kind).await?;
+    let is_privacy = server_kind == ServerKind::privacy_chat;
 
     // Store the latest user message to memory
     if let Some(memory) = &state.memory
@@ -178,7 +179,10 @@ pub(crate) async fn chat(
         }
 
         // Store user message
-        if let Err(e) = memory.add_user_message(conv_id, user_msg.clone()).await {
+        if let Err(e) = memory
+            .add_user_message(conv_id, user_msg.clone(), is_privacy)
+            .await
+        {
             dual_error!(
                 "Failed to add user message to memory: {} - request_id: {}",
                 e,
@@ -207,6 +211,7 @@ pub(crate) async fn chat(
             sequence: seq,
             tokens: None,
             tool_calls: None,
+            privacy_mode: is_privacy,
         };
         if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
             dual_warn!(
@@ -435,7 +440,7 @@ pub(crate) async fn chat(
             if let Some(memory) = &state.memory
                 && let Some(conv_id) = &conv_id
                 && let Err(e) = memory
-                    .add_assistant_message(conv_id, &answer.answer, vec![])
+                    .add_assistant_message(conv_id, &answer.answer, vec![], is_privacy)
                     .await
             {
                 dual_error!(
@@ -446,7 +451,8 @@ pub(crate) async fn chat(
             }
 
             // Write assistant message to session history
-            write_assistant_to_session(&state, &session_id, &request, &answer.answer).await;
+            write_assistant_to_session(&state, &session_id, &request, &answer.answer, is_privacy)
+                .await;
 
             // Build and return response directly
             return build_direct_answer_response(
@@ -1160,7 +1166,7 @@ pub(crate) async fn chat(
     // Store assistant message to memory
     if let (Some(memory), Some(conv_id)) = (&state.memory, &conv_id)
         && let Err(e) = memory
-            .add_assistant_message(conv_id, &final_content, vec![])
+            .add_assistant_message(conv_id, &final_content, vec![], is_privacy)
             .await
     {
         dual_error!(
@@ -1171,7 +1177,7 @@ pub(crate) async fn chat(
     }
 
     // Write assistant message to session history
-    write_assistant_to_session(&state, &session_id, &request, &final_content).await;
+    write_assistant_to_session(&state, &session_id, &request, &final_content, is_privacy).await;
 
     // Finalize trace
     trace.finalize(TraceStatus::Success);
@@ -1398,6 +1404,7 @@ async fn execute_chat_plan_realtime(
     // Get target server (route based on X-Privacy-Mode header)
     let server_kind = resolve_chat_server_kind(&headers);
     let chat_server = get_chat_server(&state, &request_id, server_kind).await?;
+    let is_privacy = server_kind == ServerKind::privacy_chat;
 
     // Extract user message for planning
     let user_message = extract_user_message(&request);
@@ -1423,7 +1430,10 @@ async fn execute_chat_plan_realtime(
         }
 
         // Store user message
-        if let Err(e) = memory.add_user_message(conv_id, user_msg.clone()).await {
+        if let Err(e) = memory
+            .add_user_message(conv_id, user_msg.clone(), is_privacy)
+            .await
+        {
             dual_error!(
                 "Failed to add user message to memory: {} - request_id: {}",
                 e,
@@ -1569,7 +1579,7 @@ async fn execute_chat_plan_realtime(
             if let Some(memory) = &state.memory
                 && let Some(conv_id) = &conv_id
                 && let Err(e) = memory
-                    .add_assistant_message(conv_id, &answer.answer, vec![])
+                    .add_assistant_message(conv_id, &answer.answer, vec![], is_privacy)
                     .await
             {
                 dual_error!(
@@ -1580,7 +1590,8 @@ async fn execute_chat_plan_realtime(
             }
 
             // Write assistant message to session history
-            write_assistant_to_session(&state, &session_id, &request, &answer.answer).await;
+            write_assistant_to_session(&state, &session_id, &request, &answer.answer, is_privacy)
+                .await;
 
             // Send text events for direct answer
             let text_chunks = gen_chunks_with_formatting(&answer.answer, 10);
@@ -2409,7 +2420,7 @@ async fn execute_chat_plan_realtime(
     // Store assistant message to memory
     if let (Some(memory), Some(conv_id)) = (&state.memory, &conv_id)
         && let Err(e) = memory
-            .add_assistant_message(conv_id, &final_content, vec![])
+            .add_assistant_message(conv_id, &final_content, vec![], is_privacy)
             .await
     {
         dual_error!(
@@ -2420,7 +2431,7 @@ async fn execute_chat_plan_realtime(
     }
 
     // Write assistant message to session history
-    write_assistant_to_session(&state, &session_id, &request, &final_content).await;
+    write_assistant_to_session(&state, &session_id, &request, &final_content, is_privacy).await;
 
     // Finalize trace
     trace.finalize(TraceStatus::Success);
@@ -2528,6 +2539,7 @@ async fn write_assistant_to_session(
     session_id: &Option<String>,
     request: &ChatCompletionRequest,
     content: &str,
+    privacy_mode: bool,
 ) {
     if let Some(sid) = session_id
         && let Some(writer) = &state.session_writer
@@ -2547,6 +2559,7 @@ async fn write_assistant_to_session(
             sequence: seq,
             tokens: None,
             tool_calls: None,
+            privacy_mode,
         };
         if let Err(e) = writer.append_message(uid, sid, &model_name, record).await {
             dual_warn!("Failed to write assistant message to session: {}", e);
