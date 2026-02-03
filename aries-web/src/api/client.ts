@@ -1,5 +1,10 @@
 import ky from 'ky';
 
+// Detect if running inside Electron
+export const isElectron = (): boolean => {
+  return (window as unknown as Record<string, unknown>)?.electronAPI !== undefined;
+};
+
 // Generate a unique request ID
 function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;

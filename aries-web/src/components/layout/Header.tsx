@@ -15,9 +15,11 @@ export function Header() {
   const { chat } = useServiceStore();
 
   const isChatConfigured = !!chat?.url;
+  const electronAPI = (window as unknown as Record<string, unknown>)?.electronAPI as { platform: string } | undefined;
+  const isElectronMac = electronAPI?.platform === 'darwin';
 
   return (
-    <header className="h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4">
+    <header className={`h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4 ${isElectronMac ? 'pl-24' : ''}`}>
       <div className="flex items-center gap-3">
         <div className="flex items-center border border-border/60 rounded-lg overflow-hidden">
           <button

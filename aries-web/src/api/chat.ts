@@ -189,8 +189,6 @@ export async function* streamChatCompletionEnhanced(
   let buffer = '';
   let currentEventType: string | null = null;
 
-  // Check if enhanced stream is enabled in response
-  const isEnhanced = response.headers.get('X-Enhanced-Stream') === 'true';
   try {
     while (true) {
       const { done, value } = await reader.read();

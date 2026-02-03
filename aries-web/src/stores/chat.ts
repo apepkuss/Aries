@@ -641,7 +641,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
           case 'error':
             {
-              const { message, type: errorType } = event.data;
+              const { type: errorType } = event.data;
               // Check if this is a user interruption error
               if (errorType === 'user_interrupted') {
                 isUserInterrupted = true;

@@ -1,0 +1,29 @@
+{
+  "name": "aries-electron",
+  "version": "0.1.0",
+  "description": "Aries AI Agent Desktop Application",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "unset ELECTRON_RUN_AS_NODE && electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "unset ELECTRON_RUN_AS_NODE && electron-vite preview",
+    "prebuild:backend": "cd .. && cargo build --release",
+    "prebuild:web": "cd ../aries-web && npm run build",
+    "build:all": "npm run prebuild:backend && npm run prebuild:web && npm run build",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:all": "npm run build:all && electron-builder"
+  },
+  "dependencies": {
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^3.1.0",
+    "typescript": "~5.9.3"
+  }
+}
