@@ -1,4 +1,4 @@
-import { User, Bot, Copy, Check, AlertCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { User, Bot, Copy, Check, AlertCircle, Loader2, ShieldCheck, FileText, FileImage, FileCode, File } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -95,6 +95,31 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
 
             {/* Content Container */}
             <div className="space-y-4">
+              {/* Attachment indicators (user messages) */}
+              {isUser && message.attachments && message.attachments.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {message.attachments.map((file, index) => {
+                    const Icon = file.mimeType.startsWith('image/')
+                      ? FileImage
+                      : (file.mimeType.startsWith('text/x-') || file.mimeType === 'text/javascript' || file.mimeType === 'text/typescript' || file.mimeType === 'text/css' || file.mimeType === 'text/html')
+                        ? FileCode
+                        : (file.mimeType.startsWith('text/') || file.mimeType === 'application/json' || file.mimeType === 'application/xml')
+                          ? FileText
+                          : File;
+                    return (
+                      <span
+                        key={`${file.path}-${index}`}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground bg-muted/50 rounded px-1.5 py-0.5"
+                        title={file.path}
+                      >
+                        <Icon className="h-3 w-3 shrink-0" />
+                        <span className="max-w-[120px] truncate">{file.name}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Error state */}
               {message.error && (
                 <div className="flex items-center gap-2 text-destructive bg-destructive/5 px-3 py-2 rounded-lg border border-destructive/20 text-sm">

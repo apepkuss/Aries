@@ -3,6 +3,8 @@ import { streamChatCompletionEnhanced, buildChatRequest } from '@/api/chat';
 import { showNativeNotification } from '@/utils/notification';
 import type {
   ChatMessage,
+  ContentPart,
+  FileAttachment,
   UIMessage,
   UIToolCall,
   ExecutionEvent,
@@ -48,7 +50,7 @@ interface ChatState {
   error: string | null;
 
   // Actions
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, attachments?: FileAttachment[]) => Promise<void>;
   stopGeneration: () => void;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
@@ -74,10 +76,28 @@ function generateSessionId(): string {
 
 // Convert UI messages to API format
 function toApiMessages(messages: UIMessage[]): ChatMessage[] {
-  return messages.map((msg) => ({
-    role: msg.role,
-    content: msg.content,
-  }));
+  return messages.map((msg) => {
+    if (msg.role === 'user' && msg.attachments && msg.attachments.length > 0) {
+      const parts: ContentPart[] = [];
+
+      if (msg.content.trim()) {
+        parts.push({ type: 'text', text: msg.content });
+      }
+
+      for (const attachment of msg.attachments) {
+        parts.push({
+          type: 'input_file',
+          input_file: {
+            filename: attachment.path,
+          },
+        });
+      }
+
+      return { role: msg.role, content: parts };
+    }
+
+    return { role: msg.role, content: msg.content };
+  });
 }
 
 // Initial execution status
@@ -120,10 +140,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
 
   // Send a message
-  sendMessage: async (content: string) => {
+  sendMessage: async (content: string, attachments?: FileAttachment[]) => {
     const { messages, isStreaming, sessionId } = get();
 
-    if (isStreaming || !content.trim()) {
+    const hasContent = content.trim().length > 0;
+    const hasAttachments = attachments && attachments.length > 0;
+
+    if (isStreaming || (!hasContent && !hasAttachments)) {
       return;
     }
 
@@ -139,6 +162,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       role: 'user',
       content: content.trim(),
       timestamp: new Date(),
+      attachments: hasAttachments ? attachments : undefined,
     };
 
     // Create placeholder assistant message

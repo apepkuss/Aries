@@ -1,11 +1,29 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { ArrowUp, Square } from 'lucide-react';
+import { ArrowUp, Square, Paperclip, X, FileText, FileImage, FileCode, File } from 'lucide-react';
 import { useChatStore } from '@/stores';
+import { isElectron } from '@/api/client';
+import type { FileAttachment } from '@/api/types';
 import { ExecutionModeSelector } from './ExecutionModeSelector';
 import { ModelSelector } from './ModelSelector';
 
+// Format file size for display
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Get icon component based on MIME type
+function getFileIcon(mimeType: string) {
+  if (mimeType.startsWith('image/')) return FileImage;
+  if (mimeType.startsWith('text/x-') || mimeType === 'text/javascript' || mimeType === 'text/typescript' || mimeType === 'text/css' || mimeType === 'text/html') return FileCode;
+  if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/xml') return FileText;
+  return File;
+}
+
 export function ChatInput() {
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { sendMessage, stopGeneration, isStreaming } = useChatStore();
 
@@ -33,10 +51,61 @@ export function ChatInput() {
     }
   }, [input]);
 
-  const handleSend = () => {
-    if (!input.trim() || isStreaming) return;
-    sendMessage(input);
+  const handleSelectFiles = async () => {
+    const api = (window as unknown as Record<string, unknown>)?.electronAPI as { selectFiles?: () => Promise<FileAttachment[]> } | undefined;
+    if (!api?.selectFiles) return;
+    try {
+      const files = await api.selectFiles();
+      if (files.length > 0) {
+        setAttachments((prev) => [...prev, ...files]);
+      }
+    } catch {
+      // User cancelled or error — silently ignore
+    }
+  };
+
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSend = async () => {
+    const hasContent = input.trim().length > 0;
+    const hasAttachments = attachments.length > 0;
+    if (isStreaming || (!hasContent && !hasAttachments)) return;
+
+    // Validate attached files still exist before sending
+    if (hasAttachments) {
+      const api = (window as unknown as Record<string, unknown>)?.electronAPI as { checkFilesExist?: (paths: string[]) => Promise<boolean[]> } | undefined;
+      if (api?.checkFilesExist) {
+        try {
+          const exists = await api.checkFilesExist(attachments.map((f) => f.path));
+          const missing = attachments.filter((_, i) => !exists[i]);
+          if (missing.length > 0) {
+            const remaining = attachments.filter((_, i) => exists[i]);
+            setAttachments(remaining);
+            const names = missing.map((f) => f.name).join(', ');
+            const canStillSend = remaining.length > 0 || hasContent;
+            if (!canStillSend) {
+              alert(`The following files no longer exist and have been removed:\n${names}`);
+              return;
+            }
+            if (!confirm(`The following files no longer exist and have been removed:\n${names}\n\nContinue sending?`)) {
+              return;
+            }
+            sendMessage(input, remaining.length > 0 ? remaining : undefined);
+            setInput('');
+            setAttachments([]);
+            return;
+          }
+        } catch {
+          // If check fails, proceed with send — backend will handle missing files
+        }
+      }
+    }
+
+    sendMessage(input, hasAttachments ? attachments : undefined);
     setInput('');
+    setAttachments([]);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -56,7 +125,7 @@ export function ChatInput() {
     }
   };
 
-  const canSend = input.trim().length > 0 && !isStreaming;
+  const canSend = (input.trim().length > 0 || attachments.length > 0) && !isStreaming;
 
   return (
     <div className="p-4 shrink-0 bg-background">
@@ -65,6 +134,34 @@ export function ChatInput() {
           className="rounded-lg border border-border/60 bg-muted/30 shadow-sm focus-within:border-border focus-within:ring-1 focus-within:ring-ring/20 transition-[border-color,box-shadow]"
           onClick={handleContainerClick}
         >
+          {/* Attachment preview area */}
+          {attachments.length > 0 && (
+            <div className="px-3 pt-3 pb-1 flex flex-wrap gap-2">
+              {attachments.map((file, index) => {
+                const Icon = getFileIcon(file.mimeType);
+                return (
+                  <div
+                    key={`${file.path}-${index}`}
+                    className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-xs group"
+                  >
+                    <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="max-w-[150px] truncate" title={file.name}>
+                      {file.name}
+                    </span>
+                    <span className="text-muted-foreground/60">{formatFileSize(file.size)}</span>
+                    <button
+                      onClick={() => handleRemoveAttachment(index)}
+                      className="ml-0.5 rounded-sm p-0.5 text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
+                      title="Remove"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* Textarea */}
           <div className="px-4 pt-3 pb-1">
             <textarea
@@ -83,6 +180,16 @@ export function ChatInput() {
           <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
             {/* Left: controls */}
             <div className="flex items-center gap-1">
+              {isElectron() && (
+                <button
+                  onClick={handleSelectFiles}
+                  disabled={isStreaming}
+                  title="Attach files"
+                  className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </button>
+              )}
               <ExecutionModeSelector />
               <ModelSelector />
             </div>

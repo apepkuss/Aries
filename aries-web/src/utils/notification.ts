@@ -1,7 +1,10 @@
+import type { FileAttachment } from '@/api/types';
+
 interface ElectronAPI {
   platform: string;
   isElectron: boolean;
   showNotification: (title: string, body: string) => void;
+  selectFiles?: () => Promise<FileAttachment[]>;
 }
 
 function getElectronAPI(): ElectronAPI | undefined {

@@ -11,11 +11,24 @@ export interface ChatMessage {
 }
 
 export interface ContentPart {
-  type: 'text' | 'image_url';
+  type: 'text' | 'image_url' | 'input_file';
   text?: string;
   image_url?: {
     url: string;
   };
+  input_file?: {
+    file_id?: string;
+    filename?: string;
+    file_data?: string;
+  };
+}
+
+export interface FileAttachment {
+  path: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  extension: string;
 }
 
 export interface ToolCall {
@@ -471,6 +484,8 @@ export interface UIMessage {
   error?: string;
   /** Whether this message was processed via privacy mode */
   privacyMode?: boolean;
+  /** File attachments included with this message */
+  attachments?: FileAttachment[];
 }
 
 /** Task plan for UI display */

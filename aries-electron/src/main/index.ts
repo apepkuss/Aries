@@ -1,6 +1,42 @@
 import { app, BrowserWindow, shell, dialog, ipcMain, Notification } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { BackendManager } from './backend'
+
+// Map file extension to MIME type
+function getMimeType(ext: string): string {
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.txt': 'text/plain',
+    '.md': 'text/markdown',
+    '.csv': 'text/csv',
+    '.pdf': 'application/pdf',
+    '.json': 'application/json',
+    '.xml': 'application/xml',
+    '.js': 'text/javascript',
+    '.ts': 'text/typescript',
+    '.py': 'text/x-python',
+    '.rs': 'text/x-rust',
+    '.go': 'text/x-go',
+    '.java': 'text/x-java',
+    '.c': 'text/x-c',
+    '.cpp': 'text/x-c++',
+    '.h': 'text/x-c',
+    '.hpp': 'text/x-c++',
+    '.css': 'text/css',
+    '.html': 'text/html',
+    '.yaml': 'text/yaml',
+    '.yml': 'text/yaml',
+    '.toml': 'text/toml',
+    '.sh': 'text/x-shellscript',
+    '.sql': 'text/x-sql',
+  }
+  return mimeMap[ext] || 'application/octet-stream'
+}
 
 // Handle native notification requests from renderer
 ipcMain.on('show-notification', (_event, title: string, body: string) => {
@@ -12,6 +48,57 @@ ipcMain.on('show-notification', (_event, title: string, body: string) => {
     })
     notification.show()
   }
+})
+
+// Handle file selection dialog
+ipcMain.handle('select-files', async () => {
+  if (!mainWindow) return []
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      {
+        name: 'Supported Files',
+        extensions: [
+          'png', 'jpg', 'jpeg', 'gif', 'webp',
+          'txt', 'md', 'csv',
+          'js', 'ts', 'py', 'rs', 'go', 'java', 'c', 'cpp', 'h', 'hpp',
+          'css', 'html', 'json', 'yaml', 'yml', 'toml', 'xml', 'sh', 'sql',
+          'pdf',
+        ],
+      },
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
+      { name: 'Text', extensions: ['txt', 'md', 'csv'] },
+      {
+        name: 'Code',
+        extensions: [
+          'js', 'ts', 'py', 'rs', 'go', 'java', 'c', 'cpp', 'h', 'hpp',
+          'css', 'html', 'json', 'yaml', 'yml', 'toml', 'xml', 'sh', 'sql',
+        ],
+      },
+      { name: 'PDF', extensions: ['pdf'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  })
+
+  if (result.canceled || result.filePaths.length === 0) return []
+
+  return result.filePaths.map((filePath) => {
+    const stats = fs.statSync(filePath)
+    const ext = path.extname(filePath).toLowerCase()
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      size: stats.size,
+      extension: ext,
+      mimeType: getMimeType(ext),
+    }
+  })
+})
+
+// Check whether given file paths still exist on disk
+ipcMain.handle('check-files-exist', async (_event, paths: string[]) => {
+  return paths.map((p) => fs.existsSync(p))
 })
 
 let mainWindow: BrowserWindow | null = null
