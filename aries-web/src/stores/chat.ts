@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { streamChatCompletionEnhanced, buildChatRequest } from '@/api/chat';
+import { showNativeNotification } from '@/utils/notification';
 import type {
   ChatMessage,
   UIMessage,
@@ -719,6 +720,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         abortController: null,
         executionStatus: initialExecutionStatus,
       }));
+
+      // Native notification when task completes
+      if (!isUserInterrupted) {
+        const preview = finalContent.slice(0, 80) || 'Task completed';
+        showNativeNotification('Aries', preview);
+      }
 
       // Refresh session list so the sidebar shows the new/updated session
       if (useConfigStore.getState().config?.session?.enable) {

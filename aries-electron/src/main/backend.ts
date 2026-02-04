@@ -17,26 +17,32 @@ export class BackendManager {
   }
 
   /**
-   * Find an available TCP port, starting from the preferred port.
+   * Read the port from the config file.
    */
-  async findAvailablePort(preferred: number = DEFAULT_PORT): Promise<number> {
-    return new Promise((resolve, reject) => {
+  private readPortFromConfig(configPath: string): number {
+    try {
+      const content = fs.readFileSync(configPath, 'utf-8')
+      const match = content.match(/^port\s*=\s*(\d+)/m)
+      if (match) {
+        return parseInt(match[1], 10)
+      }
+    } catch {
+      // Ignore read errors
+    }
+    return DEFAULT_PORT
+  }
+
+  /**
+   * Check if a port is available.
+   */
+  private checkPortAvailable(port: number): Promise<boolean> {
+    return new Promise((resolve) => {
       const server = net.createServer()
-      server.listen(preferred, '127.0.0.1', () => {
-        server.close(() => resolve(preferred))
+      server.listen(port, '127.0.0.1', () => {
+        server.close(() => resolve(true))
       })
       server.on('error', () => {
-        // Preferred port is busy, let OS assign one
-        const fallback = net.createServer()
-        fallback.listen(0, '127.0.0.1', () => {
-          const address = fallback.address()
-          if (address && typeof address !== 'string') {
-            fallback.close(() => resolve(address.port))
-          } else {
-            fallback.close(() => reject(new Error('Failed to find available port')))
-          }
-        })
-        fallback.on('error', (err) => reject(err))
+        resolve(false)
       })
     })
   }
@@ -103,32 +109,17 @@ export class BackendManager {
   }
 
   /**
-   * Update the port in the config file for the given port.
+   * Get the config file path for display in error messages.
    */
-  private ensureConfigPort(configPath: string, port: number): string {
-    if (port === DEFAULT_PORT) {
-      return configPath
-    }
-
-    // Read config, update port, write to temp location
-    const content = fs.readFileSync(configPath, 'utf-8')
-    const updated = content.replace(
-      /^port\s*=\s*\d+/m,
-      `port = ${port}`
-    )
-
+  getConfigFilePath(): string {
     const homeDir = app.getPath('home')
-    const runtimeConfigPath = path.join(homeDir, '.aries', 'config.runtime.toml')
-    fs.writeFileSync(runtimeConfigPath, updated, 'utf-8')
-    return runtimeConfigPath
+    return path.join(homeDir, '.aries', 'config.toml')
   }
 
   /**
    * Start the backend process.
    */
   async start(): Promise<number> {
-    this._port = await this.findAvailablePort()
-
     const binaryPath = this.getBinaryPath()
     if (!fs.existsSync(binaryPath)) {
       throw new Error(`Backend binary not found at: ${binaryPath}`)
@@ -136,21 +127,30 @@ export class BackendManager {
 
     const webUiPath = this.getWebUiPath()
     const configPath = this.getConfigPath()
-    const runtimeConfigPath = this.ensureConfigPort(configPath, this._port)
+    this._port = this.readPortFromConfig(configPath)
+
+    // Check if the port is available
+    const available = await this.checkPortAvailable(this._port)
+    if (!available) {
+      throw new Error(
+        `Port ${this._port} is already in use.\n\n` +
+        `Please change the port in config file:\n${configPath}`
+      )
+    }
 
     const logDir = app.getPath('logs')
     fs.mkdirSync(logDir, { recursive: true })
     const logFile = path.join(logDir, 'aries-backend.log')
 
     const args = [
-      '--config', runtimeConfigPath,
+      '--config', configPath,
       '--web-ui', webUiPath,
       '--log-destination', 'file',
       '--log-file', logFile
     ]
 
     console.log(`Starting backend: ${binaryPath}`)
-    console.log(`  Config: ${runtimeConfigPath}`)
+    console.log(`  Config: ${configPath}`)
     console.log(`  Web UI: ${webUiPath}`)
     console.log(`  Port: ${this._port}`)
     console.log(`  Log: ${logFile}`)
@@ -165,6 +165,7 @@ export class BackendManager {
     }
 
     this.process = spawn(binaryPath, args, {
+      cwd: app.getPath('home'),
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -199,20 +200,28 @@ export class BackendManager {
     const interval = 500
 
     return new Promise((resolve, reject) => {
+      let done = false
+
       const check = (): void => {
+        if (done) return
+
         if (Date.now() - startTime > timeout) {
+          done = true
           reject(new Error(`Backend did not become ready within ${timeout}ms`))
           return
         }
 
         // Check if process died
         if (this.process === null) {
+          done = true
           reject(new Error('Backend process exited unexpectedly'))
           return
         }
 
         const req = http.get(`http://127.0.0.1:${this._port}/health`, (res) => {
+          if (done) return
           if (res.statusCode === 200) {
+            done = true
             console.log('Backend is ready')
             resolve()
           } else {
@@ -221,12 +230,12 @@ export class BackendManager {
         })
 
         req.on('error', () => {
-          setTimeout(check, interval)
+          if (!done) setTimeout(check, interval)
         })
 
         req.setTimeout(2000, () => {
           req.destroy()
-          setTimeout(check, interval)
+          if (!done) setTimeout(check, interval)
         })
       }
 

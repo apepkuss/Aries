@@ -1,6 +1,9 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
-  isElectron: true
+  isElectron: true,
+  showNotification: (title: string, body: string) => {
+    ipcRenderer.send('show-notification', title, body)
+  }
 })

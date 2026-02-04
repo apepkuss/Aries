@@ -1,6 +1,18 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, dialog, ipcMain, Notification } from 'electron'
 import path from 'path'
 import { BackendManager } from './backend'
+
+// Handle native notification requests from renderer
+ipcMain.on('show-notification', (_event, title: string, body: string) => {
+  if (Notification.isSupported()) {
+    const notification = new Notification({ title, body })
+    notification.on('click', () => {
+      mainWindow?.show()
+      mainWindow?.focus()
+    })
+    notification.show()
+  }
+})
 
 let mainWindow: BrowserWindow | null = null
 const backend = new BackendManager()
@@ -57,6 +69,10 @@ app.whenReady().then(async () => {
     mainWindow?.loadURL(`http://127.0.0.1:${port}`)
   } catch (err) {
     console.error('Failed to start backend:', err)
+    dialog.showErrorBox(
+      'Failed to start Aries backend',
+      err instanceof Error ? err.message : String(err)
+    )
     app.quit()
   }
 })

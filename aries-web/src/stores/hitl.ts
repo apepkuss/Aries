@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { showNativeNotification } from '@/utils/notification';
 import type {
   HitlRequest,
   UIHitlRequest,
@@ -417,6 +418,12 @@ export const useHitlStore = create<HitlState>((set, get) => ({
       // Auto-set as active if no active request
       activeRequestId: state.activeRequestId ?? event.request_id,
     }));
+
+    // Native notification for approval requests
+    showNativeNotification(
+      'Aries - Approval Required',
+      event.summary || `${requestType} request needs your attention`
+    );
 
     // Fetch full detail
     get().fetchRequestDetail(event.request_id);

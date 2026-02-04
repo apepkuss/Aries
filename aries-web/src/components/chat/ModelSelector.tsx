@@ -6,6 +6,7 @@ import { fetchModels, type Model } from '@/api/models';
 interface SingleModelSelectorProps {
   serviceKey: 'chat' | 'privacy_chat';
   serviceUrl: string | undefined;
+  registered: boolean;
   currentModel: string | undefined;
   onModelChange: (model: string) => void;
   icon: React.ReactNode;
@@ -15,6 +16,7 @@ interface SingleModelSelectorProps {
 function SingleModelSelector({
   serviceKey,
   serviceUrl,
+  registered,
   currentModel,
   onModelChange,
   icon,
@@ -24,9 +26,9 @@ function SingleModelSelector({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch models when service URL changes
+  // Fetch models when service URL changes or registration completes
   useEffect(() => {
-    if (!serviceUrl) {
+    if (!serviceUrl || !registered) {
       setModels([]);
       return;
     }
@@ -45,6 +47,14 @@ function SingleModelSelector({
           return true;
         });
         setModels(unique);
+
+        // Auto-select first model if current selection is empty or not in the list
+        if (unique.length > 0) {
+          const validSelection = currentModel && unique.some((m) => m.id === currentModel);
+          if (!validSelection) {
+            onModelChange(unique[0].id);
+          }
+        }
       } catch (err) {
         console.error(`Failed to fetch models for ${serviceKey}:`, err);
         setError('Failed to load models');
@@ -54,7 +64,7 @@ function SingleModelSelector({
     };
 
     loadModels();
-  }, [serviceUrl, serviceKey]);
+  }, [serviceUrl, serviceKey, registered]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newModel = e.target.value;
@@ -110,7 +120,7 @@ function SingleModelSelector({
 }
 
 export function ModelSelector() {
-  const { chat, privacyChat, setChatModel, setPrivacyChatModel } = useServiceStore();
+  const { chat, privacyChat, chatRegistered, privacyChatRegistered, setChatModel, setPrivacyChatModel } = useServiceStore();
 
   const hasChatService = !!chat?.url;
   const hasPrivacyChatService = !!privacyChat?.url;
@@ -126,6 +136,7 @@ export function ModelSelector() {
       <SingleModelSelector
         serviceKey="chat"
         serviceUrl={chat?.url}
+        registered={chatRegistered}
         currentModel={chat?.model}
         onModelChange={setChatModel}
         icon={<Cloud className="h-3.5 w-3.5 text-muted-foreground" />}
@@ -136,6 +147,7 @@ export function ModelSelector() {
       <SingleModelSelector
         serviceKey="privacy_chat"
         serviceUrl={privacyChat?.url}
+        registered={privacyChatRegistered}
         currentModel={privacyChat?.model}
         onModelChange={setPrivacyChatModel}
         icon={<ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
