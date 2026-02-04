@@ -479,8 +479,15 @@ async fn main() -> ServerResult<()> {
         if art_config.enabled {
             aries::dual_info!("Artifacts system is enabled");
 
+            // Expand tilde in paths
+            let database_path = shellexpand::tilde(&art_config.database_path).to_string();
+            let storage_path = art_config
+                .storage_path
+                .as_ref()
+                .map(|p| shellexpand::tilde(p).to_string());
+
             // Ensure data directory exists
-            if let Some(parent) = std::path::Path::new(&art_config.database_path).parent() {
+            if let Some(parent) = std::path::Path::new(&database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     let err_msg = format!("Failed to create artifacts data directory: {e}");
                     aries::dual_error!("{err_msg}");
@@ -492,7 +499,7 @@ async fn main() -> ServerResult<()> {
                 max_content_size: art_config.max_content_size,
                 max_binary_size: art_config.max_binary_size,
                 max_versions: art_config.max_versions,
-                storage_path: art_config.storage_path.clone(),
+                storage_path,
                 retention_days: art_config.retention_days,
                 cleanup_interval_secs: art_config.cleanup_interval_secs,
                 soft_delete_retention_days: art_config.soft_delete_retention_days,
@@ -500,7 +507,7 @@ async fn main() -> ServerResult<()> {
             };
 
             let artifacts_state = Arc::new(artifacts::ArtifactsState::new(
-                art_config.database_path.clone(),
+                database_path,
                 artifact_config.clone(),
             ));
 
