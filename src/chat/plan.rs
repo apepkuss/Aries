@@ -122,8 +122,8 @@ pub(crate) async fn chat(
 ) -> ServerResult<axum::response::Response> {
     let request_id = request_id.as_ref();
 
-    // Extract user message for planning and privacy detection
-    let user_message = extract_user_message(&request);
+    // Extract user message (with file attachments) for planning and privacy detection
+    let (user_message, file_attachments) = extract_user_message_with_files(&request);
 
     // Extract system message for memory storage
     let system_message = extract_system_message(&request);
@@ -352,6 +352,7 @@ pub(crate) async fn chat(
             adaptive_strategy,
             dynamic_replanner,
             reflection_config,
+            file_attachments,
         )
         .await;
     }
@@ -573,6 +574,7 @@ pub(crate) async fn chat(
             subagent_config: subagent_config.clone(),
             rate_limiter: None, // Rate limiter can be added if needed
             emitter: emitter.clone(),
+            file_attachments: file_attachments.clone(),
         };
 
         // Execute subtasks in parallel
@@ -737,6 +739,7 @@ pub(crate) async fn chat(
                             emitter.as_ref(),
                             subagent_config.as_ref(),
                             Some(time_budget.pause_tracker()),
+                            &file_attachments,
                         )
                         .await
                     } else {
@@ -762,6 +765,7 @@ pub(crate) async fn chat(
                             &model_name,
                             emitter.as_ref(),
                             Some(time_budget.pause_tracker()),
+                            &file_attachments,
                         )
                         .await
                     };
@@ -1283,6 +1287,7 @@ async fn chat_realtime_stream(
     adaptive_strategy: Option<AdaptiveStrategy>,
     dynamic_replanner: Option<DynamicReplanner>,
     reflection_config: crate::reflection::ReflectionConfig,
+    file_attachments: Vec<FileAttachmentInfo>,
 ) -> ServerResult<axum::response::Response> {
     // Create channel for realtime event streaming
     // Events will be sent through this channel as they occur
@@ -1316,6 +1321,7 @@ async fn chat_realtime_stream(
             dynamic_replanner,
             reflection_config,
             event_sender,
+            file_attachments,
         )
         .await;
 
@@ -1379,6 +1385,7 @@ async fn execute_chat_plan_realtime(
     dynamic_replanner: Option<DynamicReplanner>,
     _reflection_config: crate::reflection::ReflectionConfig,
     event_sender: mpsc::Sender<String>,
+    file_attachments: Vec<FileAttachmentInfo>,
 ) -> ServerResult<()> {
     use super::{
         emitter::SseEventEmitter,
@@ -1406,11 +1413,13 @@ async fn execute_chat_plan_realtime(
     let chat_server = get_chat_server(&state, &request_id, server_kind).await?;
     let is_privacy = server_kind == ServerKind::privacy_chat;
 
-    // Extract user message for planning
+    // Extract user message for planning (use passed file_attachments, re-extract text only)
     let user_message = extract_user_message(&request);
 
     // Extract system message for memory storage
     let system_message = extract_system_message(&request);
+
+    // file_attachments is available from parent scope
 
     // Store the latest user message to memory
     if let Some(memory) = &state.memory
@@ -1757,6 +1766,7 @@ async fn execute_chat_plan_realtime(
             subagent_config: subagent_config.clone(),
             rate_limiter: None, // Rate limiter can be added if needed
             emitter: emitter.clone(),
+            file_attachments: file_attachments.clone(),
         };
 
         // Execute subtasks in parallel
@@ -1983,6 +1993,7 @@ async fn execute_chat_plan_realtime(
                             emitter.as_ref(),
                             subagent_config.as_ref(),
                             Some(time_budget.pause_tracker()),
+                            &file_attachments,
                         )
                         .await
                     } else {
@@ -2008,6 +2019,7 @@ async fn execute_chat_plan_realtime(
                             &model_name,
                             emitter.as_ref(),
                             Some(time_budget.pause_tracker()),
+                            &file_attachments,
                         )
                         .await
                     };
@@ -2881,6 +2893,7 @@ async fn execute_subtask_with_react(
     model: &str,
     emitter: &dyn EventEmitter,
     plan_pause_tracker: Option<Arc<AtomicU64>>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> ServerResult<String> {
     let start_time = Instant::now();
     // Track total time spent in tool execution (including HITL wait).
@@ -2922,6 +2935,7 @@ async fn execute_subtask_with_react(
         skills_summaries,
         &[], // No active skills in initial context
         max_reference_size,
+        file_attachments,
     )
     .await;
 
@@ -3395,6 +3409,7 @@ async fn execute_subtask_with_react(
                                     None,
                                     &active_skills,
                                     max_reference_size,
+                                    file_attachments,
                                 )
                                 .await;
 
@@ -3513,6 +3528,7 @@ async fn execute_subtask_with_react(
                                 None, // No need for summaries in Phase 2
                                 &active_skills,
                                 max_reference_size,
+                                file_attachments,
                             )
                             .await;
 
@@ -4521,6 +4537,7 @@ pub(crate) async fn build_context_for_react(
     skills_summaries: Option<&[SkillSummary]>,
     active_skills: &[LoadedSkill],
     max_reference_size: usize,
+    file_attachments: &[FileAttachmentInfo],
 ) -> Vec<ChatCompletionRequestMessage> {
     let mut messages = Vec::new();
 
@@ -4740,6 +4757,23 @@ Remember: Focus only on this specific subtask. Use the context from previous res
     messages.push(ChatCompletionRequestMessage::User(
         ChatCompletionUserMessage::new(ChatCompletionUserMessageContent::Text(task_prompt), None),
     ));
+
+    // Inject file attachment content (if any)
+    if !file_attachments.is_empty() {
+        let mut file_parts: Vec<endpoints::chat::ContentPart> = Vec::new();
+        file_parts.push(endpoints::chat::ContentPart::Text(
+            endpoints::chat::TextContentPart::new("[User attached files]"),
+        ));
+        for file in file_attachments {
+            file_parts.extend(resolve_file_for_llm(file));
+        }
+        messages.push(ChatCompletionRequestMessage::User(
+            ChatCompletionUserMessage::new(
+                ChatCompletionUserMessageContent::Parts(file_parts),
+                None,
+            ),
+        ));
+    }
 
     messages
 }
@@ -5475,6 +5509,7 @@ async fn execute_subtask_via_subagent(
     emitter: &dyn EventEmitter,
     subagent_config: Option<&SubAgentSystemConfig>,
     plan_pause_tracker: Option<Arc<AtomicU64>>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> ServerResult<String> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation(
@@ -5492,7 +5527,7 @@ async fn execute_subtask_via_subagent(
 
     // 1. Build context from previous results
     let context =
-        build_subtask_context(subtask, previous_results, context_config, skills_summaries);
+        build_subtask_context(subtask, previous_results, context_config, skills_summaries, file_attachments);
 
     // 2. Calculate effective timeout
     let effective_timeout = if executor_config.inherit_remaining_time {
@@ -5547,7 +5582,7 @@ async fn execute_subtask_via_subagent(
     };
 
     // 6. Build system prompt for the Sub-Agent
-    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
+    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries, file_attachments);
 
     // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
@@ -5745,6 +5780,7 @@ pub async fn execute_subtask_with_retry(
     emitter: &dyn EventEmitter,
     subagent_config: Option<&SubAgentSystemConfig>,
     plan_pause_tracker: Option<Arc<AtomicU64>>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> ServerResult<RetryableSubtaskResult> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation("Sub-Agent configuration required for retry execution".to_string())
@@ -5827,6 +5863,7 @@ pub async fn execute_subtask_with_retry(
             subagent_config,
             failure_context.as_deref(),
             plan_pause_tracker.clone(),
+            file_attachments,
         )
         .await;
 
@@ -5932,6 +5969,7 @@ async fn execute_subtask_via_subagent_with_context(
     subagent_config: Option<&SubAgentSystemConfig>,
     failure_context: Option<&str>,
     plan_pause_tracker: Option<Arc<AtomicU64>>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> ServerResult<String> {
     let config = subagent_config.ok_or_else(|| {
         ServerError::Operation(
@@ -5954,7 +5992,7 @@ async fn execute_subtask_via_subagent_with_context(
 
     // 1. Build context from previous results
     let mut context =
-        build_subtask_context(subtask, previous_results, context_config, skills_summaries);
+        build_subtask_context(subtask, previous_results, context_config, skills_summaries, file_attachments);
 
     // 1.5. Inject failure context if provided
     if let Some(failure_ctx) = failure_context {
@@ -5999,7 +6037,7 @@ async fn execute_subtask_via_subagent_with_context(
     };
 
     // 6. Build system prompt for the Sub-Agent
-    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries);
+    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries, file_attachments);
 
     // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
@@ -6177,6 +6215,7 @@ fn build_subtask_context(
     previous_results: &[(usize, String)],
     context_config: &crate::subagent::SubAgentContextConfig,
     skills_summaries: Option<&[SkillSummary]>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> String {
     let mut context = String::new();
 
@@ -6227,6 +6266,15 @@ fn build_subtask_context(
         ));
     }
 
+    // Inject file attachment content (text-only format for Sub-Agent mode)
+    if !file_attachments.is_empty() {
+        context.push_str("\n## User Attached Files\n\n");
+        for file in file_attachments {
+            context.push_str(&resolve_file_as_text(file));
+            context.push('\n');
+        }
+    }
+
     context
 }
 
@@ -6234,6 +6282,7 @@ fn build_subtask_context(
 fn build_subagent_system_prompt(
     subtask: &SubTask,
     skills_summaries: Option<&[SkillSummary]>,
+    file_attachments: &[FileAttachmentInfo],
 ) -> String {
     let mut prompt = String::new();
 
@@ -6253,6 +6302,21 @@ fn build_subagent_system_prompt(
     {
         prompt.push_str(&format!("## Recommended Skill: {}\n", skill));
         prompt.push_str(&format!("{}\n\n", summary.description));
+    }
+
+    // Inform Sub-Agent about attached files
+    if !file_attachments.is_empty() {
+        prompt.push_str("## User Attached Files\n\n");
+        prompt.push_str("The user has attached the following files to their request. ");
+        prompt.push_str("Text and code file contents are included in the task context. ");
+        prompt.push_str("Image files are referenced by path and can be accessed via tools if needed.\n\n");
+        for file in file_attachments {
+            prompt.push_str(&format!(
+                "- {} ({}, path: {})\n",
+                file.basename, file.mime_type, file.filename
+            ));
+        }
+        prompt.push('\n');
     }
 
     prompt
@@ -6364,6 +6428,8 @@ pub struct ParallelExecutionContext {
     pub rate_limiter: Option<Arc<RateLimiter>>,
     /// Event emitter for streaming events back to the client.
     pub emitter: Arc<dyn EventEmitter>,
+    /// File attachments from user message.
+    pub file_attachments: Vec<FileAttachmentInfo>,
 }
 
 /// Result of a single subtask execution.
@@ -6643,6 +6709,7 @@ async fn execute_parallel_group(
                 emitter_arc.as_ref(),
                 ctx.subagent_config.as_ref(),
                 Some(task_pause_tracker),
+                &ctx.file_attachments,
             )
             .await;
 
@@ -6758,6 +6825,7 @@ mod tests {
                 skills_summaries,
                 active_skills,
                 0, // No reference size limit in tests
+                &[], // No file attachments in tests
             ))
     }
 

@@ -1512,6 +1512,7 @@ async fn test_te2e_001_complete_workflow_planning_to_phase2() {
         Some(&summaries), // skill summaries for Phase 1
         &[],              // no active skills yet
         0,
+        &[],              // no file attachments in tests
     )
     .await;
 
@@ -1563,6 +1564,7 @@ async fn test_te2e_001_complete_workflow_planning_to_phase2() {
         None,                    // no summaries in Phase 2
         &[active_skill.clone()], // active skill with full content
         0,
+        &[],
     )
     .await;
 
@@ -1660,7 +1662,7 @@ async fn test_te2e_003_skill_activation_during_execution() {
 
     // Build context with active skill
     let messages =
-        build_context_for_react(&subtask, &[], &tools, None, &[active_skill.clone()], 0).await;
+        build_context_for_react(&subtask, &[], &tools, None, &[active_skill.clone()], 0, &[]).await;
 
     let system_content = messages
         .iter()
@@ -1756,7 +1758,7 @@ async fn test_te2e_004_tool_calls_after_skill_activation() {
 
     // Build context with skill
     let messages =
-        build_context_for_react(&subtask, &[], &all_tools, None, &[skill.clone()], 0).await;
+        build_context_for_react(&subtask, &[], &all_tools, None, &[skill.clone()], 0, &[]).await;
 
     let system_content = messages
         .iter()
@@ -1852,7 +1854,7 @@ async fn test_tms_001_dependent_subtasks_different_skills() {
     let skill1 = registry.get("data-fetcher").await.unwrap();
 
     let messages1 =
-        build_context_for_react(&subtask1, &[], &tools, None, &[skill1.clone()], 0).await;
+        build_context_for_react(&subtask1, &[], &tools, None, &[skill1.clone()], 0, &[]).await;
 
     let content1 = messages1
         .iter()
@@ -1893,6 +1895,7 @@ async fn test_tms_001_dependent_subtasks_different_skills() {
         None,
         &[skill2.clone()],
         0,
+        &[],
     )
     .await;
 
@@ -2020,7 +2023,7 @@ async fn test_tms_002_parallel_subtasks_different_skills() {
         );
 
         let messages =
-            build_context_for_react(subtask, &[], &tools, None, &[skill.unwrap()], 0).await;
+            build_context_for_react(subtask, &[], &tools, None, &[skill.unwrap()], 0, &[]).await;
 
         assert!(
             !messages.is_empty(),
@@ -2092,7 +2095,7 @@ async fn test_tms_003_skill_results_passed_to_next_subtask() {
     let previous_results = vec![(1, subtask1_result.to_string())];
 
     let messages =
-        build_context_for_react(&subtask2, &previous_results, &tools, None, &[skill2], 0).await;
+        build_context_for_react(&subtask2, &previous_results, &tools, None, &[skill2], 0, &[]).await;
 
     // Check if previous results are included in the context
     let has_previous_result = messages.iter().any(|m| match m {
@@ -2187,6 +2190,7 @@ async fn test_ter_003_recommended_skill_not_found() {
         Some(&summaries), // Fall back to Phase 1 with summaries
         &[],              // No active skills (couldn't load the recommended one)
         0,
+        &[],
     )
     .await;
 
@@ -2273,6 +2277,7 @@ async fn test_ter_003_graceful_fallback_to_phase1() {
         Some(&summaries), // Phase 1 with all summaries
         &[],              // No active skill
         0,
+        &[],
     )
     .await;
 

@@ -1177,6 +1177,7 @@ async fn test_tse_001_initial_context_contains_skills_summaries() {
         Some(&summaries), // skill summaries for Phase 1
         &[],              // no active skills
         0,                // no reference size limit
+        &[],
     )
     .await;
 
@@ -1277,6 +1278,7 @@ async fn test_tse_002_active_skill_context_contains_full_content() {
         None,                     // no summaries in Phase 2
         &[weather_skill.clone()], // active skill
         0,
+        &[],
     )
     .await;
 
@@ -1366,6 +1368,7 @@ async fn test_tse_005_dependent_subtask_results_passed() {
         Some(&summaries),
         &[],
         0,
+        &[],
     )
     .await;
 
@@ -1475,6 +1478,7 @@ async fn test_tse_005_multiple_dependencies() {
         Some(&summaries),
         &[],
         0,
+        &[],
     )
     .await;
 
@@ -1534,6 +1538,7 @@ async fn test_tse_phase_transition_from_1_to_2() {
         Some(&summaries),
         &[], // No active skills
         0,
+        &[],
     )
     .await;
 
@@ -1570,6 +1575,7 @@ async fn test_tse_phase_transition_from_1_to_2() {
         None,            // No summaries in Phase 2
         &[active_skill], // Active skill
         0,
+        &[],
     )
     .await;
 
