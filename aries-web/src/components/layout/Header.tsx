@@ -19,8 +19,8 @@ export function Header() {
   const isElectronMac = electronAPI?.platform === 'darwin';
 
   return (
-    <header className={`h-14 border-b bg-background/60 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-4 ${isElectronMac ? 'pl-24' : ''}`}>
-      <div className="flex items-center gap-3">
+    <header className={`h-14 border-b bg-background sticky top-0 z-50 flex items-center justify-between px-4 electron-drag ${isElectronMac ? 'pl-24' : ''}`}>
+      <div className="flex items-center gap-3 electron-no-drag">
         <div className="flex items-center border border-border/60 rounded-lg overflow-hidden">
           <button
             onClick={toggleSidebar}
@@ -54,7 +54,7 @@ export function Header() {
         </h1>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 electron-no-drag">
         {/* Theme switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
