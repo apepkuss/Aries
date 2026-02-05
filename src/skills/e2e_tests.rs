@@ -1512,7 +1512,7 @@ async fn test_te2e_001_complete_workflow_planning_to_phase2() {
         Some(&summaries), // skill summaries for Phase 1
         &[],              // no active skills yet
         0,
-        &[],              // no file attachments in tests
+        &[], // no file attachments in tests
     )
     .await;
 
@@ -2094,8 +2094,16 @@ async fn test_tms_003_skill_results_passed_to_next_subtask() {
     // Pass the result from subtask 1
     let previous_results = vec![(1, subtask1_result.to_string())];
 
-    let messages =
-        build_context_for_react(&subtask2, &previous_results, &tools, None, &[skill2], 0, &[]).await;
+    let messages = build_context_for_react(
+        &subtask2,
+        &previous_results,
+        &tools,
+        None,
+        &[skill2],
+        0,
+        &[],
+    )
+    .await;
 
     // Check if previous results are included in the context
     let has_previous_result = messages.iter().any(|m| match m {

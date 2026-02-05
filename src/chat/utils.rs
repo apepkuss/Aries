@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use endpoints::chat::{
-    ChatCompletionRequest, ChatCompletionUserMessageContent, ContentPart, Image,
-    ImageContentPart, TextContentPart,
+    ChatCompletionRequest, ChatCompletionUserMessageContent, ContentPart, Image, ImageContentPart,
+    TextContentPart,
 };
 
 /// Metadata about a file attachment extracted from the user message.
@@ -114,13 +114,18 @@ pub(super) fn extract_user_message_with_files(
         let summary = files
             .iter()
             .enumerate()
-            .map(|(i, f)| format!("  {}. {} ({}, path: {})", i + 1, f.basename, f.mime_type, f.filename))
+            .map(|(i, f)| {
+                format!(
+                    "  {}. {} ({}, path: {})",
+                    i + 1,
+                    f.basename,
+                    f.mime_type,
+                    f.filename
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        let attachment_note = format!(
-            "\n\n[Attached files]\n{}",
-            summary
-        );
+        let attachment_note = format!("\n\n[Attached files]\n{}", summary);
         Some(
             text.map(|t| format!("{}{}", t, attachment_note))
                 .unwrap_or(attachment_note),
@@ -298,12 +303,18 @@ pub(super) fn resolve_file_as_text(file: &FileAttachmentInfo) -> String {
                     .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("");
-                format!("File: {} (path: {})\n```{}\n{}\n```", file.basename, file.filename, ext, content)
+                format!(
+                    "File: {} (path: {})\n```{}\n{}\n```",
+                    file.basename, file.filename, ext, content
+                )
             }
             Err(e) => format!("[Failed to read file {}: {}]", file.basename, e),
         }
     } else {
-        format!("[Unsupported file type: {} ({})]", file.basename, file.mime_type)
+        format!(
+            "[Unsupported file type: {} ({})]",
+            file.basename, file.mime_type
+        )
     }
 }
 

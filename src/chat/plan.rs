@@ -2605,8 +2605,10 @@ async fn run_privacy_detection(
     detector: &crate::services::privacy::PrivacyDetector,
     text: &str,
     cancel_token: &CancellationToken,
-) -> Result<crate::services::privacy::PrivacyDetectionResult, crate::services::privacy::PrivacyDetectionError>
-{
+) -> Result<
+    crate::services::privacy::PrivacyDetectionResult,
+    crate::services::privacy::PrivacyDetectionError,
+> {
     use crate::services::privacy::DetectionMode;
 
     let needs_model = matches!(
@@ -2665,19 +2667,16 @@ async fn call_privacy_model(
         .build();
 
     // 3. Build HTTP request
-    let url = format!(
-        "{}/chat/completions",
-        server_info.url.trim_end_matches('/')
-    );
+    let url = format!("{}/chat/completions", server_info.url.trim_end_matches('/'));
     let mut request = reqwest::Client::new()
         .post(&url)
         .header(CONTENT_TYPE, "application/json")
         .json(&chat_request);
 
-    if let Some(ref api_key) = server_info.api_key {
-        if !api_key.is_empty() {
-            request = request.header(AUTHORIZATION, format!("Bearer {}", api_key));
-        }
+    if let Some(ref api_key) = server_info.api_key
+        && !api_key.is_empty()
+    {
+        request = request.header(AUTHORIZATION, format!("Bearer {}", api_key));
     }
 
     // 4. Send request with cancellation support
@@ -2765,18 +2764,18 @@ async fn detect_and_confirm_privacy(
     };
 
     // 3. Run privacy detection (rules first, model fallback)
-    let detection_result =
-        match run_privacy_detection(state, detector, message, cancel_token).await {
-            Ok(result) => result,
-            Err(crate::services::privacy::PrivacyDetectionError::NotEnabled) => {
-                dual_debug!("Privacy detection not enabled");
-                return Ok(ServerKind::chat);
-            }
-            Err(e) => {
-                dual_warn!("Privacy detection failed: {}, using normal chat", e);
-                return Ok(ServerKind::chat);
-            }
-        };
+    let detection_result = match run_privacy_detection(state, detector, message, cancel_token).await
+    {
+        Ok(result) => result,
+        Err(crate::services::privacy::PrivacyDetectionError::NotEnabled) => {
+            dual_debug!("Privacy detection not enabled");
+            return Ok(ServerKind::chat);
+        }
+        Err(e) => {
+            dual_warn!("Privacy detection failed: {}, using normal chat", e);
+            return Ok(ServerKind::chat);
+        }
+    };
 
     // 5. If no privacy content detected, use normal chat
     if !detection_result.is_private {
@@ -2964,12 +2963,44 @@ async fn get_available_tools(state: &Arc<AppState>) -> Vec<ToolDescription> {
         tools.push(ToolDescription {
             name: internal_tool_name(SKILL_RUN_SCRIPT_TOOL),
             description: "Execute a script from an active skill. Use this tool to run scripts in the skill's scripts/ directory.".to_string(),
-            ..Default::default()
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "script_name": {
+                        "type": "string",
+                        "description": "Name of the script file to execute (e.g., 'process.js', 'export.py')"
+                    },
+                    "args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional command line arguments to pass to the script"
+                    }
+                },
+                "required": ["script_name"]
+            })),
         });
         tools.push(ToolDescription {
             name: internal_tool_name(SKILL_LOAD_ASSET_TOOL),
             description: "Load an asset file from the active skill's assets/ directory. Supports template variable replacement and JSON/YAML parsing.".to_string(),
-            ..Default::default()
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "asset_name": {
+                        "type": "string",
+                        "description": "Name of the asset file to load (e.g., 'template.md', 'config.json')"
+                    },
+                    "variables": {
+                        "type": "object",
+                        "description": "Optional variables for template replacement. Use {{variable}} syntax in the template."
+                    },
+                    "parse_as": {
+                        "type": "string",
+                        "enum": ["json", "yaml", "markdown"],
+                        "description": "Optional format to parse the content as. If not specified, returns raw content."
+                    }
+                },
+                "required": ["asset_name"]
+            })),
         });
     }
 
@@ -5612,6 +5643,34 @@ fn apply_new_plan(
 ///
 /// This function creates a Sub-Agent to execute the subtask, with support for:
 /// - Context injection from previous subtask results
+/// - Load active skills for a subtask based on its `recommended_skill` field.
+///
+/// Used by Sub-Agent executor to handle internal tool calls (e.g., `internal__skill_run_script`).
+async fn load_skills_for_subtask(subtask: &SubTask, request_id: &str) -> Vec<LoadedSkill> {
+    if let Some(skill_name) = &subtask.recommended_skill
+        && let Ok(registry) = SkillRegistry::global()
+    {
+        if let Some(skill) = registry.get(skill_name).await {
+            dual_debug!(
+                "🎯 Loaded skill '{}' for Sub-Agent subtask {} - request_id: {}",
+                skill_name,
+                subtask.id,
+                request_id
+            );
+            return vec![skill];
+        } else {
+            dual_warn!(
+                "⚠️ Recommended skill '{}' not found for subtask {} - request_id: {}",
+                skill_name,
+                subtask.id,
+                request_id
+            );
+        }
+    }
+
+    Vec::new()
+}
+
 /// - Tool inheritance with blacklist filtering
 /// - Timeout management with graceful exit
 /// - Progress tracking and event emission
@@ -5649,8 +5708,13 @@ async fn execute_subtask_via_subagent(
     );
 
     // 1. Build context from previous results
-    let context =
-        build_subtask_context(subtask, previous_results, context_config, skills_summaries, file_attachments);
+    let context = build_subtask_context(
+        subtask,
+        previous_results,
+        context_config,
+        skills_summaries,
+        file_attachments,
+    );
 
     // 2. Calculate effective timeout
     let effective_timeout = if executor_config.inherit_remaining_time {
@@ -5689,10 +5753,13 @@ async fn execute_subtask_via_subagent(
         request_id
     );
 
-    // 4. Create Sub-Agent manager with configuration
+    // 4. Load active skills for internal tool execution and system prompt enrichment
+    let active_skills = load_skills_for_subtask(subtask, request_id).await;
+
+    // 5. Create Sub-Agent manager with configuration
     let subagent_manager = Arc::new(SubAgentManager::new(config.clone()));
 
-    // 5. Build spawn configuration
+    // 6. Build spawn configuration
     let spawn_config = SubAgentSpawnConfig {
         timeout_secs: Some(effective_timeout.as_secs()),
         max_iterations: Some(config.default_max_iterations),
@@ -5704,10 +5771,11 @@ async fn execute_subtask_via_subagent(
         wait_for_completion: true,
     };
 
-    // 6. Build system prompt for the Sub-Agent
-    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries, file_attachments);
+    // 7. Build system prompt for the Sub-Agent (with full skill content if loaded)
+    let system_prompt =
+        build_subagent_system_prompt(subtask, skills_summaries, &active_skills, file_attachments);
 
-    // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
+    // 8. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
         .spawn_with_subtask_id(
             format!("subtask-{}", subtask.id),
@@ -5722,7 +5790,7 @@ async fn execute_subtask_via_subagent(
     let subagent_name = format!("Subtask-{}", subtask.id);
     let start_time = std::time::Instant::now();
 
-    // 8. Emit spawn event
+    // 9. Emit spawn event
     emitter
         .emit_subagent_spawned(
             subagent_id.as_ref(),
@@ -5733,7 +5801,7 @@ async fn execute_subtask_via_subagent(
         )
         .await;
 
-    // 9. Create executor and run
+    // 10. Create executor and run
     // Extract user_id from headers (set by frontend in X-User-ID header)
     let user_id = headers
         .get("X-User-ID")
@@ -5750,7 +5818,8 @@ async fn execute_subtask_via_subagent(
         model.to_string(),
         request_id.to_string(), // Use request_id as conversation_id
         user_id,
-    );
+    )
+    .with_active_skills(active_skills);
 
     let subagent_context = SubAgentContext::new(
         subagent_id.clone(),
@@ -5771,7 +5840,7 @@ async fn execute_subtask_via_subagent(
         )
         .await;
 
-    // 10. Handle result
+    // 11. Handle result
     let duration_ms = start_time.elapsed().as_millis() as u64;
 
     match result {
@@ -6114,8 +6183,13 @@ async fn execute_subtask_via_subagent_with_context(
     );
 
     // 1. Build context from previous results
-    let mut context =
-        build_subtask_context(subtask, previous_results, context_config, skills_summaries, file_attachments);
+    let mut context = build_subtask_context(
+        subtask,
+        previous_results,
+        context_config,
+        skills_summaries,
+        file_attachments,
+    );
 
     // 1.5. Inject failure context if provided
     if let Some(failure_ctx) = failure_context {
@@ -6144,10 +6218,13 @@ async fn execute_subtask_via_subagent_with_context(
             .collect::<Vec<_>>()
     };
 
-    // 4. Create Sub-Agent manager with configuration
+    // 4. Load active skills for internal tool execution and system prompt enrichment
+    let active_skills = load_skills_for_subtask(subtask, request_id).await;
+
+    // 5. Create Sub-Agent manager with configuration
     let subagent_manager = Arc::new(SubAgentManager::new(config.clone()));
 
-    // 5. Build spawn configuration
+    // 6. Build spawn configuration
     let spawn_config = SubAgentSpawnConfig {
         timeout_secs: Some(effective_timeout.as_secs()),
         max_iterations: Some(config.default_max_iterations),
@@ -6159,10 +6236,11 @@ async fn execute_subtask_via_subagent_with_context(
         wait_for_completion: true,
     };
 
-    // 6. Build system prompt for the Sub-Agent
-    let system_prompt = build_subagent_system_prompt(subtask, skills_summaries, file_attachments);
+    // 7. Build system prompt for the Sub-Agent (with full skill content if loaded)
+    let system_prompt =
+        build_subagent_system_prompt(subtask, skills_summaries, &active_skills, file_attachments);
 
-    // 7. Spawn the Sub-Agent (with subtask_id for HITL display)
+    // 8. Spawn the Sub-Agent (with subtask_id for HITL display)
     let subagent_id = subagent_manager
         .spawn_with_subtask_id(
             format!("subtask-{}", subtask.id),
@@ -6177,7 +6255,7 @@ async fn execute_subtask_via_subagent_with_context(
     let subagent_name = format!("Subtask-{}", subtask.id);
     let start_time = std::time::Instant::now();
 
-    // 8. Emit spawn event
+    // 9. Emit spawn event
     emitter
         .emit_subagent_spawned(
             subagent_id.as_ref(),
@@ -6188,7 +6266,7 @@ async fn execute_subtask_via_subagent_with_context(
         )
         .await;
 
-    // 9. Create executor and run
+    // 10. Create executor and run
     // Extract user_id from headers (set by frontend in X-User-ID header)
     let user_id = headers
         .get("X-User-ID")
@@ -6205,7 +6283,8 @@ async fn execute_subtask_via_subagent_with_context(
         model.to_string(),
         request_id.to_string(), // Use request_id as conversation_id
         user_id,
-    );
+    )
+    .with_active_skills(active_skills);
 
     let subagent_context = SubAgentContext::new(
         subagent_id.clone(),
@@ -6402,9 +6481,14 @@ fn build_subtask_context(
 }
 
 /// Build system prompt for a Sub-Agent executing a subtask.
+///
+/// When `active_skills` is non-empty, injects the full SKILL.md content
+/// (via `SkillInjector::phase2_injection`) so the Sub-Agent knows exact
+/// script filenames, usage instructions, and other skill details.
 fn build_subagent_system_prompt(
     subtask: &SubTask,
     skills_summaries: Option<&[SkillSummary]>,
+    active_skills: &[LoadedSkill],
     file_attachments: &[FileAttachmentInfo],
 ) -> String {
     let mut prompt = String::new();
@@ -6418,8 +6502,14 @@ fn build_subagent_system_prompt(
     prompt.push_str("3. Provide a clear, concise result when done\n");
     prompt.push_str("4. If you encounter errors, try alternative approaches\n\n");
 
-    // Add skill context if recommended
-    if let Some(skill) = &subtask.recommended_skill
+    // Add full skill content if loaded, otherwise fall back to summary
+    if !active_skills.is_empty() {
+        // Inject full SKILL.md content (same as Plan mode Phase 2)
+        for skill in active_skills {
+            prompt.push_str(&SkillInjector::phase2_injection(skill));
+            prompt.push_str("\n\n");
+        }
+    } else if let Some(skill) = &subtask.recommended_skill
         && let Some(summaries) = skills_summaries
         && let Some(summary) = summaries.iter().find(|s| &s.name == skill)
     {
@@ -6432,7 +6522,9 @@ fn build_subagent_system_prompt(
         prompt.push_str("## User Attached Files\n\n");
         prompt.push_str("The user has attached the following files to their request. ");
         prompt.push_str("Text and code file contents are included in the task context. ");
-        prompt.push_str("Image files are referenced by path and can be accessed via tools if needed.\n\n");
+        prompt.push_str(
+            "Image files are referenced by path and can be accessed via tools if needed.\n\n",
+        );
         for file in file_attachments {
             prompt.push_str(&format!(
                 "- {} ({}, path: {})\n",
@@ -6947,7 +7039,7 @@ mod tests {
                 available_tools,
                 skills_summaries,
                 active_skills,
-                0, // No reference size limit in tests
+                0,   // No reference size limit in tests
                 &[], // No file attachments in tests
             ))
     }

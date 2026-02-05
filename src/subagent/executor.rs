@@ -33,6 +33,7 @@ use crate::{
     reflection::engine::LlmServerInfo,
     server::TargetServerInfo,
     services::hitl::{self, HitlError, HitlToolCaller, HitlToolContext, HitlToolResult},
+    skills::{LoadedSkill, ScriptContext, SkillLoader},
 };
 
 // ============================================================================
@@ -65,6 +66,8 @@ pub struct SubAgentExecutor {
     conversation_id: String,
     /// 用户 ID（用于 HITL 上下文）
     user_id: String,
+    /// 当前活跃的 Skills（用于执行 internal__ 工具）
+    active_skills: Vec<LoadedSkill>,
 }
 
 impl SubAgentExecutor {
@@ -87,6 +90,13 @@ impl SubAgentExecutor {
             "default".to_string(),
             "anonymous".to_string(),
         )
+        .with_active_skills(Vec::new())
+    }
+
+    /// 设置活跃的 Skills
+    pub fn with_active_skills(mut self, skills: Vec<LoadedSkill>) -> Self {
+        self.active_skills = skills;
+        self
     }
 
     /// 创建带 HITL 上下文的执行器
@@ -121,6 +131,7 @@ impl SubAgentExecutor {
             hitl_caller,
             conversation_id,
             user_id,
+            active_skills: Vec::new(),
         }
     }
 
@@ -660,10 +671,16 @@ impl SubAgentExecutor {
             }
 
             let tool_name_clone = tool_name.to_string();
+            let active_skills = self.active_skills.clone();
+            let conv_id = self.conversation_id.clone();
             let result = hitl_caller
                 .check_and_execute(tool_name, args, &context, |args| {
                     let tool_name = tool_name_clone.clone();
-                    async move { Self::execute_mcp_tool(&tool_name, &args).await }
+                    let skills = active_skills.clone();
+                    let conv_id = conv_id.clone();
+                    async move {
+                        Self::dispatch_tool_execution(&tool_name, &args, &skills, &conv_id).await
+                    }
                 })
                 .await;
 
@@ -706,9 +723,132 @@ impl SubAgentExecutor {
             }
         } else {
             // 没有 HITL，直接执行
-            Self::execute_mcp_tool(tool_name, args)
-                .await
-                .map_err(ServerError::Operation)
+            Self::dispatch_tool_execution(
+                tool_name,
+                args,
+                &self.active_skills,
+                &self.conversation_id,
+            )
+            .await
+            .map_err(ServerError::Operation)
+        }
+    }
+
+    /// 统一工具执行分发：根据工具名称前缀路由到 internal 或 MCP 执行路径
+    async fn dispatch_tool_execution(
+        tool_name: &str,
+        args: &serde_json::Value,
+        active_skills: &[LoadedSkill],
+        conversation_id: &str,
+    ) -> Result<String, String> {
+        if is_internal_tool(tool_name) {
+            Self::execute_internal_tool(tool_name, args, active_skills, conversation_id).await
+        } else {
+            Self::execute_mcp_tool(tool_name, args).await
+        }
+    }
+
+    /// 执行 internal 工具调用（skill_run_script, skill_load_asset）
+    async fn execute_internal_tool(
+        full_tool_name: &str,
+        args: &serde_json::Value,
+        active_skills: &[LoadedSkill],
+        conversation_id: &str,
+    ) -> Result<String, String> {
+        let tool_name = parse_internal_tool_name(full_tool_name)
+            .ok_or_else(|| format!("Invalid internal tool name: {full_tool_name}"))?;
+
+        match tool_name {
+            "skill_run_script" => {
+                let skill = active_skills.first().ok_or_else(|| {
+                    "skill_run_script requires an active skill. No skill is active for this Sub-Agent.".to_string()
+                })?;
+
+                let script_name = args
+                    .get("script_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        "skill_run_script requires 'script_name' argument".to_string()
+                    })?;
+
+                let script_args: Vec<String> = args
+                    .get("args")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let context = ScriptContext::with_ids(Some(conversation_id.to_string()), None);
+
+                match skill
+                    .execute_script_with_context(script_name, script_args, context, None)
+                    .await
+                {
+                    Ok(output) => {
+                        if output.exit_code == 0 {
+                            Ok(format!(
+                                "Script '{}' executed successfully.\n\nOutput:\n{}",
+                                script_name,
+                                output.stdout.trim()
+                            ))
+                        } else {
+                            Ok(format!(
+                                "Script '{}' failed with exit code {}.\n\nStdout:\n{}\n\nStderr:\n{}",
+                                script_name,
+                                output.exit_code,
+                                output.stdout.trim(),
+                                output.stderr.trim()
+                            ))
+                        }
+                    }
+                    Err(e) => Err(format!("Script execution failed: {}", e)),
+                }
+            }
+            "skill_load_asset" => {
+                let skill = active_skills.first().ok_or_else(|| {
+                    "skill_load_asset requires an active skill. No skill is active for this Sub-Agent.".to_string()
+                })?;
+
+                let asset_name = args
+                    .get("asset_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "skill_load_asset requires 'asset_name' argument".to_string())?;
+
+                let content = SkillLoader::load_asset_string(&skill.skill_dir, asset_name)
+                    .await
+                    .ok_or_else(|| {
+                        format!(
+                            "Asset '{}' not found in skill '{}'",
+                            asset_name, skill.metadata.name
+                        )
+                    })?;
+
+                // Apply template variable replacement if variables provided
+                let content = if let Some(vars) = args.get("variables").and_then(|v| v.as_object())
+                {
+                    let mut result = content;
+                    for (key, value) in vars {
+                        let placeholder = format!("{{{{{}}}}}", key);
+                        let replacement = match value {
+                            serde_json::Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        };
+                        result = result.replace(&placeholder, &replacement);
+                    }
+                    result
+                } else {
+                    content
+                };
+
+                Ok(format!(
+                    "Asset '{}' loaded successfully.\n\nContent:\n{}",
+                    asset_name, content
+                ))
+            }
+            _ => Err(format!("Unknown internal tool: {tool_name}")),
         }
     }
 
@@ -798,6 +938,19 @@ fn build_tools_json(tools: &[ToolDescription]) -> serde_json::Value {
         .collect();
 
     serde_json::Value::Array(tools_json)
+}
+
+/// Internal tool 前缀
+const INTERNAL_TOOL_PREFIX: &str = "internal";
+
+/// 检查是否是 internal 工具（skill_run_script, skill_load_asset 等）
+fn is_internal_tool(tool_name: &str) -> bool {
+    tool_name.starts_with(&format!("{INTERNAL_TOOL_PREFIX}__"))
+}
+
+/// 解析 internal 工具名称，返回去除前缀后的工具名
+fn parse_internal_tool_name(full_name: &str) -> Option<&str> {
+    full_name.strip_prefix(&format!("{INTERNAL_TOOL_PREFIX}__"))
 }
 
 /// 解析 MCP 工具名称
