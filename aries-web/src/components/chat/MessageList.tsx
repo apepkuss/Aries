@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageItem } from './MessageItem';
 import { useChatStore } from '@/stores';
-import { HitlOverlay } from '@/components/hitl';
 
 export function MessageList() {
   const { messages, executionStatus, isStreaming, getSubAgent, getRootSubAgents } = useChatStore();
@@ -16,16 +15,12 @@ export function MessageList() {
 
   if (messages.length === 0) {
     return (
-      <>
-        <div className="flex-1 min-h-0 flex items-center justify-center">
-          <div className="text-center text-muted-foreground">
-            <p className="text-lg font-medium">Welcome to Aries</p>
-            <p className="text-sm">Start a conversation by typing a message below</p>
-          </div>
+      <div className="flex-1 min-h-0 flex items-center justify-center">
+        <div className="text-center text-muted-foreground">
+          <p className="text-lg font-medium">Welcome to Aries</p>
+          <p className="text-sm">Start a conversation by typing a message below</p>
         </div>
-        {/* HITL overlay needs to be rendered even when no messages */}
-        <HitlOverlay />
-      </>
+      </div>
     );
   }
 
@@ -51,8 +46,6 @@ export function MessageList() {
             getSubAgent={index === lastStreamingIndex ? getSubAgent : undefined}
           />
         ))}
-        {/* HITL overlay for pending requests */}
-        <HitlOverlay className="mt-4" />
         <div ref={bottomRef} />
       </div>
     </ScrollArea>
