@@ -46,10 +46,6 @@ pub struct PrivacyDetectorConfig {
     #[serde(default = "default_rule_confidence_threshold")]
     pub rule_confidence_threshold: f32,
 
-    /// 是否启用模型检测兜底
-    #[serde(default = "default_enable_model_fallback")]
-    pub enable_model_fallback: bool,
-
     /// 模型检测置信度阈值
     #[serde(default = "default_model_confidence_threshold")]
     pub model_confidence_threshold: f32,
@@ -71,10 +67,6 @@ fn default_rule_confidence_threshold() -> f32 {
     0.6
 }
 
-fn default_enable_model_fallback() -> bool {
-    true
-}
-
 fn default_model_confidence_threshold() -> f32 {
     0.8
 }
@@ -89,7 +81,6 @@ impl Default for PrivacyDetectorConfig {
             enabled: default_enabled(),
             mode: DetectionMode::default(),
             rule_confidence_threshold: default_rule_confidence_threshold(),
-            enable_model_fallback: default_enable_model_fallback(),
             model_confidence_threshold: default_model_confidence_threshold(),
             custom_keywords: Vec::new(),
             min_text_length: default_min_text_length(),
@@ -234,9 +225,7 @@ impl PrivacyDetector {
                 }
 
                 // 规则未检测到或置信度不足，尝试模型检测
-                if self.config.enable_model_fallback
-                    && let Some(response) = model_response
-                {
+                if let Some(response) = model_response {
                     let model_result = self.process_model_response(response)?;
                     // 合并结果
                     return Ok(rule_result.merge(model_result));
@@ -266,50 +255,6 @@ impl PrivacyDetector {
         }
     }
 
-    /// 判断是否需要模型检测
-    ///
-    /// # 参数
-    /// - `text`: 待检测的文本
-    ///
-    /// # 返回
-    /// 是否需要调用模型进行检测
-    pub fn needs_model_detection(&self, text: &str) -> Result<bool, PrivacyDetectionError> {
-        // 检查是否启用
-        if !self.config.enabled {
-            return Ok(false);
-        }
-
-        // 检查文本长度
-        if text.chars().count() < self.config.min_text_length {
-            return Ok(false);
-        }
-
-        // 根据检测模式判断
-        match self.config.mode {
-            DetectionMode::RulesOnly => Ok(false),
-            DetectionMode::ModelOnly => Ok(true),
-            DetectionMode::Combined => Ok(true),
-            DetectionMode::RulesThenModel => {
-                if !self.config.enable_model_fallback {
-                    return Ok(false);
-                }
-
-                // 先执行规则检测
-                let rule_result = self.detect_rules_only(text);
-
-                // 如果规则检测到了高置信度的隐私，不需要模型
-                if rule_result.is_private
-                    && rule_result.confidence >= self.config.rule_confidence_threshold
-                {
-                    Ok(false)
-                } else {
-                    // 规则未检测到或置信度不足，需要模型兜底
-                    Ok(true)
-                }
-            }
-        }
-    }
-
     /// 获取配置
     pub fn config(&self) -> &PrivacyDetectorConfig {
         &self.config
@@ -326,7 +271,6 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.mode, DetectionMode::RulesThenModel);
         assert!((config.rule_confidence_threshold - 0.6).abs() < f32::EPSILON);
-        assert!(config.enable_model_fallback);
     }
 
     #[test]
@@ -384,50 +328,6 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_model_detection_rules_only() {
-        let config = PrivacyDetectorConfig {
-            mode: DetectionMode::RulesOnly,
-            ..Default::default()
-        };
-        let detector = PrivacyDetector::new(config);
-
-        let needs_model = detector.needs_model_detection("some text").unwrap();
-        assert!(!needs_model);
-    }
-
-    #[test]
-    fn test_needs_model_detection_model_only() {
-        let config = PrivacyDetectorConfig {
-            mode: DetectionMode::ModelOnly,
-            ..Default::default()
-        };
-        let detector = PrivacyDetector::new(config);
-
-        let needs_model = detector.needs_model_detection("some text here").unwrap();
-        assert!(needs_model);
-    }
-
-    #[test]
-    fn test_needs_model_detection_rules_then_model() {
-        let config = PrivacyDetectorConfig {
-            mode: DetectionMode::RulesThenModel,
-            enable_model_fallback: true,
-            ..Default::default()
-        };
-        let detector = PrivacyDetector::new(config);
-
-        // 规则检测到隐私，不需要模型
-        let needs_model = detector
-            .needs_model_detection("我的手机号是13812345678")
-            .unwrap();
-        assert!(!needs_model);
-
-        // 规则未检测到，需要模型
-        let needs_model = detector.needs_model_detection("今天天气很好啊").unwrap();
-        assert!(needs_model);
-    }
-
-    #[test]
     fn test_detect_with_model() {
         let config = PrivacyDetectorConfig {
             mode: DetectionMode::RulesThenModel,
@@ -453,7 +353,6 @@ mod tests {
             enabled = true
             mode = "rules_then_model"
             rule_confidence_threshold = 0.7
-            enable_model_fallback = true
             model_confidence_threshold = 0.85
             custom_keywords = ["机密", "内部"]
             min_text_length = 10
@@ -463,7 +362,6 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.mode, DetectionMode::RulesThenModel);
         assert!((config.rule_confidence_threshold - 0.7).abs() < f32::EPSILON);
-        assert!(config.enable_model_fallback);
         assert!((config.model_confidence_threshold - 0.85).abs() < f32::EPSILON);
         assert_eq!(config.custom_keywords.len(), 2);
         assert_eq!(config.min_text_length, 10);
@@ -495,7 +393,6 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.mode, DetectionMode::RulesThenModel);
         assert!((config.rule_confidence_threshold - 0.6).abs() < f32::EPSILON);
-        assert!(config.enable_model_fallback);
         assert!((config.model_confidence_threshold - 0.8).abs() < f32::EPSILON);
         assert!(config.custom_keywords.is_empty());
         assert_eq!(config.min_text_length, 5);

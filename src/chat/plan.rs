@@ -22,8 +22,9 @@ use axum::{
 use endpoints::chat::{
     ChatCompletionAssistantMessage, ChatCompletionChunk, ChatCompletionChunkChoice,
     ChatCompletionChunkChoiceDelta, ChatCompletionObject, ChatCompletionRequest,
-    ChatCompletionRequestMessage, ChatCompletionRole, ChatCompletionSystemMessage,
-    ChatCompletionToolMessage, ChatCompletionUserMessage, ChatCompletionUserMessageContent,
+    ChatCompletionRequestBuilder, ChatCompletionRequestMessage, ChatCompletionRole,
+    ChatCompletionSystemMessage, ChatCompletionToolMessage, ChatCompletionUserMessage,
+    ChatCompletionUserMessageContent,
 };
 use futures_util::stream::{self, StreamExt};
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -2593,6 +2594,127 @@ fn resolve_chat_server_kind(headers: &HeaderMap) -> ServerKind {
     }
 }
 
+/// Runs the full privacy detection pipeline: rules first, model fallback.
+///
+/// 1. Determines whether model detection is needed based on the detection mode.
+/// 2. If needed, calls the privacy chat LLM for model-based detection.
+/// 3. Merges rules and model results via `detect_with_model()`.
+/// 4. If the model call fails at any point, gracefully falls back to rules-only.
+async fn run_privacy_detection(
+    state: &Arc<AppState>,
+    detector: &crate::services::privacy::PrivacyDetector,
+    text: &str,
+    cancel_token: &CancellationToken,
+) -> Result<crate::services::privacy::PrivacyDetectionResult, crate::services::privacy::PrivacyDetectionError>
+{
+    use crate::services::privacy::DetectionMode;
+
+    let needs_model = matches!(
+        detector.config().mode,
+        DetectionMode::RulesThenModel | DetectionMode::ModelOnly | DetectionMode::Combined
+    );
+
+    if !needs_model {
+        dual_debug!("Detection mode is rules_only, skipping model detection");
+        return detector.detect_with_model(text, None);
+    }
+
+    // Attempt model-based detection via privacy_chat LLM
+    dual_debug!("Attempting LLM-based privacy detection via privacy_chat service");
+    let model_response = match call_privacy_model(state, detector, text, cancel_token).await {
+        Ok(response) => Some(response),
+        Err(e) => {
+            dual_warn!(
+                "Privacy model detection failed: {}, falling back to rules-only",
+                e
+            );
+            None
+        }
+    };
+
+    detector.detect_with_model(text, model_response.as_deref())
+}
+
+/// Calls the privacy_chat LLM for privacy detection.
+///
+/// Gets a privacy_chat server, builds the request from `detector.prepare_model_request()`,
+/// sends it, and returns the model's text response.
+///
+/// All errors are returned as `String` — callers treat any failure as
+/// "model unavailable" and fall back to rules-only detection.
+async fn call_privacy_model(
+    state: &Arc<AppState>,
+    detector: &crate::services::privacy::PrivacyDetector,
+    text: &str,
+    cancel_token: &CancellationToken,
+) -> Result<String, String> {
+    // 1. Get a privacy_chat server (must NOT use normal chat server)
+    let request_id = gen_chat_id();
+    let server_info = get_chat_server(state, &request_id, ServerKind::privacy_chat)
+        .await
+        .map_err(|e| format!("No privacy_chat server available for model detection: {e}"))?;
+
+    // 2. Build LLM request
+    let prompt = detector.prepare_model_request(text);
+    let user_message = ChatCompletionRequestMessage::new_user_message(
+        ChatCompletionUserMessageContent::Text(prompt),
+        None,
+    );
+    let chat_request = ChatCompletionRequestBuilder::new(&[user_message])
+        .with_max_completion_tokens(512)
+        .build();
+
+    // 3. Build HTTP request
+    let url = format!(
+        "{}/chat/completions",
+        server_info.url.trim_end_matches('/')
+    );
+    let mut request = reqwest::Client::new()
+        .post(&url)
+        .header(CONTENT_TYPE, "application/json")
+        .json(&chat_request);
+
+    if let Some(ref api_key) = server_info.api_key {
+        if !api_key.is_empty() {
+            request = request.header(AUTHORIZATION, format!("Bearer {}", api_key));
+        }
+    }
+
+    // 4. Send request with cancellation support
+    let response = select! {
+        result = request.send() => {
+            result.map_err(|e| format!("Privacy model LLM request failed: {e}"))?
+        }
+        _ = cancel_token.cancelled() => {
+            return Err("Privacy model detection cancelled".to_string());
+        }
+    };
+
+    // 5. Check HTTP status
+    if !response.status().is_success() {
+        return Err(format!(
+            "Privacy model LLM returned HTTP {}",
+            response.status()
+        ));
+    }
+
+    // 6. Parse response
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read privacy model response: {e}"))?;
+
+    let completion: ChatCompletionObject = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Failed to parse privacy model response: {e}"))?;
+
+    // 7. Extract content
+    completion
+        .choices
+        .first()
+        .and_then(|c| c.message.content.clone())
+        .ok_or_else(|| "Privacy model LLM returned empty content".to_string())
+}
+
 /// Detects privacy content and confirms with user via HITL if needed.
 ///
 /// This function implements the smart privacy detection flow:
@@ -2642,18 +2764,19 @@ async fn detect_and_confirm_privacy(
         return Ok(ServerKind::chat);
     };
 
-    // 3. Run privacy detection
-    let detection_result = match detector.detect(message) {
-        Ok(result) => result,
-        Err(crate::services::privacy::PrivacyDetectionError::NotEnabled) => {
-            dual_debug!("Privacy detection not enabled");
-            return Ok(ServerKind::chat);
-        }
-        Err(e) => {
-            dual_warn!("Privacy detection failed: {}, using normal chat", e);
-            return Ok(ServerKind::chat);
-        }
-    };
+    // 3. Run privacy detection (rules first, model fallback)
+    let detection_result =
+        match run_privacy_detection(state, detector, message, cancel_token).await {
+            Ok(result) => result,
+            Err(crate::services::privacy::PrivacyDetectionError::NotEnabled) => {
+                dual_debug!("Privacy detection not enabled");
+                return Ok(ServerKind::chat);
+            }
+            Err(e) => {
+                dual_warn!("Privacy detection failed: {}, using normal chat", e);
+                return Ok(ServerKind::chat);
+            }
+        };
 
     // 5. If no privacy content detected, use normal chat
     if !detection_result.is_private {

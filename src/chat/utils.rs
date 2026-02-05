@@ -114,7 +114,7 @@ pub(super) fn extract_user_message_with_files(
         let summary = files
             .iter()
             .enumerate()
-            .map(|(i, f)| format!("  {}. {} ({})", i + 1, f.basename, f.mime_type))
+            .map(|(i, f)| format!("  {}. {} ({}, path: {})", i + 1, f.basename, f.mime_type, f.filename))
             .collect::<Vec<_>>()
             .join("\n");
         let attachment_note = format!(
@@ -233,8 +233,8 @@ pub(super) fn resolve_file_for_llm(file: &FileAttachmentInfo) -> Vec<ContentPart
                     .and_then(|e| e.to_str())
                     .unwrap_or("");
                 vec![ContentPart::Text(TextContentPart::new(format!(
-                    "File: {}\n```{}\n{}\n```",
-                    file.basename, ext, content
+                    "File: {} (path: {})\n```{}\n{}\n```",
+                    file.basename, file.filename, ext, content
                 )))]
             }
             Err(e) => vec![ContentPart::Text(TextContentPart::new(format!(
@@ -298,7 +298,7 @@ pub(super) fn resolve_file_as_text(file: &FileAttachmentInfo) -> String {
                     .extension()
                     .and_then(|e| e.to_str())
                     .unwrap_or("");
-                format!("File: {}\n```{}\n{}\n```", file.basename, ext, content)
+                format!("File: {} (path: {})\n```{}\n{}\n```", file.basename, file.filename, ext, content)
             }
             Err(e) => format!("[Failed to read file {}: {}]", file.basename, e),
         }

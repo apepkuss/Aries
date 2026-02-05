@@ -389,7 +389,6 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 enabled = true                        # Enable smart privacy detection (default: true)
 mode = "rules_then_model"             # Detection mode (default: rules_then_model)
 rule_confidence_threshold = 0.6       # Minimum confidence for rule-based detection (0.0-1.0)
-enable_model_fallback = true          # Enable LLM fallback when rules are uncertain
 model_confidence_threshold = 0.8      # Minimum confidence for model-based detection (0.0-1.0)
 min_text_length = 5                   # Skip detection for very short texts (default: 5 chars)
 

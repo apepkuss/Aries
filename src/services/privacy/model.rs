@@ -10,26 +10,49 @@ use super::types::{
 };
 
 /// 模型检测的 prompt 模板
-const DETECTION_PROMPT: &str = r#"分析以下用户查询是否包含或请求处理隐私/敏感信息。
+const DETECTION_PROMPT: &str = r#"You are a privacy sensitivity classifier. Analyze the following user query and determine whether it should be handled in privacy-protected mode.
 
-隐私信息类别：
-- personal_identification: 身份证、护照、驾照、社保号等身份证明
-- financial: 银行卡、信用卡、账户信息、交易详情等财务数据
-- medical: 病历、诊断、处方、健康档案等医疗信息
-- credentials: 密码、API Key、Token、私钥等凭证
-- contact: 手机号、邮箱、社交账号等联系方式
-- location: 家庭住址、GPS坐标等位置信息
-- biometric: 指纹、人脸等生物特征
+## Decision Criteria
 
-请以 JSON 格式返回分析结果：
+A query should use privacy mode if it meets ANY of the following:
+
+1. **Contains explicit personal data**: The text directly includes identifiable information such as ID numbers, phone numbers, email addresses, bank card numbers, passwords, API keys, home addresses, medical record IDs, etc.
+
+2. **Requests processing of personal data**: The user is asking to process, analyze, format, convert, or otherwise handle personal/sensitive data, even if the actual data is not yet provided (e.g., "Help me organize my medical records", "Parse this CSV of customer info").
+
+3. **Involves privacy-sensitive context**: The query topic inherently relates to personal privacy, such as:
+   - Personal health conditions, symptoms, medications, or diagnoses
+   - Personal financial situations, tax filings, debt, or salary details
+   - Legal matters involving personal cases or disputes
+   - Personal relationship issues or private life details
+   - Employment records, performance reviews, or HR matters
+   - Personal biometric data or identity verification
+
+4. **Implies handling confidential content**: The query suggests that the conversation will involve confidential or restricted information (e.g., "I need to draft a confidentiality agreement for...", "Don't share this but...").
+
+## What is NOT privacy-sensitive
+
+- General knowledge questions (e.g., "What is machine learning?")
+- Programming help without personal data (e.g., "How to sort a list in Python?")
+- Public information lookups (e.g., "What's the capital of France?")
+- Creative writing or brainstorming without personal context
+- Technical troubleshooting for general scenarios
+
+## Response Format
+
+Return ONLY a JSON object:
 {
   "is_private": true/false,
   "confidence": 0.0-1.0,
-  "categories": ["category1", "category2"],
-  "reason": "简要说明"
+  "categories": ["category1"],
+  "reason": "Brief explanation in the same language as the user query"
 }
 
-用户查询：
+Categories (use one or more): personal_identification, financial, medical, credentials, contact, location, biometric
+
+If none of the predefined categories fit but the query is still privacy-sensitive, use the most relevant category and explain in "reason".
+
+## User Query:
 "#;
 
 /// 模型检测结果（从 LLM 响应解析）
@@ -216,7 +239,7 @@ mod tests {
     #[test]
     fn test_build_detection_prompt() {
         let prompt = build_detection_prompt("我的手机号是多少");
-        assert!(prompt.contains("分析以下用户查询"));
+        assert!(prompt.contains("privacy sensitivity classifier"));
         assert!(prompt.contains("我的手机号是多少"));
     }
 
