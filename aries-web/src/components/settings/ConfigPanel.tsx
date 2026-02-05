@@ -9,7 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUIStore, useConfigStore, useServiceStore } from '@/stores';
@@ -141,7 +140,7 @@ export function ConfigPanel() {
           </div>
         ) : (
           <>
-            <ScrollArea className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto scrollbar-overlay">
               <Tabs defaultValue="service" className="w-full">
                 <TabsList className="w-full">
                   <TabsTrigger value="service" className="flex-1">
@@ -169,7 +168,7 @@ export function ConfigPanel() {
                   </TabsContent>
                 </div>
               </Tabs>
-            </ScrollArea>
+            </div>
 
             <DialogFooter className="shrink-0 gap-2 border-t pt-4">
               <div className="flex gap-2 w-full sm:w-auto justify-end">

@@ -108,6 +108,32 @@
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }
+
+  /* Themed scrollbar: auto-hide, shows on hover */
+  .scrollbar-overlay {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .scrollbar-overlay:hover {
+    scrollbar-color: var(--border) transparent;
+  }
+  .scrollbar-overlay::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-overlay::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-overlay::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 9999px;
+    transition: background-color 0.2s;
+  }
+  .scrollbar-overlay:hover::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+  }
+  .scrollbar-overlay::-webkit-scrollbar-thumb:hover {
+    background-color: var(--muted-foreground);
+  }
 }
 
 @theme inline {
