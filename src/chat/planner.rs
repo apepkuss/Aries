@@ -597,7 +597,7 @@ impl TaskPlanner {
         let skill_rule = if self.skills_summaries.is_empty() {
             String::new()
         } else {
-            "\n7. 如果某个子任务适合使用特定的 Skill，请在 `<recommended_skill>` 标签中指定"
+            "\n7. 如果某个子任务适合使用特定的 Skill，请在 `<recommended_skill>` 标签中指定。当推荐使用某个 Skill 时，应参考其描述中的输入要求来规划前置任务，避免为 Skill 已能自行处理的工作创建冗余子任务"
                 .to_string()
         };
 
