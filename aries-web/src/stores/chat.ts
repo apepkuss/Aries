@@ -50,7 +50,7 @@ interface ChatState {
   error: string | null;
 
   // Actions
-  sendMessage: (content: string, attachments?: FileAttachment[]) => Promise<void>;
+  sendMessage: (content: string, attachments?: FileAttachment[], options?: { privacyMode?: boolean }) => Promise<void>;
   stopGeneration: () => void;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
@@ -140,7 +140,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
 
   // Send a message
-  sendMessage: async (content: string, attachments?: FileAttachment[]) => {
+  sendMessage: async (content: string, attachments?: FileAttachment[], options?: { privacyMode?: boolean }) => {
     const { messages, isStreaming, sessionId } = get();
 
     const hasContent = content.trim().length > 0;
@@ -163,6 +163,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: content.trim(),
       timestamp: new Date(),
       attachments: hasAttachments ? attachments : undefined,
+      privacyMode: options?.privacyMode || undefined,
     };
 
     // Create placeholder assistant message
@@ -173,6 +174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       timestamp: new Date(),
       isStreaming: true,
       toolCalls: [],
+      privacyMode: options?.privacyMode || undefined,
     };
 
     // Create abort controller
@@ -207,7 +209,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       for await (const event of streamChatCompletionEnhanced(
         request,
         abortController.signal,
-        { sessionId: currentSessionId }
+        { sessionId: currentSessionId, privacyMode: options?.privacyMode }
       )) {
         switch (event.type) {
           case 'status':
