@@ -155,7 +155,7 @@ dependencies = [
  "dashmap",
  "dirs",
  "dotenv",
- "endpoints 0.37.0 (git+https://github.com/LlamaEdge/LlamaEdge.git?branch=feat-file-content)",
+ "endpoints",
  "futures-util",
  "hex",
  "http",
@@ -521,13 +521,13 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chat-prompts"
-version = "0.35.2"
+version = "0.35.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1de9892c614957fd89a9759a2978ecf8d686263089cf8a7a5e0f7c01a6f75db2"
+checksum = "28b39e51fe324cde4335645167d9bcc5fddbde9c66adca85138d1cbc7ee6d0d3"
 dependencies = [
  "base64 0.22.1",
  "clap",
- "endpoints 0.37.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "endpoints",
  "enum_dispatch",
  "image",
  "serde",
@@ -996,20 +996,9 @@ dependencies = [
 
 [[package]]
 name = "endpoints"
-version = "0.37.0"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c1e6f6391c40a3da28a1edfaf1eda695c21434eecbd24fd730c63b5661a915e"
-dependencies = [
- "indexmap 2.13.0",
- "serde",
- "serde_json",
- "url",
-]
-
-[[package]]
-name = "endpoints"
-version = "0.37.0"
-source = "git+https://github.com/LlamaEdge/LlamaEdge.git?branch=feat-file-content#7dc032896f80ebc183e71c1e91e6a233573090c5"
+checksum = "4492e6b3dbcb07e5c8e4a90538c4d79f635e484a7450eb7dddaa2348e8f8a88b"
 dependencies = [
  "indexmap 2.13.0",
  "serde",
