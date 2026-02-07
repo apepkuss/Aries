@@ -17,3 +17,19 @@ export async function getSkills(): Promise<SkillListResponse> {
     throw err;
   }
 }
+
+/**
+ * Reload all skills from the skills directory.
+ * Clears the skill cache and re-scans ~/.aries/skills for new/updated skills.
+ * Returns empty result if skills system is not enabled (503).
+ */
+export async function reloadSkills(): Promise<void> {
+  try {
+    await apiClient.post('api/skills/reload', { retry: 0 });
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 503 || err.status === 404)) {
+      return;
+    }
+    throw err;
+  }
+}

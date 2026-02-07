@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getSkills } from '@/api/skills';
+import { getSkills, reloadSkills } from '@/api/skills';
 import type { SkillSummary } from '@/api/types';
 
 interface SkillsState {
@@ -19,6 +19,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
 
     set({ isLoading: true, error: null });
     try {
+      await reloadSkills();
       const response = await getSkills();
       set({ skills: response.skills, isLoading: false });
     } catch (err) {
