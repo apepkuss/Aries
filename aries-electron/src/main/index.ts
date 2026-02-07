@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell, dialog, ipcMain, Notification } from 'electr
 import path from 'path'
 import fs from 'fs'
 import { BackendManager } from './backend'
+import { initAutoUpdater, stopAutoUpdater } from './updater'
 
 // Map file extension to MIME type
 function getMimeType(ext: string): string {
@@ -154,12 +155,50 @@ app.whenReady().then(async () => {
 
     // 3. Navigate to the backend-served frontend
     mainWindow?.loadURL(`http://127.0.0.1:${port}`)
+
+    // 4. Start auto-updater (packaged builds only)
+    initAutoUpdater()
   } catch (err) {
     console.error('Failed to start backend:', err)
-    dialog.showErrorBox(
-      'Failed to start Aries backend',
-      err instanceof Error ? err.message : String(err)
-    )
+    const msg = err instanceof Error ? err.message : String(err)
+
+    let title = 'Failed to start Aries'
+    let detail = msg
+
+    if (msg.includes('binary not found')) {
+      title = 'Backend binary not found'
+      detail =
+        'The Aries backend binary could not be located.\n\n' +
+        'If you are running in development mode, please run:\n' +
+        '  cargo build --release\n\n' +
+        msg
+    } else if (msg.includes('already in use')) {
+      title = 'Port conflict'
+      detail =
+        'Another process is using the configured port.\n\n' +
+        `You can change the port in:\n${backend.getConfigFilePath()}\n\n` +
+        'Or stop the other process and try again.'
+    } else if (msg.includes('No config.toml found')) {
+      title = 'Configuration file missing'
+      detail =
+        'Aries could not find a config.toml file.\n\n' +
+        `Expected location: ${backend.getConfigFilePath()}\n\n` +
+        'Please ensure the configuration file exists.'
+    } else if (msg.includes('did not become ready')) {
+      title = 'Backend startup timeout'
+      detail =
+        'The backend process started but did not respond in time.\n\n' +
+        'Check the log file for details:\n' +
+        `${app.getPath('logs')}/aries-backend.log`
+    } else if (msg.includes('exited unexpectedly')) {
+      title = 'Backend crashed'
+      detail =
+        'The backend process exited unexpectedly.\n\n' +
+        'Check the log file for details:\n' +
+        `${app.getPath('logs')}/aries-backend.log`
+    }
+
+    dialog.showErrorBox(title, detail)
     app.quit()
   }
 })
@@ -178,6 +217,7 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', async () => {
+  stopAutoUpdater()
   await backend.stop()
 })
 

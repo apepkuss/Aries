@@ -17,28 +17,19 @@ extraResources:
     to: "web-ui"
   - from: "../config.toml.example"
     to: "config.toml.example"
+# For private repos, uncomment `private: true` below and ensure
+# users have GH_TOKEN (with `repo` scope) set in their environment.
+publish:
+  provider: github
+  owner: apepkuss
+  repo: Aries
+  # private: true
 mac:
   category: public.app-category.developer-tools
   target:
     - target: dmg
-      arch: [x64, arm64]
-  icon: resources/icon.icns
-win:
-  target:
-    - target: nsis
-      arch: [x64]
-  icon: resources/icon.ico
-nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: ${productName}
-  uninstallDisplayName: ${productName}
-  createDesktopShortcut: always
-linux:
-  target:
-    - target: AppImage
-      arch: [x64]
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
   icon: resources/icon.png
-  category: Development
-appImage:
-  artifactName: ${name}-${version}.${ext}
 npmRebuild: false

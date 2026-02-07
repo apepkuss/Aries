@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release_macos_arm64:
+    runs-on: macos-14
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v5
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version to project files
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+          sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          cd aries-electron && npm version "$VERSION" --no-git-tag-version
+
+      - name: Install Rust-stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Rust backend
+        run: cargo build --release
+        env:
+          SQLX_OFFLINE: true
+
+      - name: Build Web UI
+        working-directory: aries-web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Electron app and publish
+        working-directory: aries-electron
+        run: |
+          npm ci
+          npm run build
+          npx electron-builder --mac --arm64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

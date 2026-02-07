@@ -3,6 +3,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { Layout } from '@/components/layout';
 import { ChatContainer } from '@/components/chat';
 import { ConfigPanel } from '@/components/settings';
+import { SetupWizard } from '@/components/setup';
 import { useTheme, useHitlEventSource } from '@/hooks';
 import { useConfigStore, useServiceStore } from '@/stores';
 
@@ -27,6 +28,7 @@ function App() {
         <ChatContainer />
       </Layout>
       <ConfigPanel />
+      <SetupWizard />
       <Toaster position="bottom-right" />
     </>
   );
