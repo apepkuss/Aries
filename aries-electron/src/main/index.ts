@@ -216,12 +216,16 @@ app.on('activate', () => {
   }
 })
 
-app.on('before-quit', async () => {
-  stopAutoUpdater()
-  await backend.stop()
-})
+let isQuitting = false
 
-// Ensure backend is cleaned up on unexpected exit
-process.on('exit', () => {
-  // Synchronous cleanup is limited, but tree-kill in stop() handles it
+app.on('before-quit', (e) => {
+  if (isQuitting) return // Already handling quit
+
+  e.preventDefault()
+  isQuitting = true
+
+  stopAutoUpdater()
+  backend.stop().finally(() => {
+    app.exit(0)
+  })
 })
