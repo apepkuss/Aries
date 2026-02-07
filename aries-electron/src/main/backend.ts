@@ -75,14 +75,19 @@ export class BackendManager {
    */
   private getConfigPath(): string {
     const homeDir = app.getPath('home')
-    const userConfigPath = path.join(homeDir, '.aries', 'config.toml')
+    const ariesDir = path.join(homeDir, '.aries')
+    const userConfigPath = path.join(ariesDir, 'config.toml')
+
+    // Ensure ~/.aries/ directory structure exists
+    for (const sub of ['artifacts', 'data', 'sessions', 'skills']) {
+      fs.mkdirSync(path.join(ariesDir, sub), { recursive: true })
+    }
 
     if (fs.existsSync(userConfigPath)) {
       return userConfigPath
     }
 
     // Copy default config to ~/.aries/
-    const ariesDir = path.join(homeDir, '.aries')
     const defaultConfigPaths = app.isPackaged
       ? [path.join(process.resourcesPath, 'config.toml.example')]
       : [
