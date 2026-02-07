@@ -22,8 +22,11 @@ jobs:
       - name: Sync version to project files
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
-          sed -i '' "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-          cd aries-electron && npm version "$VERSION" --no-git-tag-version
+          echo "Syncing version to ${VERSION}"
+          sed -i '' "s/^version *=.*$/version = \"${VERSION}\"/" Cargo.toml
+          sed -i '' "s/\"version\": *\"[^\"]*\"/\"version\": \"${VERSION}\"/" aries-electron/package.json
+          grep '^version' Cargo.toml
+          grep '"version"' aries-electron/package.json
 
       - name: Install Rust-stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
