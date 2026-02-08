@@ -4949,16 +4949,20 @@ fn filter_tools_by_patterns<'a>(
         Some(patterns) => tools
             .iter()
             .filter(|tool| {
-                // Extract the tool name part from MCP tool name
-                let tool_name = extract_tool_name(&tool.name);
+                // Extract the short tool name part from MCP tool name
+                let short_name = extract_tool_name(&tool.name);
+                // Also keep the full name for matching patterns that use full MCP names
+                // (e.g., "mcp__cardea-weather__get_current_weather")
+                let full_name = &tool.name;
 
                 patterns.iter().any(|pattern| {
                     if pattern.contains('*') {
-                        // Wildcard pattern matching
-                        match_wildcard_pattern(pattern, tool_name)
+                        // Wildcard pattern matching (against short name)
+                        match_wildcard_pattern(pattern, short_name)
                     } else {
-                        // Exact match (case-insensitive)
-                        tool_name.eq_ignore_ascii_case(pattern)
+                        // Exact match (case-insensitive) against both full and short name
+                        short_name.eq_ignore_ascii_case(pattern)
+                            || full_name.eq_ignore_ascii_case(pattern)
                     }
                 })
             })
@@ -7317,6 +7321,53 @@ mod tests {
         let filtered = filter_tools_by_patterns(&tools, Some(&patterns));
 
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn test_filter_tools_by_patterns_full_mcp_name() {
+        let tools = vec![
+            ToolDescription {
+                name: "mcp__cardea-weather__get_current_weather".to_string(),
+                description: "Get current weather".to_string(),
+                ..Default::default()
+            },
+            ToolDescription {
+                name: "mcp__cardea-calculator__sum".to_string(),
+                description: "Calculate sum".to_string(),
+                ..Default::default()
+            },
+            ToolDescription {
+                name: "internal__skill_run_script".to_string(),
+                description: "Run script".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        // Pattern using full MCP name (as declared in skill's allowed-tools)
+        let patterns = vec!["mcp__cardea-weather__get_current_weather".to_string()];
+        let filtered = filter_tools_by_patterns(&tools, Some(&patterns));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "mcp__cardea-weather__get_current_weather");
+
+        // Short name pattern should still work
+        let patterns = vec!["get_current_weather".to_string()];
+        let filtered = filter_tools_by_patterns(&tools, Some(&patterns));
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "mcp__cardea-weather__get_current_weather");
+
+        // Mixed: full MCP name + short name
+        let patterns = vec![
+            "mcp__cardea-weather__get_current_weather".to_string(),
+            "sum".to_string(),
+        ];
+        let filtered = filter_tools_by_patterns(&tools, Some(&patterns));
+
+        assert_eq!(filtered.len(), 2);
+        let names: Vec<&str> = filtered.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"mcp__cardea-weather__get_current_weather"));
+        assert!(names.contains(&"mcp__cardea-calculator__sum"));
     }
 
     #[test]
