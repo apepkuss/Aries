@@ -99,6 +99,9 @@ Example: <use_skill>skill-name</use_skill>
             )
         };
 
+        // Auto-generate script calling instructions if skill has scripts
+        let scripts_section = Self::generate_scripts_section(skill);
+
         format!(
             r#"## Active Skill: {}
 
@@ -106,8 +109,8 @@ The following skill instructions guide how to complete this task:
 
 ---
 {}
----{}"#,
-            skill.metadata.name, skill.content, refs_section
+---{}{}"#,
+            skill.metadata.name, skill.content, scripts_section, refs_section
         )
     }
 
@@ -159,6 +162,53 @@ The following skill instructions guide how to complete this task:
         }
 
         result
+    }
+
+    /// Generate script execution instructions based on skill's available scripts
+    ///
+    /// Automatically creates a section explaining how to call scripts via
+    /// `internal__skill_run_script`, so SKILL.md doesn't need to hardcode
+    /// internal tool names.
+    ///
+    /// # Arguments
+    /// * `skill` - The loaded skill containing script information
+    ///
+    /// # Returns
+    /// Formatted markdown section with script list and calling instructions.
+    /// Returns empty string if skill has no scripts.
+    fn generate_scripts_section(skill: &LoadedSkill) -> String {
+        if skill.scripts.is_empty() {
+            return String::new();
+        }
+
+        let script_list = skill
+            .scripts
+            .iter()
+            .map(|s| format!("- `{}`", s.name))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let example_script = &skill.scripts[0].name;
+
+        format!(
+            r#"
+
+## Available Scripts
+
+This skill provides the following executable scripts:
+
+{script_list}
+
+To execute a script, use the `internal__skill_run_script` tool:
+- `script_name` (required): The script filename listed above (e.g., `{example_script}`)
+- `args` (optional): Array of command-line arguments to pass to the script
+
+Example:
+```json
+{{"script_name": "{example_script}", "args": ["arg1", "arg2"]}}
+```
+"#
+        )
     }
 
     /// Generate injection text for multiple skills
@@ -235,6 +285,12 @@ The following skill instructions guide how to complete this task:
             }
             output.push_str(&format!("### Skill: {}\n\n", skill.metadata.name));
             output.push_str(&skill.content);
+
+            // Auto-append script instructions for skills with scripts
+            let scripts_section = Self::generate_scripts_section(skill);
+            if !scripts_section.is_empty() {
+                output.push_str(&scripts_section);
+            }
         }
 
         output.push_str("\n---");
@@ -400,7 +456,7 @@ mod tests {
     use chrono::Utc;
 
     use super::*;
-    use crate::skills::types::SkillMetadata;
+    use crate::skills::types::{ScriptInfo, SkillMetadata};
 
     fn create_test_summary(name: &str, description: &str) -> SkillSummary {
         SkillSummary {
@@ -1229,5 +1285,115 @@ fn main() {
 
         // With size limit, only small.md should be included
         assert!(result.contains("Small") || !result.contains(&"L".repeat(100)));
+    }
+
+    // =========================================================================
+    // Tests for generate_scripts_section
+    // =========================================================================
+
+    #[test]
+    fn test_generate_scripts_section_no_scripts() {
+        let skill = create_test_skill("test-skill", "Content");
+        let result = SkillInjector::generate_scripts_section(&skill);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_generate_scripts_section_with_scripts() {
+        let mut skill = create_test_skill("data-convert", "Content");
+        skill.scripts = vec![ScriptInfo {
+            name: "convert.py".to_string(),
+            path: PathBuf::from("/skills/data-convert/scripts/convert.py"),
+            executable: true,
+        }];
+
+        let result = SkillInjector::generate_scripts_section(&skill);
+
+        assert!(result.contains("## Available Scripts"));
+        assert!(result.contains("`convert.py`"));
+        assert!(result.contains("internal__skill_run_script"));
+        assert!(result.contains("script_name"));
+        assert!(result.contains("args"));
+    }
+
+    #[test]
+    fn test_generate_scripts_section_multiple_scripts() {
+        let mut skill = create_test_skill("multi-script", "Content");
+        skill.scripts = vec![
+            ScriptInfo {
+                name: "process.py".to_string(),
+                path: PathBuf::from("/skills/multi-script/scripts/process.py"),
+                executable: true,
+            },
+            ScriptInfo {
+                name: "export.js".to_string(),
+                path: PathBuf::from("/skills/multi-script/scripts/export.js"),
+                executable: true,
+            },
+        ];
+
+        let result = SkillInjector::generate_scripts_section(&skill);
+
+        assert!(result.contains("`process.py`"));
+        assert!(result.contains("`export.js`"));
+        // Example should use the first script
+        assert!(result.contains(r#""script_name": "process.py""#));
+    }
+
+    #[test]
+    fn test_phase2_injection_with_scripts() {
+        let mut skill = create_test_skill("data-convert", "# Data Convert\n\nConvert data.");
+        skill.scripts = vec![ScriptInfo {
+            name: "convert.py".to_string(),
+            path: PathBuf::from("/skills/data-convert/scripts/convert.py"),
+            executable: true,
+        }];
+
+        let result = SkillInjector::phase2_injection(&skill);
+
+        // Skill content comes first
+        assert!(result.contains("# Data Convert"));
+        // Scripts section comes after
+        assert!(result.contains("## Available Scripts"));
+        assert!(result.contains("`convert.py`"));
+
+        // Order verification
+        let content_pos = result.find("# Data Convert").unwrap();
+        let scripts_pos = result.find("## Available Scripts").unwrap();
+        assert!(content_pos < scripts_pos);
+    }
+
+    #[test]
+    fn test_phase2_injection_without_scripts() {
+        let skill = create_test_skill("no-scripts", "Content here");
+        let result = SkillInjector::phase2_injection(&skill);
+
+        assert!(!result.contains("## Available Scripts"));
+        assert!(!result.contains("internal__skill_run_script"));
+    }
+
+    #[test]
+    fn test_multi_skill_injection_with_scripts() {
+        let skill_a = create_test_skill("skill-a", "Content A");
+        let mut skill_b = create_test_skill("skill-b", "Content B");
+        skill_b.scripts = vec![ScriptInfo {
+            name: "run.sh".to_string(),
+            path: PathBuf::from("/skills/skill-b/scripts/run.sh"),
+            executable: true,
+        }];
+
+        let skills = vec![skill_a, skill_b];
+        let result = SkillInjector::multi_skill_injection(&skills);
+
+        // skill-b has scripts, should have scripts section
+        assert!(result.contains("`run.sh`"));
+
+        // Scripts section should come after skill-b content
+        let content_b_pos = result.find("Content B").unwrap();
+        let scripts_pos = result.find("## Available Scripts").unwrap();
+        assert!(content_b_pos < scripts_pos);
+
+        // Only one scripts section (skill-a has no scripts)
+        assert_eq!(result.matches("## Available Scripts").count(), 1);
     }
 }
