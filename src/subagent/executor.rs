@@ -33,7 +33,10 @@ use crate::{
     reflection::engine::LlmServerInfo,
     server::TargetServerInfo,
     services::hitl::{self, HitlError, HitlToolCaller, HitlToolContext, HitlToolResult},
-    skills::{LoadedSkill, ScriptContext, SkillLoader},
+    skills::{
+        LoadedSkill, ScriptContext, SkillLoader,
+        constants::{is_internal_tool, parse_internal_tool_name},
+    },
 };
 
 // ============================================================================
@@ -938,19 +941,6 @@ fn build_tools_json(tools: &[ToolDescription]) -> serde_json::Value {
         .collect();
 
     serde_json::Value::Array(tools_json)
-}
-
-/// Internal tool 前缀
-const INTERNAL_TOOL_PREFIX: &str = "internal";
-
-/// 检查是否是 internal 工具（skill_run_script, skill_load_asset 等）
-fn is_internal_tool(tool_name: &str) -> bool {
-    tool_name.starts_with(&format!("{INTERNAL_TOOL_PREFIX}__"))
-}
-
-/// 解析 internal 工具名称，返回去除前缀后的工具名
-fn parse_internal_tool_name(full_name: &str) -> Option<&str> {
-    full_name.strip_prefix(&format!("{INTERNAL_TOOL_PREFIX}__"))
 }
 
 /// 解析 MCP 工具名称

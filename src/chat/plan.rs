@@ -69,6 +69,10 @@ use crate::{
     skills::{
         LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
         SkillSummary,
+        constants::{
+            INTERNAL_TOOL_PREFIX, SKILL_LOAD_ASSET_TOOL, SKILL_RUN_SCRIPT_TOOL, internal_tool_name,
+            is_internal_tool, parse_internal_tool_name,
+        },
     },
     subagent::{
         self, CANCEL_SUB_AGENT_TOOL, CancelSubAgentArgs, GET_SUB_AGENT_RESULT_TOOL,
@@ -78,34 +82,6 @@ use crate::{
         parse_subagent_tool_name,
     },
 };
-
-// ============================================================================
-// Internal Tool Constants
-// ============================================================================
-
-/// Internal tool prefix for non-MCP tools
-const INTERNAL_TOOL_PREFIX: &str = "internal";
-
-/// Skill script execution tool name
-const SKILL_RUN_SCRIPT_TOOL: &str = "skill_run_script";
-
-/// Skill asset loading tool name
-const SKILL_LOAD_ASSET_TOOL: &str = "skill_load_asset";
-
-/// Full name for the skill_run_script internal tool
-fn internal_tool_name(tool_name: &str) -> String {
-    format!("{INTERNAL_TOOL_PREFIX}__{tool_name}")
-}
-
-/// Check if a tool name is an internal tool
-fn is_internal_tool(tool_name: &str) -> bool {
-    tool_name.starts_with(&format!("{INTERNAL_TOOL_PREFIX}__"))
-}
-
-/// Parse an internal tool name, returning the tool name if valid
-fn parse_internal_tool_name(full_name: &str) -> Option<&str> {
-    full_name.strip_prefix(&format!("{INTERNAL_TOOL_PREFIX}__"))
-}
 
 // ============================================================================
 // Plan Mode Handler
@@ -4715,6 +4691,27 @@ pub(crate) async fn build_context_for_react(
         // For multi-skill, use multi_skill_injection_auto_refs to merge all skills
         let skill_section =
             SkillInjector::multi_skill_injection_auto_refs(active_skills, max_reference_size).await;
+
+        // Conditionally include script-related examples and notes
+        let has_scripts = active_skills.iter().any(|s| !s.scripts.is_empty());
+        let script_example = if has_scripts {
+            r#"
+### Example 2: Run a Script from the Active Skill
+<thought>I need to run a script from the skill to process data</thought>
+<action>{"name": "internal__skill_run_script", "arguments": {"script_name": "process.py", "args": ["--input", "data.csv", "--output", "result.json"]}}</action>
+"#
+        } else {
+            ""
+        };
+        let script_notes = if has_scripts {
+            r#"- `internal__skill_run_script`:
+  - `script_name`: Just the filename (e.g., "convert.py"), not the full path
+  - `args`: Array of command line arguments to pass to the script
+"#
+        } else {
+            ""
+        };
+
         format!(
             r#"You are an AI assistant executing a specific subtask as part of a larger plan.
 
@@ -4742,11 +4739,7 @@ pub(crate) async fn build_context_for_react(
 ### Example 1: MCP Tool Call
 <thought>I need to calculate the sum of two numbers</thought>
 <action>{{"name": "mcp__cardea-calculator__sum", "arguments": {{"a": 23, "b": 32}}}}</action>
-
-### Example 2: Run a Script from the Active Skill
-<thought>I need to run a script from the skill to process data</thought>
-<action>{{"name": "internal__skill_run_script", "arguments": {{"script_name": "process.py", "args": ["--input", "data.csv", "--output", "result.json"]}}}}</action>
-
+{script_example}
 ### Example 3: Load an Asset with Template Variables
 <thought>I need to load a template and fill in the variables</thought>
 <action>{{"name": "internal__skill_load_asset", "arguments": {{"asset_name": "report-template.md", "variables": {{"title": "Monthly Report", "date": "2024-01-15"}}}}}}</action>
@@ -4768,10 +4761,7 @@ pub(crate) async fn build_context_for_react(
 <action>{{"name": "internal__cancel_sub_agent", "arguments": {{"subagent_id": "subagent_abc123", "reason": "Task no longer needed"}}}}</action>
 
 **Important**: When using internal tools:
-- `internal__skill_run_script`:
-  - `script_name`: Just the filename (e.g., "convert.py"), not the full path
-  - `args`: Array of command line arguments to pass to the script
-- `internal__skill_load_asset`:
+{script_notes}- `internal__skill_load_asset`:
   - `asset_name`: Just the filename in the assets/ directory
   - `variables`: Object with key-value pairs to replace {{key}} in the template
   - `parse_as`: Optional format ("json", "yaml", "markdown") for structured parsing
@@ -4801,7 +4791,11 @@ After receiving the observation, provide your final answer:
 <final_answer>The task is complete.</final_answer>
 
 Remember: Focus only on this specific subtask. Follow the skill instructions carefully."#,
-            subtask.description, skill_section, tools_desc
+            subtask.description,
+            skill_section,
+            tools_desc,
+            script_example = script_example,
+            script_notes = script_notes,
         )
     } else {
         // Phase 1: No active skills - show skills summaries if available using SkillInjector

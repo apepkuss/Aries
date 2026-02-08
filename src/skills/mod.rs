@@ -8,6 +8,7 @@
 //! 1. Discovery: Load skill summaries (name + description)
 //! 2. Activation: Load full SKILL.md content when selected
 
+pub mod constants;
 pub mod detector;
 pub mod error;
 pub mod handlers;

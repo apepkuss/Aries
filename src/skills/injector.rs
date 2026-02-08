@@ -5,6 +5,7 @@
 //! - Phase 2: Full skill content when activated (with optional references)
 
 use crate::skills::{
+    constants::{SKILL_RUN_SCRIPT_TOOL, internal_tool_name},
     loader::SkillLoader,
     types::{LoadedSkill, SkillSummary},
 };
@@ -181,6 +182,8 @@ The following skill instructions guide how to complete this task:
             return String::new();
         }
 
+        let tool_full_name = internal_tool_name(SKILL_RUN_SCRIPT_TOOL);
+
         let script_list = skill
             .scripts
             .iter()
@@ -199,7 +202,7 @@ This skill provides the following executable scripts:
 
 {script_list}
 
-To execute a script, use the `internal__skill_run_script` tool:
+To execute a script, use the `{tool_full_name}` tool:
 - `script_name` (required): The script filename listed above (e.g., `{example_script}`)
 - `args` (optional): Array of command-line arguments to pass to the script
 
