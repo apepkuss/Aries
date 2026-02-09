@@ -178,6 +178,9 @@ pub struct SanitizedMcpToolServerConfig {
     pub transport: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Command for stdio transport
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
     pub enable: bool,
     /// Number of tools (not the full list)
     pub tools_count: usize,

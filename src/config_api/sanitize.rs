@@ -148,6 +148,7 @@ impl Sanitize for McpToolServerConfig {
             transport: self.transport.to_string(),
             // Only expose url, hide oauth_url for security
             url: self.url.clone(),
+            command: self.command.clone(),
             enable: self.enable,
             tools_count: self.tools.as_ref().map_or(0, |t| t.len()),
         }

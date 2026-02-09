@@ -26,10 +26,11 @@ use tokio::{
 };
 
 use crate::{
-    dual_debug, dual_error, dual_info,
+    dual_debug, dual_error, dual_info, dual_warn,
     error::{ServerError, ServerResult},
     executor::{DenoConfig, DockerConfig, ResourceLimits},
     mcp::{MCP_SERVICES, McpService},
+    mcp_stdio::{self, StdioConfig, StdioProcessConfig},
 };
 
 const MCP_REDIRECT_URI: &str = "http://localhost:8080/callback";
@@ -398,6 +399,21 @@ pub struct McpToolServerConfig {
     pub url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_url: Option<String>,
+    /// Command to run for stdio transport
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Arguments for the stdio command
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<String>>,
+    /// Environment variables for the stdio process
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    /// Working directory for the stdio process
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    /// stdio-specific configuration (health check, restart, etc.)
+    #[serde(default)]
+    pub stdio: StdioConfig,
     pub enable: bool,
     #[serde(skip)]
     pub server_name: Option<String>,
@@ -410,6 +426,11 @@ impl McpToolServerConfig {
     /// Connect the mcp server if it is enabled
     pub async fn connect_mcp_server(&mut self) -> ServerResult<()> {
         if self.enable {
+            // Handle stdio transport separately (no URL needed)
+            if self.transport == McpTransport::Stdio {
+                return self.connect_stdio().await;
+            }
+
             // Validate URL configuration: exactly one must be non-empty
             let mut use_oauth = false;
             let server_url = match (&self.url, &self.oauth_url) {
@@ -1042,13 +1063,55 @@ impl McpToolServerConfig {
                         }
                     }
                 }
-                _ => {
-                    let err_msg = format!("Unsupported transport: {}", self.transport);
-                    dual_error!("{}", err_msg);
-                    return Err(ServerError::Operation(err_msg.to_string()));
-                }
+                // Stdio is handled by connect_stdio() above, before URL validation
+                McpTransport::Stdio => unreachable!("stdio handled before URL validation"),
             }
         }
+
+        Ok(())
+    }
+
+    /// Connect a stdio MCP server by registering its config with the process manager.
+    ///
+    /// The process is NOT started here — it will be started lazily on the first
+    /// tool call via [`StdioProcessManager::get_transport`].
+    async fn connect_stdio(&mut self) -> ServerResult<()> {
+        let command = self.command.as_ref().ok_or_else(|| {
+            let err_msg = format!(
+                "Invalid configuration for stdio mcp server '{}': 'command' is required",
+                self.name
+            );
+            dual_error!("{}", err_msg);
+            ServerError::Operation(err_msg)
+        })?;
+
+        dual_warn!(
+            "Registering stdio MCP server '{}' (command: {}). \
+             The process will run with Aries Agent privileges. Ensure you trust this MCP server.",
+            self.name,
+            command
+        );
+
+        let stdio_config = StdioProcessConfig {
+            name: self.name.clone(),
+            command: command.clone(),
+            args: self.args.clone().unwrap_or_default(),
+            env: self.env.clone().unwrap_or_default(),
+            working_dir: self.working_dir.clone(),
+            enable: self.enable,
+            stdio: self.stdio.clone(),
+        };
+
+        let manager = mcp_stdio::get_stdio_process_manager();
+        manager.register_config(stdio_config).await;
+
+        // Use config name as server name for stdio
+        self.server_name = Some(self.name.clone());
+
+        dual_info!(
+            "Registered stdio MCP server config: {} (will start on first use via lazy loading)",
+            self.name
+        );
 
         Ok(())
     }

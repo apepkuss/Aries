@@ -425,10 +425,37 @@ custom_keywords = ["机密", "internal only", "confidential"]
 # The following items are the configuration for the third party MCP tool servers:
 #
 # - name: The name of the MCP tool server.
-# - transport: The transport protocol to use. Possible values: "sse" and "stream-http".
-# - url: The URL of the MCP tool server. ONLY one of `url` and `oauth_url` should be set.
-# - oauth_url: The URL of the MCP tool server for OAuth authentication. ONLY one of `url` and `oauth_url` should be set.
+# - transport: The transport protocol to use. Possible values: "sse", "stream-http", and "stdio".
+# - url: The URL of the MCP tool server. ONLY one of `url` and `oauth_url` should be set. (For "sse" and "stream-http" only)
+# - oauth_url: The URL of the MCP tool server for OAuth authentication. ONLY one of `url` and `oauth_url` should be set. (For "sse" and "stream-http" only)
+# - command: The command to run for stdio transport. (For "stdio" only)
+# - args: Arguments for the stdio command. (For "stdio" only)
+# - env: Environment variables for the stdio process. (For "stdio" only)
+# - working_dir: Working directory for the stdio process. (For "stdio" only)
 # - enable: Whether to enable the MCP tool server.
+#
+# For stdio transport, additional configuration can be set under the `stdio` section:
+# - health_check_interval_secs: Interval for health checks (default: 30, set to 0 to disable)
+# - health_check_timeout_secs: Timeout for each health check (default: 5)
+# - health_check_failure_threshold: Number of consecutive failures before marking as failed (default: 3)
+# - restart_on_failure: Whether to automatically restart on failure (default: true)
+# - max_restart_attempts: Maximum restart attempts before giving up (default: 3)
+# - restart_backoff_secs: Delay between restart attempts (default: 5)
+
+# The following config is for an example stdio MCP server (actionbook).
+# Stdio transport starts the MCP server as a child process and communicates via stdin/stdout.
+# The process is started lazily on the first tool call, not at system startup.
+#
+# WARNING: stdio processes run with Aries Agent privileges. Only use trusted MCP servers.
+# [[mcp.server.tool]]
+# name    = "actionbook"
+# transport = "stdio"
+# command = "npx"
+# args    = ["-y", "@anthropic-ai/claude-code-mcp@latest"]
+# enable  = false
+# stdio.health_check_interval_secs = 60
+# stdio.restart_on_failure = true
+# stdio.max_restart_attempts = 5
 
 # The following config is for the markitdown mcp server.
 # The details about the server are available at https://github.com/microsoft/markitdown/tree/main/packages/markitdown-mcp

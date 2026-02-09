@@ -33,8 +33,19 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
 pub use health::HealthMonitor;
 pub use manager::StdioProcessManager;
+use once_cell::sync::OnceCell;
 pub use recovery::{RecoveryAction, RecoveryManager};
 pub use transport::StdioTransport;
 pub use types::*;
+
+/// Global stdio process manager instance.
+pub static STDIO_PROCESS_MANAGER: OnceCell<Arc<StdioProcessManager>> = OnceCell::new();
+
+/// Get or initialize the global stdio process manager.
+pub fn get_stdio_process_manager() -> &'static Arc<StdioProcessManager> {
+    STDIO_PROCESS_MANAGER.get_or_init(|| Arc::new(StdioProcessManager::new()))
+}
