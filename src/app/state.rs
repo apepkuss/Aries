@@ -16,7 +16,9 @@ use crate::{
     HEALTH_CHECK_INTERVAL,
     config::Config,
     error::{ServerError, ServerResult},
-    handlers, info, memory, server,
+    handlers, info,
+    mcp_stdio::{self, StdioProcessManager},
+    memory, server,
     services::privacy::PrivacyDetector,
 };
 
@@ -35,6 +37,8 @@ pub struct AppState {
     pub(crate) last_config_update_time: RwLock<Option<Instant>>,
     /// Privacy detector for smart privacy mode detection
     pub(crate) privacy_detector: Option<PrivacyDetector>,
+    /// stdio MCP process manager (shared reference to global instance)
+    pub(crate) stdio_manager: Arc<StdioProcessManager>,
 }
 
 impl AppState {
@@ -55,6 +59,7 @@ impl AppState {
             session_writer: None,
             last_config_update_time: RwLock::new(None),
             privacy_detector,
+            stdio_manager: mcp_stdio::get_stdio_process_manager().clone(),
         }
     }
 
@@ -107,6 +112,11 @@ impl AppState {
     /// Get the privacy detector reference (if enabled)
     pub fn privacy_detector(&self) -> Option<&PrivacyDetector> {
         self.privacy_detector.as_ref()
+    }
+
+    /// Get the stdio process manager reference
+    pub fn stdio_manager(&self) -> &Arc<StdioProcessManager> {
+        &self.stdio_manager
     }
 
     pub async fn register_downstream_server(&self, server: server::Server) -> ServerResult<()> {
