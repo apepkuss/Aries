@@ -127,14 +127,25 @@ restart_on_failure = false
 #[test]
 fn test_stdio_request_serialization() {
     let req = StdioRequest {
+        jsonrpc: "2.0".to_string(),
         id: "req-1".to_string(),
         method: "tools/call".to_string(),
         params: serde_json::json!({"name": "search", "arguments": {}}),
     };
     let json = serde_json::to_string(&req).unwrap();
+    assert!(json.contains("\"jsonrpc\":\"2.0\""));
     let deserialized: StdioRequest = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.jsonrpc, "2.0");
     assert_eq!(deserialized.id, "req-1");
     assert_eq!(deserialized.method, "tools/call");
+}
+
+#[test]
+fn test_stdio_request_jsonrpc_default() {
+    // Deserializing without jsonrpc field should default to "2.0"
+    let json = r#"{"id": "req-1", "method": "ping", "params": {}}"#;
+    let req: StdioRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.jsonrpc, "2.0");
 }
 
 #[test]
