@@ -678,8 +678,28 @@ async fn main() -> ServerResult<()> {
         axum::serve(listener, app.into_make_service()).with_graceful_shutdown(shutdown_signal());
 
     // Start the server
-    match server.await {
-        Ok(_) => {
+    let server_result = server.await;
+
+    // Shutdown stdio MCP child processes with timeout to prevent hanging
+    aries::dual_info!("Shutting down stdio MCP child processes...");
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        aries::mcp_stdio::get_stdio_process_manager().shutdown_all(),
+    )
+    .await
+    {
+        Ok(()) => {
+            aries::dual_info!("stdio MCP processes shut down successfully");
+        }
+        Err(_) => {
+            aries::dual_warn!(
+                "stdio MCP process shutdown timed out after 10s, processes may be orphaned"
+            );
+        }
+    }
+
+    match server_result {
+        Ok(()) => {
             aries::dual_info!("Server shutdown completed");
             Ok(())
         }
