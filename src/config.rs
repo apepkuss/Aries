@@ -13,7 +13,7 @@ use rmcp::{
     model::{ClientCapabilities, ClientInfo, Implementation, Tool as RmcpTool},
     service::ServiceExt,
     transport::{
-        SseClientTransport, StreamableHttpClientTransport,
+        SseClientTransport, StreamableHttpClientTransport, TokioChildProcess,
         auth::{AuthClient, OAuthState},
         sse_client::SseClientConfig,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -1071,10 +1071,11 @@ impl McpToolServerConfig {
         Ok(())
     }
 
-    /// Connect a stdio MCP server by registering its config with the process manager.
+    /// Connect a stdio MCP server using rmcp's TokioChildProcess.
     ///
-    /// The process is NOT started here — it will be started lazily on the first
-    /// tool call via [`StdioProcessManager::get_transport`].
+    /// Spawns the child process, performs MCP handshake, discovers tools,
+    /// and registers the resulting `RunningService` into `MCP_SERVICES`
+    /// (same path as SSE/StreamHTTP).
     async fn connect_stdio(&mut self) -> ServerResult<()> {
         let command = self.command.as_ref().ok_or_else(|| {
             let err_msg = format!(
@@ -1086,12 +1087,145 @@ impl McpToolServerConfig {
         })?;
 
         dual_warn!(
-            "Registering stdio MCP server '{}' (command: {}). \
-             The process will run with Aries Agent privileges. Ensure you trust this MCP server.",
+            "[mcp-stdio:{}] Starting child process '{}' with Aries Agent privileges. \
+             Ensure you trust this MCP server.",
             self.name,
             command
         );
 
+        // Build command
+        let mut cmd = tokio::process::Command::new(command);
+        cmd.args(self.args.as_deref().unwrap_or_default());
+        if let Some(ref env_vars) = self.env {
+            for (key, value) in env_vars {
+                cmd.env(key, value);
+            }
+        }
+        if let Some(ref dir) = self.working_dir {
+            cmd.current_dir(dir);
+        }
+
+        // Spawn process via TokioChildProcess (captures stderr for logging)
+        let (child_process, stderr) = TokioChildProcess::builder(cmd)
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                let err_msg = format!(
+                    "Failed to start stdio MCP server '{}' (command: {}): {e}",
+                    self.name, command
+                );
+                dual_error!("{}", &err_msg);
+                ServerError::McpOperation(err_msg)
+            })?;
+
+        let pid = child_process.id();
+        dual_info!("[mcp-stdio:{}] Process started (PID: {:?})", self.name, pid);
+
+        // Spawn stderr logger
+        if let Some(stderr) = stderr {
+            let name = self.name.clone();
+            tokio::spawn(async move {
+                mcp_stdio::log_stderr(name, stderr).await;
+            });
+        }
+
+        // Create MCP client and perform handshake
+        let client_info = ClientInfo {
+            protocol_version: Default::default(),
+            capabilities: ClientCapabilities::default(),
+            client_info: Implementation {
+                name: env!("CARGO_PKG_NAME").to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                title: None,
+                icons: None,
+                website_url: None,
+            },
+        };
+
+        let service = client_info
+            .into_dyn()
+            .serve(child_process)
+            .await
+            .map_err(|e| {
+                let err_msg = format!(
+                    "Failed to connect to stdio MCP server (name: {}, command: {}). {e}. \
+                     Please check if the command is valid and the MCP server starts correctly.",
+                    self.name, command
+                );
+                dual_error!("{}", &err_msg);
+                ServerError::McpOperation(err_msg)
+            })?;
+
+        // Get service name from server
+        let service_name = match service.peer_info() {
+            Some(peer_info) => peer_info.server_info.name.clone(),
+            None => self.name.clone(),
+        };
+        self.server_name = Some(service_name.clone());
+
+        // Discover tools
+        let tools = service.list_all_tools().await.map_err(|e| {
+            let err_msg = format!(
+                "Failed to list tools from stdio server '{}': {e}",
+                self.name
+            );
+            dual_error!("{}", &err_msg);
+            ServerError::McpOperation(err_msg)
+        })?;
+        dual_info!(
+            "Found {} tools from {} stdio mcp server",
+            tools.len(),
+            self.name,
+        );
+
+        dual_debug!(
+            "Retrieved mcp tools: {}",
+            serde_json::to_string_pretty(&tools).unwrap()
+        );
+
+        // Update tools
+        self.tools = Some(tools.clone());
+
+        let mut client = McpService::new(&service_name, service);
+        client.tools = tools.iter().map(|tool| tool.name.to_string()).collect();
+        client.fallback_message = self.fallback_message.clone();
+
+        // Log all discovered tools
+        for (idx, tool) in tools.iter().enumerate() {
+            dual_debug!(
+                "Tool {} - name: {}, description: {}",
+                idx,
+                tool.name,
+                tool.description.as_deref().unwrap_or("No description"),
+            );
+        }
+
+        // Register to MCP_SERVICES (same as SSE/StreamHTTP path)
+        match MCP_SERVICES.get() {
+            Some(clients) => {
+                let mut clients = clients.write().await;
+                if clients.contains_key(&service_name) {
+                    let err_msg = format!("Mcp client {service_name} already exists");
+                    dual_error!("{}", err_msg);
+                    return Err(ServerError::Operation(err_msg));
+                }
+                clients.insert(service_name.clone(), TokioRwLock::new(client));
+            }
+            None => {
+                MCP_SERVICES
+                    .set(TokioRwLock::new(HashMap::from([(
+                        service_name.clone(),
+                        TokioRwLock::new(client),
+                    )])))
+                    .map_err(|_| {
+                        let err_msg = "Failed to set MCP_CLIENTS";
+                        dual_error!("{}", err_msg);
+                        ServerError::Operation(err_msg.to_string())
+                    })?;
+            }
+        }
+
+        // Register config and process to StdioProcessManager for health check & recovery
         let stdio_config = StdioProcessConfig {
             name: self.name.clone(),
             command: command.clone(),
@@ -1101,16 +1235,21 @@ impl McpToolServerConfig {
             enable: self.enable,
             stdio: self.stdio.clone(),
         };
-
         let manager = mcp_stdio::get_stdio_process_manager();
         manager.register_config(stdio_config).await;
-
-        // Use config name as server name for stdio
-        self.server_name = Some(self.name.clone());
+        manager
+            .register_process(
+                &self.name,
+                service_name.clone(),
+                pid,
+                self.fallback_message.clone(),
+            )
+            .await;
 
         dual_info!(
-            "Registered stdio MCP server config: {} (will start on first use via lazy loading)",
-            self.name
+            "[mcp-stdio:{}] Stdio MCP server connected and registered (service_name: {})",
+            self.name,
+            service_name
         );
 
         Ok(())

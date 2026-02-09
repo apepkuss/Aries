@@ -150,34 +150,3 @@ impl ProcessMetadata {
         }
     }
 }
-
-/// stdio JSON-RPC request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StdioRequest {
-    /// JSON-RPC protocol version
-    #[serde(default = "default_jsonrpc")]
-    pub jsonrpc: String,
-    pub id: String,
-    pub method: String,
-    pub params: serde_json::Value,
-}
-
-fn default_jsonrpc() -> String {
-    "2.0".to_string()
-}
-
-/// stdio JSON-RPC response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StdioResponse {
-    pub id: String,
-    pub result: Option<serde_json::Value>,
-    pub error: Option<StdioError>,
-}
-
-/// stdio JSON-RPC error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StdioError {
-    pub code: i32,
-    pub message: String,
-    pub data: Option<serde_json::Value>,
-}
