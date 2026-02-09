@@ -79,6 +79,7 @@ pub use services::hitl;
 // Integration modules (also available via crate::integration::*)
 pub mod mcp;
 pub mod mcp_handlers;
+pub mod mcp_stdio;
 pub mod server;
 
 // Other modules
