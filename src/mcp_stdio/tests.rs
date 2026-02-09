@@ -1,6 +1,9 @@
 //! Tests for stdio MCP transport module.
 
-use super::types::*;
+use super::{
+    recovery::{RecoveryAction, RecoveryManager},
+    types::*,
+};
 
 #[test]
 fn test_stdio_config_default() {
@@ -188,4 +191,105 @@ fn test_process_status_display() {
         ProcessStatus::Failed("timeout".to_string()).to_string(),
         "Failed: timeout"
     );
+}
+
+// --- Recovery Manager tests ---
+
+fn make_test_process_config(restart_on_failure: bool, max_attempts: u32) -> StdioProcessConfig {
+    StdioProcessConfig {
+        name: "test-server".to_string(),
+        command: "/usr/bin/echo".to_string(),
+        args: vec![],
+        env: Default::default(),
+        working_dir: None,
+        enable: true,
+        stdio: StdioConfig {
+            restart_on_failure,
+            max_restart_attempts: max_attempts,
+            restart_backoff_secs: 2,
+            ..StdioConfig::default()
+        },
+    }
+}
+
+#[tokio::test]
+async fn test_recovery_restart_allowed() {
+    let rm = RecoveryManager::new();
+    let config = make_test_process_config(true, 3);
+
+    let action = rm.handle_process_failure("test", &config).await;
+    assert_eq!(action, RecoveryAction::Restart { delay_secs: 2 });
+    assert!(!rm.has_given_up("test").await);
+}
+
+#[tokio::test]
+async fn test_recovery_disabled() {
+    let rm = RecoveryManager::new();
+    let config = make_test_process_config(false, 3);
+
+    let action = rm.handle_process_failure("test", &config).await;
+    assert_eq!(action, RecoveryAction::None);
+}
+
+#[tokio::test]
+async fn test_recovery_give_up_after_max_attempts() {
+    let rm = RecoveryManager::new();
+    let config = make_test_process_config(true, 2);
+
+    // Record 2 restarts
+    rm.record_restart("test").await;
+    rm.record_restart("test").await;
+    assert_eq!(rm.get_restart_count("test").await, 2);
+
+    let action = rm.handle_process_failure("test", &config).await;
+    assert_eq!(action, RecoveryAction::GiveUp);
+    assert!(rm.has_given_up("test").await);
+}
+
+#[tokio::test]
+async fn test_recovery_restart_count_increments() {
+    let rm = RecoveryManager::new();
+    assert_eq!(rm.get_restart_count("test").await, 0);
+
+    rm.record_restart("test").await;
+    assert_eq!(rm.get_restart_count("test").await, 1);
+
+    rm.record_restart("test").await;
+    assert_eq!(rm.get_restart_count("test").await, 2);
+}
+
+#[tokio::test]
+async fn test_recovery_reset() {
+    let rm = RecoveryManager::new();
+    let config = make_test_process_config(true, 1);
+
+    // Exhaust attempts
+    rm.record_restart("test").await;
+    let action = rm.handle_process_failure("test", &config).await;
+    assert_eq!(action, RecoveryAction::GiveUp);
+    assert!(rm.has_given_up("test").await);
+
+    // Reset
+    rm.reset("test").await;
+    assert!(!rm.has_given_up("test").await);
+    assert_eq!(rm.get_restart_count("test").await, 0);
+
+    // Should allow restart again
+    let action = rm.handle_process_failure("test", &config).await;
+    assert_eq!(action, RecoveryAction::Restart { delay_secs: 2 });
+}
+
+#[tokio::test]
+async fn test_recovery_independent_processes() {
+    let rm = RecoveryManager::new();
+    let config = make_test_process_config(true, 1);
+
+    // Exhaust attempts for "server-a"
+    rm.record_restart("server-a").await;
+    let action = rm.handle_process_failure("server-a", &config).await;
+    assert_eq!(action, RecoveryAction::GiveUp);
+
+    // "server-b" should still be allowed
+    let action = rm.handle_process_failure("server-b", &config).await;
+    assert_eq!(action, RecoveryAction::Restart { delay_secs: 2 });
 }

@@ -7,8 +7,9 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::{sync::RwLock, time::interval};
 
 use super::{
+    recovery::{RecoveryAction, RecoveryManager},
     transport::StdioTransport,
-    types::{ProcessMetadata, ProcessStatus, StdioConfig},
+    types::{ProcessMetadata, ProcessStatus, StdioConfig, StdioProcessConfig},
 };
 use crate::{dual_debug, dual_error, dual_info, dual_warn};
 
@@ -41,6 +42,8 @@ impl HealthMonitor {
         metadata: Arc<RwLock<ProcessMetadata>>,
         transport: Arc<StdioTransport>,
         config: StdioConfig,
+        process_config: StdioProcessConfig,
+        recovery_manager: Arc<RecoveryManager>,
     ) {
         if config.health_check_interval_secs == 0 {
             dual_info!(
@@ -62,7 +65,15 @@ impl HealthMonitor {
 
         let monitor_name = name.clone();
         let handle = tokio::spawn(async move {
-            Self::monitor_loop(monitor_name, metadata, transport, config).await;
+            Self::monitor_loop(
+                monitor_name,
+                metadata,
+                transport,
+                config,
+                process_config,
+                recovery_manager,
+            )
+            .await;
         });
 
         self.tasks.write().await.insert(name, handle);
@@ -95,6 +106,8 @@ impl HealthMonitor {
         metadata: Arc<RwLock<ProcessMetadata>>,
         transport: Arc<StdioTransport>,
         config: StdioConfig,
+        process_config: StdioProcessConfig,
+        recovery_manager: Arc<RecoveryManager>,
     ) {
         let mut ticker = interval(Duration::from_secs(config.health_check_interval_secs));
 
@@ -129,7 +142,36 @@ impl HealthMonitor {
                             name
                         );
                         meta.status = ProcessStatus::Failed(e);
-                        // TODO: Phase 5 — trigger recovery manager
+
+                        // Close transport so get_transport() will restart
+                        transport.close().await;
+
+                        // Evaluate recovery action
+                        recovery_manager.record_restart(&name).await;
+                        let action = recovery_manager
+                            .handle_process_failure(&name, &process_config)
+                            .await;
+                        match action {
+                            RecoveryAction::Restart { .. } => {
+                                dual_info!(
+                                    "[mcp-stdio:{}] Will restart on next request (lazy loading)",
+                                    name
+                                );
+                            }
+                            RecoveryAction::GiveUp => {
+                                dual_error!(
+                                    "[mcp-stdio:{}] Recovery gave up after health check failures",
+                                    name
+                                );
+                            }
+                            RecoveryAction::None => {
+                                dual_info!(
+                                    "[mcp-stdio:{}] Recovery disabled, process will not restart",
+                                    name
+                                );
+                            }
+                        }
+
                         return;
                     }
                 }

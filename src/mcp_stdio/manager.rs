@@ -12,7 +12,7 @@ use tokio::{
 
 use super::{
     health::HealthMonitor,
-    recovery::RecoveryManager,
+    recovery::{RecoveryAction, RecoveryManager},
     transport::StdioTransport,
     types::{ProcessMetadata, ProcessStatus, StdioProcessConfig},
 };
@@ -20,9 +20,7 @@ use crate::{dual_error, dual_info, dual_warn};
 
 /// Managed process instance.
 struct ManagedProcess {
-    /// Process configuration
-    // TODO: Phase 5 — used by recovery manager for restart
-    #[allow(dead_code)]
+    /// Process configuration (used by recovery manager)
     config: StdioProcessConfig,
     /// Child process handle (Option to allow take() during stop)
     child: Mutex<Option<Child>>,
@@ -47,8 +45,6 @@ pub struct StdioProcessManager {
     /// Health monitor
     health_monitor: Arc<HealthMonitor>,
     /// Recovery manager
-    // TODO: Phase 5 — automatic recovery
-    #[allow(dead_code)]
     recovery_manager: Arc<RecoveryManager>,
 }
 
@@ -60,7 +56,7 @@ impl StdioProcessManager {
             processes: Arc::new(RwLock::new(HashMap::new())),
             start_locks: Arc::new(RwLock::new(HashMap::new())),
             health_monitor: Arc::new(HealthMonitor::new()),
-            recovery_manager: Arc::new(RecoveryManager),
+            recovery_manager: Arc::new(RecoveryManager::new()),
         }
     }
 
@@ -169,14 +165,25 @@ impl StdioProcessManager {
                 Arc::clone(&managed.metadata),
                 Arc::clone(&managed.transport),
                 managed.config.stdio.clone(),
+                managed.config.clone(),
+                Arc::clone(&self.recovery_manager),
             )
             .await;
 
         // 13. Start process exit monitor
         let monitor_processes = Arc::clone(&self.processes);
+        let monitor_health = Arc::clone(&self.health_monitor);
+        let monitor_recovery = Arc::clone(&self.recovery_manager);
         let monitor_name = name.to_string();
         tokio::spawn(async move {
-            Self::monitor_process_exit(monitor_name, managed, monitor_processes).await;
+            Self::monitor_process_exit(
+                monitor_name,
+                managed,
+                monitor_processes,
+                monitor_health,
+                monitor_recovery,
+            )
+            .await;
         });
 
         Ok(())
@@ -282,8 +289,17 @@ impl StdioProcessManager {
     ///
     /// This is the primary entry point for tool calls. If the process is not
     /// running, it will be started automatically. Uses per-process locks to
-    /// prevent concurrent startup.
+    /// prevent concurrent startup. Also handles crash recovery: if a process
+    /// previously crashed and its transport is closed, it will be cleaned up
+    /// and restarted.
     pub async fn get_transport(&self, name: &str) -> Result<Arc<StdioTransport>, String> {
+        // Check if recovery has given up for this process
+        if self.recovery_manager.has_given_up(name).await {
+            return Err(format!(
+                "process '{name}' exceeded max restart attempts, recovery gave up"
+            ));
+        }
+
         // Fast path: check if process is already running
         {
             let processes = self.processes.read().await;
@@ -306,6 +322,15 @@ impl StdioProcessManager {
             {
                 return Ok(Arc::clone(&managed.transport));
             }
+        }
+
+        // Clean up stale process (still in map but transport is closed)
+        if self.processes.read().await.contains_key(name) {
+            dual_info!(
+                "[mcp-stdio:{}] Cleaning up stale process before restart",
+                name
+            );
+            let _ = self.stop_process(name).await;
         }
 
         // Start the process
@@ -355,11 +380,15 @@ impl StdioProcessManager {
     /// - Process is removed from the map (stopped externally)
     /// - Child handle is taken (by stop_process)
     ///
-    /// TODO: Phase 5 — trigger recovery manager on unexpected exit.
+    /// On unexpected exit, triggers recovery evaluation. If recovery allows
+    /// restart, the process will be restarted on the next
+    /// [`get_transport`](Self::get_transport) call (Lazy Loading).
     async fn monitor_process_exit(
         name: String,
         managed: Arc<ManagedProcess>,
         processes: Arc<RwLock<HashMap<String, Arc<ManagedProcess>>>>,
+        health_monitor: Arc<HealthMonitor>,
+        recovery_manager: Arc<RecoveryManager>,
     ) {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
@@ -393,8 +422,11 @@ impl StdioProcessManager {
                         meta.status = ProcessStatus::Failed(format!("exited: {status}"));
                     }
                     managed.transport.close().await;
+                    health_monitor.stop_monitoring(&name).await;
                     processes.write().await.remove(&name);
-                    // TODO: Phase 5 — trigger recovery manager
+
+                    // Trigger recovery evaluation
+                    Self::evaluate_recovery(&name, &managed.config, &recovery_manager).await;
                     return;
                 }
                 Ok(None) => continue, // Still running
@@ -405,9 +437,48 @@ impl StdioProcessManager {
                         meta.status = ProcessStatus::Failed(format!("wait error: {e}"));
                     }
                     managed.transport.close().await;
+                    health_monitor.stop_monitoring(&name).await;
                     processes.write().await.remove(&name);
+
+                    // Trigger recovery evaluation
+                    Self::evaluate_recovery(&name, &managed.config, &recovery_manager).await;
                     return;
                 }
+            }
+        }
+    }
+
+    /// Evaluate recovery action for a failed process.
+    ///
+    /// Records the failure and determines the appropriate recovery action.
+    /// Actual restart is deferred to the next [`get_transport`](Self::get_transport)
+    /// call via Lazy Loading.
+    async fn evaluate_recovery(
+        name: &str,
+        config: &StdioProcessConfig,
+        recovery_manager: &RecoveryManager,
+    ) {
+        recovery_manager.record_restart(name).await;
+        let action = recovery_manager.handle_process_failure(name, config).await;
+        match action {
+            RecoveryAction::Restart { delay_secs } => {
+                dual_info!(
+                    "[mcp-stdio:{}] Will restart on next request (backoff: {}s via lazy loading)",
+                    name,
+                    delay_secs
+                );
+            }
+            RecoveryAction::GiveUp => {
+                dual_error!(
+                    "[mcp-stdio:{}] Recovery gave up, process will not be restarted",
+                    name
+                );
+            }
+            RecoveryAction::None => {
+                dual_info!(
+                    "[mcp-stdio:{}] Recovery disabled, process will not be restarted",
+                    name
+                );
             }
         }
     }
