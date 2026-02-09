@@ -45,8 +45,6 @@ pub struct StdioProcessManager {
     /// Per-process startup locks to prevent concurrent spawning during Lazy Loading
     start_locks: Arc<RwLock<HashMap<String, Arc<Mutex<()>>>>>,
     /// Health monitor
-    // TODO: Phase 4 — health check integration
-    #[allow(dead_code)]
     health_monitor: Arc<HealthMonitor>,
     /// Recovery manager
     // TODO: Phase 5 — automatic recovery
@@ -61,7 +59,7 @@ impl StdioProcessManager {
             configs: Arc::new(RwLock::new(HashMap::new())),
             processes: Arc::new(RwLock::new(HashMap::new())),
             start_locks: Arc::new(RwLock::new(HashMap::new())),
-            health_monitor: Arc::new(HealthMonitor),
+            health_monitor: Arc::new(HealthMonitor::new()),
             recovery_manager: Arc::new(RecoveryManager),
         }
     }
@@ -164,14 +162,22 @@ impl StdioProcessManager {
             .await
             .insert(name.to_string(), managed.clone());
 
-        // 12. Start process exit monitor
+        // 12. Start health monitoring
+        self.health_monitor
+            .start_monitoring(
+                name.to_string(),
+                Arc::clone(&managed.metadata),
+                Arc::clone(&managed.transport),
+                managed.config.stdio.clone(),
+            )
+            .await;
+
+        // 13. Start process exit monitor
         let monitor_processes = Arc::clone(&self.processes);
         let monitor_name = name.to_string();
         tokio::spawn(async move {
             Self::monitor_process_exit(monitor_name, managed, monitor_processes).await;
         });
-
-        // TODO: Phase 4 — start health monitoring if health_check_interval_secs > 0
 
         Ok(())
     }
@@ -191,7 +197,8 @@ impl StdioProcessManager {
             meta.status = ProcessStatus::Stopping;
         }
 
-        // TODO: Phase 4 — stop health monitoring
+        // Stop health monitoring
+        self.health_monitor.stop_monitoring(name).await;
 
         // Close transport
         managed.transport.close().await;
@@ -323,6 +330,9 @@ impl StdioProcessManager {
 
     /// Shutdown all managed processes.
     pub async fn shutdown_all(&self) {
+        // Stop all health monitoring first
+        self.health_monitor.stop_all().await;
+
         let names: Vec<String> = {
             let processes = self.processes.read().await;
             processes.keys().cloned().collect()
