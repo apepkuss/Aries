@@ -104,6 +104,19 @@ pub enum ProcessStatus {
     Restarting,
 }
 
+impl std::fmt::Display for ProcessStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Starting => write!(f, "Starting"),
+            Self::Running => write!(f, "Running"),
+            Self::Stopping => write!(f, "Stopping"),
+            Self::Stopped => write!(f, "Stopped"),
+            Self::Failed(msg) => write!(f, "Failed: {msg}"),
+            Self::Restarting => write!(f, "Restarting"),
+        }
+    }
+}
+
 /// Process metadata.
 #[derive(Debug, Clone)]
 pub struct ProcessMetadata {
@@ -121,6 +134,21 @@ pub struct ProcessMetadata {
     pub last_health_check: Option<std::time::Instant>,
     /// Consecutive failure count
     pub consecutive_failures: u32,
+}
+
+impl ProcessMetadata {
+    /// Create new metadata for a freshly started process.
+    pub fn new(name: impl Into<String>, pid: Option<u32>) -> Self {
+        Self {
+            name: name.into(),
+            pid,
+            status: ProcessStatus::Starting,
+            start_time: Some(std::time::Instant::now()),
+            restart_count: 0,
+            last_health_check: None,
+            consecutive_failures: 0,
+        }
+    }
 }
 
 /// stdio JSON-RPC request.
