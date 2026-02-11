@@ -3984,7 +3984,21 @@ async fn execute_mcp_tool_with_retry(
         match service.read().await.raw.call_tool(request_param).await {
             Ok(result) => {
                 if result.is_error == Some(true) {
-                    last_error = Some("Tool returned error".to_string());
+                    let error_detail = result
+                        .content
+                        .first()
+                        .and_then(|c| match &c.raw {
+                            RawContent::Text(text) => Some(text.text.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "Unknown error".to_string());
+                    dual_warn!(
+                        "Tool {} returned error: {} - request_id: {}",
+                        tool_name,
+                        error_detail,
+                        request_id
+                    );
+                    last_error = Some(format!("Tool returned error: {}", error_detail));
                     continue;
                 }
 
@@ -4680,7 +4694,18 @@ pub(crate) async fn build_context_for_react(
     } else {
         filtered_tools
             .iter()
-            .map(|t| format!("- {}: {}", t.name, t.description))
+            .map(|t| {
+                if let Some(params) = &t.parameters {
+                    format!(
+                        "- {}: {}\n  Parameters: {}",
+                        t.name,
+                        t.description,
+                        serde_json::to_string(params).unwrap_or_default()
+                    )
+                } else {
+                    format!("- {}: {}", t.name, t.description)
+                }
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -4814,12 +4839,15 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 ## Available Tools
 {}
 
+**⚠️ IMPORTANT**: Tools listed above can be called DIRECTLY using <action> tags. Do NOT use <use_skill> tags for these tools. The <use_skill> tag is ONLY for loading skills from the "Available Skills" section.
+
 ## Instructions
 1. Analyze the task and think about how to accomplish it
-2. If a skill would help, request it using <use_skill>skill-name</use_skill> tags
+2. To call a tool from "Available Tools", use <action> tags directly:
+   <action>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</action>
+3. Only if a **skill** (from "Available Skills" section, NOT "Available Tools") would help, request it using <use_skill>skill-name</use_skill> tags
    - You can request multiple skills: <use_skill>skill-a, skill-b</use_skill>
    - **⚠️ IMPORTANT**: When you request a skill, ONLY output the <use_skill> tag. Do NOT include any <action> tags in the same response. The system will load the skill and provide the actual tool list in the next turn.
-3. Use the available tools as needed to complete the task
 4. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
 
 ## Response Format
@@ -4830,21 +4858,21 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 
 ## Tool Call Examples
 
-### Example 1: Request a Skill (Correct)
+### Example 1: Direct Tool Call
+<thought>I need to convert an address to coordinates using the geo tool.</thought>
+<action>{{"name": "mcp__amap__maps_geo", "arguments": {{"address": "北京市", "city": "北京"}}}}</action>
+
+### Example 2: Request a Skill (Only for items in "Available Skills")
 <thought>I need to perform a calculation. The cardea-calculator skill can help with this.</thought>
 <use_skill>cardea-calculator</use_skill>
 
 (Do NOT add <action> tags here. Wait for the skill to be loaded in the next turn.)
 
-### Example 2: MCP Tool Call (After Skill is Loaded)
-<thought>I need to search for information</thought>
-<action>{{"name": "mcp__search__query", "arguments": {{"query": "example search"}}}}</action>
-
-### Example 4: Spawn a Sub-Agent for Parallel Task Execution
+### Example 3: Spawn a Sub-Agent for Parallel Task Execution
 <thought>I need to perform multiple independent searches in parallel. I'll spawn Sub-Agents for each search.</thought>
 <action>{{"name": "internal__spawn_sub_agent", "arguments": {{"name": "WebSearcher", "role": "You are a research assistant specialized in web searching.", "task": "Search for the latest news about AI developments", "wait_for_completion": false}}}}</action>
 
-### Example 5: Get Sub-Agent Result
+### Example 4: Get Sub-Agent Result
 <thought>I need to check the result from the Sub-Agent I spawned earlier.</thought>
 <action>{{"name": "internal__get_sub_agent_result", "arguments": {{"subagent_id": "subagent_abc123", "wait": true}}}}</action>
 

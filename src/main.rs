@@ -648,13 +648,25 @@ async fn main() -> ServerResult<()> {
                     let cancel_token = CancellationToken::new();
                     req.extensions_mut().insert(cancel_token);
 
+                    // Suppress noisy polling endpoints to DEBUG level
+                    let path = req.uri().path().to_string();
+                    let is_polling = path == "/api/hitl/pending";
+
                     // Log request start
-                    aries::dual_info!("Request started - ID: {}", request_id);
+                    if is_polling {
+                        aries::dual_debug!("Request started - ID: {}", request_id);
+                    } else {
+                        aries::dual_info!("Request started - ID: {}", request_id);
+                    }
 
                     let response = next.run(req).await;
 
                     // Log request completion
-                    aries::dual_info!("Request completed - ID: {}", request_id);
+                    if is_polling {
+                        aries::dual_debug!("Request completed - ID: {}", request_id);
+                    } else {
+                        aries::dual_info!("Request completed - ID: {}", request_id);
+                    }
 
                     response
                 },

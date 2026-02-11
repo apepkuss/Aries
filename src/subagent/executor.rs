@@ -886,7 +886,15 @@ impl SubAgentExecutor {
             .map_err(|e| format!("Tool call failed: {e}"))?;
 
         if result.is_error == Some(true) {
-            return Err("Tool returned error".to_string());
+            let error_detail = result
+                .content
+                .first()
+                .and_then(|c| match &c.raw {
+                    rmcp::model::RawContent::Text(text) => Some(text.text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "Unknown error".to_string());
+            return Err(format!("Tool returned error: {}", error_detail));
         }
 
         // 提取结果文本

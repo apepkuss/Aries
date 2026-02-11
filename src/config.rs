@@ -24,6 +24,7 @@ use tokio::{
     io::{AsyncWriteExt, BufWriter},
     sync::{Mutex, RwLock as TokioRwLock, oneshot},
 };
+use url::Url;
 
 use crate::{
     dual_debug, dual_error, dual_info, dual_warn,
@@ -463,12 +464,17 @@ impl McpToolServerConfig {
 
                     let service = match use_oauth {
                         false => {
-                            if !url.ends_with("/sse") {
+                            let parsed_url = Url::parse(url).map_err(|e| {
+                                let err_msg = format!("Invalid mcp tools sse URL: {url}. {e}",);
+                                dual_error!("{}", err_msg);
+                                ServerError::Operation(err_msg)
+                            })?;
+                            if !parsed_url.path().trim_end_matches('/').ends_with("/sse") {
                                 let err_msg = format!(
-                                    "Invalid mcp tools sse URL: {url}. The correct format should end with `/sse`",
+                                    "Invalid mcp tools sse URL: {url}. The URL path should end with `/sse`",
                                 );
                                 dual_error!("{}", err_msg);
-                                return Err(ServerError::Operation(err_msg.to_string()));
+                                return Err(ServerError::Operation(err_msg));
                             }
                             dual_debug!("Sync mcp tools from mcp server: {}", url);
 
@@ -771,12 +777,18 @@ impl McpToolServerConfig {
 
                     let service = match use_oauth {
                         false => {
-                            if !url.ends_with("/mcp") {
+                            let parsed_url = Url::parse(url).map_err(|e| {
+                                let err_msg =
+                                    format!("Invalid mcp tools stream-http URL: {url}. {e}",);
+                                dual_error!("{}", err_msg);
+                                ServerError::Operation(err_msg)
+                            })?;
+                            if !parsed_url.path().trim_end_matches('/').ends_with("/mcp") {
                                 let err_msg = format!(
-                                    "Invalid mcp tools stream-http URL: {url}. The correct format should end with `/mcp`",
+                                    "Invalid mcp tools stream-http URL: {url}. The URL path should end with `/mcp`",
                                 );
                                 dual_error!("{}", err_msg);
-                                return Err(ServerError::Operation(err_msg.to_string()));
+                                return Err(ServerError::Operation(err_msg));
                             }
                             dual_debug!("Sync mcp tools from mcp server: {}", url);
 
