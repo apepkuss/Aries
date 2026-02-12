@@ -103,8 +103,48 @@ impl Config {
         if let Some(mcp_config) = config.mcp.as_mut()
             && !mcp_config.server.tool_servers.is_empty()
         {
+            let total = mcp_config.server.tool_servers.len();
+            let mut connected = 0;
+            let mut failed_names = Vec::new();
+
             for server_config in mcp_config.server.tool_servers.iter_mut() {
-                server_config.connect_mcp_server().await?;
+                if !server_config.enable {
+                    continue;
+                }
+                match server_config.connect_mcp_server().await {
+                    Ok(()) => {
+                        connected += 1;
+                    }
+                    Err(e) => {
+                        dual_warn!(
+                            "Failed to connect MCP server '{}': {}. Disabling.",
+                            server_config.name,
+                            e
+                        );
+                        server_config.enable = false;
+                        failed_names.push(server_config.name.clone());
+                    }
+                }
+            }
+
+            if !failed_names.is_empty() {
+                dual_warn!(
+                    "MCP servers: {}/{} connected, {} failed ({}). Failed servers have been disabled.",
+                    connected,
+                    total,
+                    failed_names.len(),
+                    failed_names.join(", ")
+                );
+
+                // Persist the disabled state to config file
+                let config_path = path.as_ref();
+                let result = crate::config_api::persist::persist_config(&config, config_path).await;
+                if !result.success {
+                    dual_warn!(
+                        "Failed to persist config after disabling failed MCP servers: {:?}",
+                        result.error
+                    );
+                }
             }
         }
 
