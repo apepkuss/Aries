@@ -473,6 +473,13 @@ transport = "stream-http"
 oauth_url = "https://mcp.zapier.com/api/mcp/a/23683142/mcp?serverId=67bdebee-2595-4e58-bc11-62359d74a8ef"
 enable    = false
 
+# The following config is for the AMap Maps mcp server.
+# The details about the server are available at https://lbs.amap.com/api/mcp-server/summary
+[[mcp.server.tool]]
+name      = "amap-maps"
+transport = "stream-http"
+url       = "https://mcp.amap.com/mcp?key=82eb708088285c2e7c75cb882b17b0c9"
+enable    = true
 
 # Section 3.2: Cardea MCP Servers
 #
