@@ -151,6 +151,8 @@ impl Sanitize for McpToolServerConfig {
             command: self.command.clone(),
             enable: self.enable,
             tools_count: self.tools.as_ref().map_or(0, |t| t.len()),
+            api_key_configured: self.api_key.as_ref().is_some_and(|k| !k.is_empty()),
+            api_key_param: self.api_key_param.clone(),
         }
     }
 }

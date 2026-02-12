@@ -416,6 +416,12 @@ pub struct McpToolServerConfig {
     #[serde(default)]
     pub stdio: StdioConfig,
     pub enable: bool,
+    /// API key (stored separately, dynamically appended to URL at connection time)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// URL query parameter name for the API key (e.g., "tavilyApiKey")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_param: Option<String>,
     #[serde(skip)]
     pub server_name: Option<String>,
     #[serde(skip)]
@@ -460,11 +466,30 @@ impl McpToolServerConfig {
 
             match self.transport {
                 McpTransport::Sse => {
-                    let url = server_url.trim_end_matches('/');
+                    // Dynamically append API key to URL if configured
+                    let url = if let (Some(api_key), Some(param_name)) =
+                        (&self.api_key, &self.api_key_param)
+                    {
+                        if !api_key.is_empty() {
+                            let base = server_url.trim_end_matches('/');
+                            let separator = if base.contains('?') { "&" } else { "?" };
+                            format!(
+                                "{}{}{}={}",
+                                base,
+                                separator,
+                                param_name,
+                                urlencoding::encode(api_key)
+                            )
+                        } else {
+                            server_url.trim_end_matches('/').to_string()
+                        }
+                    } else {
+                        server_url.trim_end_matches('/').to_string()
+                    };
 
                     let service = match use_oauth {
                         false => {
-                            let parsed_url = Url::parse(url).map_err(|e| {
+                            let parsed_url = Url::parse(&url).map_err(|e| {
                                 let err_msg = format!("Invalid mcp tools sse URL: {url}. {e}",);
                                 dual_error!("{}", err_msg);
                                 ServerError::Operation(err_msg)
@@ -479,11 +504,12 @@ impl McpToolServerConfig {
                             dual_debug!("Sync mcp tools from mcp server: {}", url);
 
                             // create a sse transport
-                            let transport = SseClientTransport::start(url).await.map_err(|e| {
-                                let err_msg = format!("Failed to create sse transport: {e}");
-                                dual_error!("{}", &err_msg);
-                                ServerError::McpOperation(err_msg)
-                            })?;
+                            let transport =
+                                SseClientTransport::start(url.as_str()).await.map_err(|e| {
+                                    let err_msg = format!("Failed to create sse transport: {e}");
+                                    dual_error!("{}", &err_msg);
+                                    ServerError::McpOperation(err_msg)
+                                })?;
 
                             // create a mcp client
                             let client_info = ClientInfo {
@@ -500,7 +526,7 @@ impl McpToolServerConfig {
                             client_info.into_dyn().serve(transport).await.map_err(|e| {
                                 let err_msg = format!(
                                     "Failed to connect to mcp server (name: {}, url: {}, transport: {}). {e}. Please check if the mcp server is running.",
-                                    self.name, url, self.transport
+                                    self.name, server_url, self.transport
                                 );
                                 dual_error!("{}", &err_msg);
                                 ServerError::McpOperation(err_msg)
@@ -539,7 +565,7 @@ impl McpToolServerConfig {
 
                             // Initialize oauth state machine
                             let mut oauth_state =
-                                OAuthState::new(url, None).await.map_err(|e| {
+                                OAuthState::new(&url, None).await.map_err(|e| {
                                     let err_msg =
                                         format!("Failed to initialize oauth state machine: {e}");
                                     dual_error!("{}", err_msg);
@@ -698,7 +724,7 @@ impl McpToolServerConfig {
                                 client_info.into_dyn().serve(transport).await.map_err(|e| {
                                     let err_msg = format!(
                                         "Failed to connect to mcp server (name: {}, url: {}, transport: {}). {e}. Please check if the mcp server is running.",
-                                        self.name, url, self.transport
+                                        self.name, server_url, self.transport
                                     );
                                     dual_error!("{}", &err_msg);
                                     ServerError::McpOperation(err_msg)
@@ -773,11 +799,30 @@ impl McpToolServerConfig {
                     }
                 }
                 McpTransport::StreamHttp => {
-                    let url = server_url.trim_end_matches('/');
+                    // Dynamically append API key to URL if configured
+                    let url = if let (Some(api_key), Some(param_name)) =
+                        (&self.api_key, &self.api_key_param)
+                    {
+                        if !api_key.is_empty() {
+                            let base = server_url.trim_end_matches('/');
+                            let separator = if base.contains('?') { "&" } else { "?" };
+                            format!(
+                                "{}{}{}={}",
+                                base,
+                                separator,
+                                param_name,
+                                urlencoding::encode(api_key)
+                            )
+                        } else {
+                            server_url.trim_end_matches('/').to_string()
+                        }
+                    } else {
+                        server_url.trim_end_matches('/').to_string()
+                    };
 
                     let service = match use_oauth {
                         false => {
-                            let parsed_url = Url::parse(url).map_err(|e| {
+                            let parsed_url = Url::parse(&url).map_err(|e| {
                                 let err_msg =
                                     format!("Invalid mcp tools stream-http URL: {url}. {e}",);
                                 dual_error!("{}", err_msg);
@@ -793,7 +838,7 @@ impl McpToolServerConfig {
                             dual_debug!("Sync mcp tools from mcp server: {}", url);
 
                             // create a stream-http transport
-                            let transport = StreamableHttpClientTransport::from_uri(url);
+                            let transport = StreamableHttpClientTransport::from_uri(url.as_str());
 
                             // create a mcp client
                             let client_info = ClientInfo {
@@ -822,6 +867,7 @@ impl McpToolServerConfig {
                             let (code_sender, code_receiver) = oneshot::channel::<String>();
 
                             // Create app state
+
                             let app_state = AppState {
                                 code_receiver: Arc::new(Mutex::new(Some(code_sender))),
                             };
@@ -849,7 +895,7 @@ impl McpToolServerConfig {
 
                             // Initialize oauth state machine
                             let mut oauth_state =
-                                OAuthState::new(url, None).await.map_err(|e| {
+                                OAuthState::new(&url, None).await.map_err(|e| {
                                     let err_msg =
                                         format!("Failed to initialize oauth state machine: {e}");
                                     dual_error!("{}", err_msg);
@@ -1003,7 +1049,7 @@ impl McpToolServerConfig {
                             client_info.into_dyn().serve(transport).await.map_err(|e| {
                                 let err_msg = format!(
                                     "Failed to connect to mcp server (name: {}, url: {}, transport: {}). {e}. Please check if the mcp server is running.",
-                                    self.name, url, self.transport
+                                    self.name, server_url, self.transport
                                 );
                                 dual_error!("{}", &err_msg);
                                 ServerError::McpOperation(err_msg)

@@ -184,6 +184,11 @@ pub struct SanitizedMcpToolServerConfig {
     pub enable: bool,
     /// Number of tools (not the full list)
     pub tools_count: usize,
+    /// Whether an API key is configured (actual key is hidden)
+    pub api_key_configured: bool,
+    /// URL query parameter name for the API key (e.g., "tavilyApiKey")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_param: Option<String>,
 }
 
 /// Sanitized skills configuration
