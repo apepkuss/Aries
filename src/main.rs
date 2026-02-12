@@ -350,6 +350,19 @@ async fn main() -> ServerResult<()> {
         )
         // MCP tools endpoint
         .route("/api/mcp/tools", get(mcp_handlers::list_mcp_tools_handler))
+        // MCP server management endpoints
+        .route(
+            "/api/mcp/servers",
+            get(mcp_handlers::list_mcp_servers_handler),
+        )
+        .route(
+            "/api/mcp/servers/{name}/toggle",
+            post(mcp_handlers::toggle_mcp_server_handler),
+        )
+        .route(
+            "/api/mcp/servers/{name}/api-key",
+            post(mcp_handlers::update_api_key_handler),
+        )
         // Capabilities introspection endpoint
         .route(
             "/v1/capabilities",

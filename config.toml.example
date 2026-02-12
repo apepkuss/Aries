@@ -476,18 +476,24 @@ enable    = false
 # The following config is for the AMap Maps mcp server.
 # The details about the server are available at https://lbs.amap.com/api/mcp-server/summary
 [[mcp.server.tool]]
-name      = "amap-maps"
-transport = "stream-http"
-url       = "https://mcp.amap.com/mcp?key=your-api-key-here"
-enable    = false
+name          = "amap-maps"
+transport     = "stream-http"
+url           = "https://mcp.amap.com/mcp"
+api_key_param = "key"
+api_key       = ""
+enable        = false
 
 # The following config is for the Tavily mcp server
 # The details about the server are available at https://github.com/tavily-ai/tavily-mcp
+# Note: api_key is stored separately and dynamically appended to the URL as the
+# query parameter specified by api_key_param. You can manage it via the MCP management page.
 [[mcp.server.tool]]
-name      = "tavily"
-transport = "stream-http"
-url       = "https://mcp.tavily.com/mcp?tavilyApiKey=your-api-key-here"
-enable    = false
+name          = "tavily"
+transport     = "stream-http"
+url           = "https://mcp.tavily.com/mcp"
+api_key_param = "tavilyApiKey"
+api_key       = ""
+enable        = false
 
 
 # Section 3.2: Cardea MCP Servers

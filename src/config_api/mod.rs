@@ -39,10 +39,10 @@
 
 pub mod diff;
 mod handlers;
-mod persist;
+pub mod persist;
 mod reload;
-mod sanitize;
-mod types;
+pub mod sanitize;
+pub mod types;
 mod update;
 mod validate;
 pub mod watcher;

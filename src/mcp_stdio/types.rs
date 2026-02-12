@@ -24,7 +24,7 @@ pub struct StdioProcessConfig {
     #[serde(default = "default_enable")]
     pub enable: bool,
     /// stdio-specific configuration (maps to [mcp.server.tool.stdio] section)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "StdioConfig::is_default")]
     pub stdio: StdioConfig,
 }
 
@@ -33,7 +33,7 @@ fn default_enable() -> bool {
 }
 
 /// stdio-specific configuration (flat structure, maps to [mcp.server.tool.stdio]).
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct StdioConfig {
     /// Health check interval in seconds, 0 to disable
     #[serde(default = "default_interval")]
@@ -84,6 +84,13 @@ impl Default for StdioConfig {
             max_restart_attempts: 3,
             restart_backoff_secs: 5,
         }
+    }
+}
+
+impl StdioConfig {
+    /// Returns true if all fields match the default values.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }
 

@@ -413,7 +413,7 @@ pub struct McpToolServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
     /// stdio-specific configuration (health check, restart, etc.)
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "StdioConfig::is_default")]
     pub stdio: StdioConfig,
     pub enable: bool,
     /// API key (stored separately, dynamically appended to URL at connection time)
