@@ -20,17 +20,29 @@ export async function getMcpServers(): Promise<McpServerListResponse> {
 
 /**
  * Toggle a MCP server's enable/disable state.
+ * Handles error responses explicitly to extract backend error messages.
  */
 export async function toggleMcpServer(
   name: string,
   enable: boolean
 ): Promise<ToggleMcpServerResponse> {
-  return await apiClient
-    .post(`api/mcp/servers/${encodeURIComponent(name)}/toggle`, {
-      json: { enable },
-      timeout: 30000,
-    })
-    .json<ToggleMcpServerResponse>();
+  try {
+    return await apiClient
+      .post(`api/mcp/servers/${encodeURIComponent(name)}/toggle`, {
+        json: { enable },
+        timeout: 30000,
+      })
+      .json<ToggleMcpServerResponse>();
+  } catch (err) {
+    // Extract the backend error message from ApiError.data
+    if (err instanceof ApiError && err.data) {
+      const data = err.data as { message?: string };
+      if (data.message) {
+        throw new Error(data.message);
+      }
+    }
+    throw err;
+  }
 }
 
 /**

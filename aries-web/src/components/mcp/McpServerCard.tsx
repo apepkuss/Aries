@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Server, Terminal, Globe, Wrench, Key, Loader2 } from 'lucide-react';
+import { Server, Terminal, Globe, Wrench, Key, Loader2, AlertCircle } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,11 +19,12 @@ import type { SanitizedMcpToolServer } from '@/api/types';
 interface McpServerCardProps {
   server: SanitizedMcpToolServer;
   isToggling: boolean;
+  toggleError?: string;
   onToggle: (enable: boolean) => void;
   onUpdateApiKey: (apiKey: string, apiKeyParam?: string) => Promise<void>;
 }
 
-export function McpServerCard({ server, isToggling, onToggle, onUpdateApiKey }: McpServerCardProps) {
+export function McpServerCard({ server, isToggling, toggleError, onToggle, onUpdateApiKey }: McpServerCardProps) {
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyParamInput, setApiKeyParamInput] = useState(server.api_key_param || '');
@@ -146,6 +147,16 @@ export function McpServerCard({ server, isToggling, onToggle, onUpdateApiKey }: 
           </div>
         )}
       </div>
+
+      {/* Error message */}
+      {toggleError && (
+        <div className="mt-3 pt-3 border-t border-destructive/20 flex items-start gap-2">
+          <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+          <p className="text-[11px] text-destructive leading-relaxed break-all">
+            {toggleError}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { useMcpStore } from '@/stores';
 import { McpServerCard } from './McpServerCard';
 
 export function McpPage() {
-  const { servers, isLoading, togglingServer, fetchServers, toggleServer, updateApiKey } =
+  const { servers, isLoading, togglingServer, serverErrors, fetchServers, toggleServer, updateApiKey } =
     useMcpStore();
 
   useEffect(() => {
@@ -69,6 +69,7 @@ export function McpPage() {
                     key={server.name}
                     server={server}
                     isToggling={togglingServer === server.name}
+                    toggleError={serverErrors[server.name]}
                     onToggle={(enable) => toggleServer(server.name, enable)}
                     onUpdateApiKey={(apiKey, apiKeyParam) =>
                       updateApiKey(server.name, apiKey, apiKeyParam)
