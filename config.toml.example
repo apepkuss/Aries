@@ -478,8 +478,17 @@ enable    = false
 [[mcp.server.tool]]
 name      = "amap-maps"
 transport = "stream-http"
-url       = "https://mcp.amap.com/mcp?key=82eb708088285c2e7c75cb882b17b0c9"
-enable    = true
+url       = "https://mcp.amap.com/mcp?key=your-api-key-here"
+enable    = false
+
+# The following config is for the Tavily mcp server
+# The details about the server are available at https://github.com/tavily-ai/tavily-mcp
+[[mcp.server.tool]]
+name      = "tavily"
+transport = "stream-http"
+url       = "https://mcp.tavily.com/mcp?tavilyApiKey=your-api-key-here"
+enable    = false
+
 
 # Section 3.2: Cardea MCP Servers
 #
