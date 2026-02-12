@@ -55,21 +55,18 @@ impl FileSystemStorage {
             .join("artifacts")
     }
 
-    /// Build file path: base_path/{shard}/{artifact_id}/v{version}
+    /// Build file path: base_path/{shard}/{artifact_id}/content
     ///
     /// Uses first 2 characters of artifact_id for directory sharding
     /// to avoid too many files in a single directory.
-    fn file_path(&self, artifact_id: &str, version: i32) -> PathBuf {
+    fn file_path(&self, artifact_id: &str) -> PathBuf {
         let shard = if artifact_id.len() >= 2 {
             &artifact_id[0..2]
         } else {
             "00"
         };
 
-        self.base_path
-            .join(shard)
-            .join(artifact_id)
-            .join(format!("v{}", version))
+        self.base_path.join(shard).join(artifact_id).join("content")
     }
 
     /// Get artifact directory
@@ -90,27 +87,17 @@ impl FileSystemStorage {
     }
 
     /// Read a range of bytes from a file (for streaming/Range requests)
-    ///
-    /// # Arguments
-    /// * `artifact_id` - Artifact ID
-    /// * `version` - Version number
-    /// * `offset` - Start offset in bytes
-    /// * `length` - Number of bytes to read (None = read to end)
     #[allow(dead_code)]
     pub async fn read_range(
         &self,
         artifact_id: &str,
-        version: i32,
         offset: u64,
         length: Option<u64>,
     ) -> ArtifactResult<Vec<u8>> {
-        let path = self.file_path(artifact_id, version);
+        let path = self.file_path(artifact_id);
 
         if !path.exists() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                version,
-            ));
+            return Err(ArtifactError::NotFound(artifact_id.to_string()));
         }
 
         let file = fs::File::open(&path).await?;
@@ -136,14 +123,11 @@ impl FileSystemStorage {
 
     /// Get file size without reading content
     #[allow(dead_code)]
-    pub async fn file_size(&self, artifact_id: &str, version: i32) -> ArtifactResult<u64> {
-        let path = self.file_path(artifact_id, version);
+    pub async fn file_size(&self, artifact_id: &str) -> ArtifactResult<u64> {
+        let path = self.file_path(artifact_id);
 
         if !path.exists() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                version,
-            ));
+            return Err(ArtifactError::NotFound(artifact_id.to_string()));
         }
 
         let metadata = fs::metadata(&path).await?;
@@ -154,13 +138,8 @@ impl FileSystemStorage {
     ///
     /// This prevents partial writes if the process is interrupted.
     #[allow(dead_code)]
-    pub async fn store_atomic(
-        &self,
-        artifact_id: &str,
-        version: i32,
-        content: &[u8],
-    ) -> ArtifactResult<()> {
-        let path = self.file_path(artifact_id, version);
+    pub async fn store_atomic(&self, artifact_id: &str, content: &[u8]) -> ArtifactResult<()> {
+        let path = self.file_path(artifact_id);
 
         // Ensure directory exists
         if let Some(parent) = path.parent() {
@@ -185,8 +164,8 @@ impl FileSystemStorage {
 
 #[async_trait]
 impl ArtifactStorage for FileSystemStorage {
-    async fn store(&self, artifact_id: &str, version: i32, content: &[u8]) -> ArtifactResult<()> {
-        let path = self.file_path(artifact_id, version);
+    async fn store(&self, artifact_id: &str, content: &[u8]) -> ArtifactResult<()> {
+        let path = self.file_path(artifact_id);
 
         // Ensure directory exists
         if let Some(parent) = path.parent() {
@@ -202,14 +181,11 @@ impl ArtifactStorage for FileSystemStorage {
         Ok(())
     }
 
-    async fn read(&self, artifact_id: &str, version: i32) -> ArtifactResult<Vec<u8>> {
-        let path = self.file_path(artifact_id, version);
+    async fn read(&self, artifact_id: &str) -> ArtifactResult<Vec<u8>> {
+        let path = self.file_path(artifact_id);
 
         if !path.exists() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                version,
-            ));
+            return Err(ArtifactError::NotFound(artifact_id.to_string()));
         }
 
         // Use buffered reader for better performance
@@ -221,8 +197,8 @@ impl ArtifactStorage for FileSystemStorage {
         Ok(content)
     }
 
-    async fn delete(&self, artifact_id: &str, version: i32) -> ArtifactResult<()> {
-        let path = self.file_path(artifact_id, version);
+    async fn delete(&self, artifact_id: &str) -> ArtifactResult<()> {
+        let path = self.file_path(artifact_id);
 
         if path.exists() {
             fs::remove_file(&path).await?;
@@ -248,8 +224,8 @@ impl ArtifactStorage for FileSystemStorage {
         Ok(())
     }
 
-    async fn exists(&self, artifact_id: &str, version: i32) -> ArtifactResult<bool> {
-        let path = self.file_path(artifact_id, version);
+    async fn exists(&self, artifact_id: &str) -> ArtifactResult<bool> {
+        let path = self.file_path(artifact_id);
         Ok(path.exists())
     }
 
@@ -300,26 +276,20 @@ impl ArtifactStorage for FileSystemStorage {
     async fn read_range(
         &self,
         artifact_id: &str,
-        version: i32,
         offset: u64,
         length: Option<u64>,
     ) -> ArtifactResult<Vec<u8>> {
         // Delegate to the inherent method
-        FileSystemStorage::read_range(self, artifact_id, version, offset, length).await
+        FileSystemStorage::read_range(self, artifact_id, offset, length).await
     }
 
-    async fn file_size(&self, artifact_id: &str, version: i32) -> ArtifactResult<u64> {
+    async fn file_size(&self, artifact_id: &str) -> ArtifactResult<u64> {
         // Delegate to the inherent method
-        FileSystemStorage::file_size(self, artifact_id, version).await
+        FileSystemStorage::file_size(self, artifact_id).await
     }
 
-    async fn store_stream(
-        &self,
-        artifact_id: &str,
-        version: i32,
-        mut stream: ByteStream,
-    ) -> ArtifactResult<u64> {
-        let path = self.file_path(artifact_id, version);
+    async fn store_stream(&self, artifact_id: &str, mut stream: ByteStream) -> ArtifactResult<u64> {
+        let path = self.file_path(artifact_id);
 
         // Ensure directory exists
         if let Some(parent) = path.parent() {
@@ -350,16 +320,12 @@ impl ArtifactStorage for FileSystemStorage {
     async fn read_stream(
         &self,
         artifact_id: &str,
-        version: i32,
         chunk_size: usize,
     ) -> ArtifactResult<ByteStream> {
-        let path = self.file_path(artifact_id, version);
+        let path = self.file_path(artifact_id);
 
         if !path.exists() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                version,
-            ));
+            return Err(ArtifactError::NotFound(artifact_id.to_string()));
         }
 
         let file = fs::File::open(&path).await?;
@@ -394,9 +360,9 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
 
         let content = b"fn main() { println!(\"Hello\"); }";
-        storage.store("art_123", 1, content).await.unwrap();
+        storage.store("art_123", content).await.unwrap();
 
-        let read_content = storage.read("art_123", 1).await.unwrap();
+        let read_content = storage.read("art_123").await.unwrap();
         assert_eq!(read_content, content);
     }
 
@@ -404,59 +370,49 @@ mod tests {
     async fn test_read_nonexistent() {
         let (storage, _temp) = create_test_storage().await;
 
-        let result = storage.read("nonexistent", 1).await;
-        assert!(matches!(result, Err(ArtifactError::VersionNotFound(_, _))));
+        let result = storage.read("nonexistent").await;
+        assert!(matches!(result, Err(ArtifactError::NotFound(_))));
     }
 
     #[tokio::test]
     async fn test_exists() {
         let (storage, _temp) = create_test_storage().await;
 
-        assert!(!storage.exists("art_456", 1).await.unwrap());
+        assert!(!storage.exists("art_456").await.unwrap());
 
-        storage.store("art_456", 1, b"content").await.unwrap();
+        storage.store("art_456", b"content").await.unwrap();
 
-        assert!(storage.exists("art_456", 1).await.unwrap());
-        assert!(!storage.exists("art_456", 2).await.unwrap());
+        assert!(storage.exists("art_456").await.unwrap());
     }
 
     #[tokio::test]
-    async fn test_delete_version() {
+    async fn test_delete() {
         let (storage, _temp) = create_test_storage().await;
 
-        storage.store("art_789", 1, b"v1").await.unwrap();
-        storage.store("art_789", 2, b"v2").await.unwrap();
+        storage.store("art_789", b"data").await.unwrap();
+        assert!(storage.exists("art_789").await.unwrap());
 
-        assert!(storage.exists("art_789", 1).await.unwrap());
-        assert!(storage.exists("art_789", 2).await.unwrap());
-
-        storage.delete("art_789", 1).await.unwrap();
-
-        assert!(!storage.exists("art_789", 1).await.unwrap());
-        assert!(storage.exists("art_789", 2).await.unwrap());
+        storage.delete("art_789").await.unwrap();
+        assert!(!storage.exists("art_789").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_delete_all() {
         let (storage, _temp) = create_test_storage().await;
 
-        storage.store("art_abc", 1, b"v1").await.unwrap();
-        storage.store("art_abc", 2, b"v2").await.unwrap();
-        storage.store("art_abc", 3, b"v3").await.unwrap();
+        storage.store("art_abc", b"data").await.unwrap();
 
         storage.delete_all("art_abc").await.unwrap();
 
-        assert!(!storage.exists("art_abc", 1).await.unwrap());
-        assert!(!storage.exists("art_abc", 2).await.unwrap());
-        assert!(!storage.exists("art_abc", 3).await.unwrap());
+        assert!(!storage.exists("art_abc").await.unwrap());
     }
 
     #[tokio::test]
     async fn test_stats() {
         let (storage, _temp) = create_test_storage().await;
 
-        storage.store("art_1", 1, b"content1").await.unwrap();
-        storage.store("art_2", 1, b"content22").await.unwrap();
+        storage.store("art_1", b"content1").await.unwrap();
+        storage.store("art_2", b"content22").await.unwrap();
 
         let stats = storage.stats().await.unwrap();
         assert_eq!(stats.file_count, 2);
@@ -474,8 +430,8 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
 
         // Store artifacts with different prefixes
-        storage.store("ab_artifact", 1, b"1").await.unwrap();
-        storage.store("cd_artifact", 1, b"2").await.unwrap();
+        storage.store("ab_artifact", b"1").await.unwrap();
+        storage.store("cd_artifact", b"2").await.unwrap();
 
         // Verify sharding structure
         let ab_path = storage.base_path().join("ab").join("ab_artifact");
@@ -486,22 +442,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_versions() {
+    async fn test_overwrite_content() {
         let (storage, _temp) = create_test_storage().await;
 
-        storage.store("versioned", 1, b"version 1").await.unwrap();
-        storage.store("versioned", 2, b"version 2").await.unwrap();
-        storage
-            .store("versioned", 3, b"version 3 - longer")
-            .await
-            .unwrap();
+        storage.store("overwrite", b"version 1").await.unwrap();
+        assert_eq!(storage.read("overwrite").await.unwrap(), b"version 1");
 
-        assert_eq!(storage.read("versioned", 1).await.unwrap(), b"version 1");
-        assert_eq!(storage.read("versioned", 2).await.unwrap(), b"version 2");
-        assert_eq!(
-            storage.read("versioned", 3).await.unwrap(),
-            b"version 3 - longer"
-        );
+        storage.store("overwrite", b"version 2").await.unwrap();
+        assert_eq!(storage.read("overwrite").await.unwrap(), b"version 2");
     }
 
     #[tokio::test]
@@ -509,36 +457,30 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
 
         let content = b"0123456789ABCDEFGHIJ";
-        storage.store("range_test", 1, content).await.unwrap();
+        storage.store("range_test", content).await.unwrap();
 
         // Read from beginning
-        let result = storage
-            .read_range("range_test", 1, 0, Some(5))
-            .await
-            .unwrap();
+        let result = storage.read_range("range_test", 0, Some(5)).await.unwrap();
         assert_eq!(result, b"01234");
 
         // Read from middle
-        let result = storage
-            .read_range("range_test", 1, 10, Some(5))
-            .await
-            .unwrap();
+        let result = storage.read_range("range_test", 10, Some(5)).await.unwrap();
         assert_eq!(result, b"ABCDE");
 
         // Read to end
-        let result = storage.read_range("range_test", 1, 15, None).await.unwrap();
+        let result = storage.read_range("range_test", 15, None).await.unwrap();
         assert_eq!(result, b"FGHIJ");
 
         // Read with length exceeding file size
         let result = storage
-            .read_range("range_test", 1, 15, Some(100))
+            .read_range("range_test", 15, Some(100))
             .await
             .unwrap();
         assert_eq!(result, b"FGHIJ");
 
         // Read past end
         let result = storage
-            .read_range("range_test", 1, 100, Some(10))
+            .read_range("range_test", 100, Some(10))
             .await
             .unwrap();
         assert!(result.is_empty());
@@ -549,9 +491,9 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
 
         let content = b"Hello, World!";
-        storage.store("size_test", 1, content).await.unwrap();
+        storage.store("size_test", content).await.unwrap();
 
-        let size = storage.file_size("size_test", 1).await.unwrap();
+        let size = storage.file_size("size_test").await.unwrap();
         assert_eq!(size, 13);
     }
 
@@ -559,8 +501,8 @@ mod tests {
     async fn test_file_size_nonexistent() {
         let (storage, _temp) = create_test_storage().await;
 
-        let result = storage.file_size("nonexistent", 1).await;
-        assert!(matches!(result, Err(ArtifactError::VersionNotFound(_, _))));
+        let result = storage.file_size("nonexistent").await;
+        assert!(matches!(result, Err(ArtifactError::NotFound(_))));
     }
 
     #[tokio::test]
@@ -568,16 +510,13 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
 
         let content = b"atomic write test content";
-        storage
-            .store_atomic("atomic_test", 1, content)
-            .await
-            .unwrap();
+        storage.store_atomic("atomic_test", content).await.unwrap();
 
-        let read_content = storage.read("atomic_test", 1).await.unwrap();
+        let read_content = storage.read("atomic_test").await.unwrap();
         assert_eq!(read_content, content);
 
         // Temp file should not exist
-        let path = storage.file_path("atomic_test", 1);
+        let path = storage.file_path("atomic_test");
         let temp_path = path.with_extension("tmp");
         assert!(!temp_path.exists());
     }
@@ -588,15 +527,15 @@ mod tests {
 
         // Create a 1MB file to test buffered I/O
         let content: Vec<u8> = (0..1024 * 1024).map(|i| (i % 256) as u8).collect();
-        storage.store("large_file", 1, &content).await.unwrap();
+        storage.store("large_file", &content).await.unwrap();
 
-        let read_content = storage.read("large_file", 1).await.unwrap();
+        let read_content = storage.read("large_file").await.unwrap();
         assert_eq!(read_content.len(), content.len());
         assert_eq!(read_content, content);
 
         // Test range read on large file
         let middle = storage
-            .read_range("large_file", 1, 512 * 1024, Some(1024))
+            .read_range("large_file", 512 * 1024, Some(1024))
             .await
             .unwrap();
         assert_eq!(middle.len(), 1024);
@@ -621,15 +560,12 @@ mod tests {
         let stream: super::ByteStream = Box::pin(futures_util::stream::iter(chunks.into_iter()));
 
         // Store from stream
-        let bytes_written = storage
-            .store_stream("stream_test", 1, stream)
-            .await
-            .unwrap();
+        let bytes_written = storage.store_stream("stream_test", stream).await.unwrap();
         // "Hello, " (7) + "World!" (6) + " This is streaming." (19) = 32 bytes
         assert_eq!(bytes_written, 32);
 
         // Verify content
-        let content = storage.read("stream_test", 1).await.unwrap();
+        let content = storage.read("stream_test").await.unwrap();
         assert_eq!(content, b"Hello, World! This is streaming.");
     }
 
@@ -639,16 +575,10 @@ mod tests {
 
         // Store some content
         let original = b"This is test content for streaming read.";
-        storage
-            .store("read_stream_test", 1, original)
-            .await
-            .unwrap();
+        storage.store("read_stream_test", original).await.unwrap();
 
         // Read as stream
-        let mut stream = storage
-            .read_stream("read_stream_test", 1, 10)
-            .await
-            .unwrap();
+        let mut stream = storage.read_stream("read_stream_test", 10).await.unwrap();
 
         // Collect all chunks
         let mut collected = Vec::new();
@@ -666,11 +596,11 @@ mod tests {
 
         // Create a 100KB file
         let content: Vec<u8> = (0..100 * 1024).map(|i| (i % 256) as u8).collect();
-        storage.store("large_stream", 1, &content).await.unwrap();
+        storage.store("large_stream", &content).await.unwrap();
 
         // Read with 16KB chunks
         let mut stream = storage
-            .read_stream("large_stream", 1, 16 * 1024)
+            .read_stream("large_stream", 16 * 1024)
             .await
             .unwrap();
 
@@ -692,8 +622,8 @@ mod tests {
     async fn test_read_stream_nonexistent() {
         let (storage, _temp) = create_test_storage().await;
 
-        let result = storage.read_stream("nonexistent", 1, 1024).await;
-        assert!(matches!(result, Err(ArtifactError::VersionNotFound(_, _))));
+        let result = storage.read_stream("nonexistent", 1024).await;
+        assert!(matches!(result, Err(ArtifactError::NotFound(_))));
     }
 
     #[tokio::test]
@@ -703,15 +633,12 @@ mod tests {
         // Empty stream
         let stream: super::ByteStream = Box::pin(futures_util::stream::empty());
 
-        let bytes_written = storage
-            .store_stream("empty_stream", 1, stream)
-            .await
-            .unwrap();
+        let bytes_written = storage.store_stream("empty_stream", stream).await.unwrap();
         assert_eq!(bytes_written, 0);
 
         // Verify empty file exists
-        assert!(storage.exists("empty_stream", 1).await.unwrap());
-        let content = storage.read("empty_stream", 1).await.unwrap();
+        assert!(storage.exists("empty_stream").await.unwrap());
+        let content = storage.read("empty_stream").await.unwrap();
         assert!(content.is_empty());
     }
 
@@ -721,15 +648,9 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
         let storage: &dyn ArtifactStorage = &storage;
 
-        storage
-            .store("trait_range", 1, b"0123456789")
-            .await
-            .unwrap();
+        storage.store("trait_range", b"0123456789").await.unwrap();
 
-        let result = storage
-            .read_range("trait_range", 1, 3, Some(4))
-            .await
-            .unwrap();
+        let result = storage.read_range("trait_range", 3, Some(4)).await.unwrap();
         assert_eq!(result, b"3456");
     }
 
@@ -739,12 +660,9 @@ mod tests {
         let (storage, _temp) = create_test_storage().await;
         let storage: &dyn ArtifactStorage = &storage;
 
-        storage
-            .store("trait_size", 1, b"Hello, World!")
-            .await
-            .unwrap();
+        storage.store("trait_size", b"Hello, World!").await.unwrap();
 
-        let size = storage.file_size("trait_size", 1).await.unwrap();
+        let size = storage.file_size("trait_size").await.unwrap();
         assert_eq!(size, 13);
     }
 }

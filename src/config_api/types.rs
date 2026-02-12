@@ -207,7 +207,6 @@ pub struct SanitizedArtifactsConfig {
     pub storage_path: Option<String>,
     pub max_content_size: u64,
     pub max_binary_size: u64,
-    pub max_versions: i32,
     pub retention_days: u32,
     pub cleanup_interval_secs: u64,
     pub soft_delete_retention_days: u32,

@@ -121,9 +121,7 @@ pub trait EventEmitter: Send + Sync {
     async fn emit_artifact_updated(
         &self,
         artifact_id: &str,
-        version: i32,
         content: &str,
-        change_description: Option<&str>,
         subtask_id: Option<usize>,
     );
 
@@ -425,19 +423,14 @@ impl EventEmitter for SseEventEmitter {
     async fn emit_artifact_updated(
         &self,
         artifact_id: &str,
-        version: i32,
         content: &str,
-        change_description: Option<&str>,
         subtask_id: Option<usize>,
     ) {
         if !self.config.should_emit_artifacts() {
             return;
         }
 
-        let mut event = ArtifactUpdatedEvent::new(artifact_id, version, content);
-        if let Some(desc) = change_description {
-            event = event.with_change_description(desc);
-        }
+        let mut event = ArtifactUpdatedEvent::new(artifact_id, content);
         if let Some(id) = subtask_id {
             event = event.with_subtask_id(id);
         }
@@ -752,9 +745,7 @@ impl EventEmitter for NoopEventEmitter {
     async fn emit_artifact_updated(
         &self,
         _artifact_id: &str,
-        _version: i32,
         _content: &str,
-        _change_description: Option<&str>,
         _subtask_id: Option<usize>,
     ) {
         // No-op
@@ -1170,20 +1161,13 @@ mod tests {
         let emitter = SseEventEmitter::new(tx, EnhancedStreamConfig::all_enabled());
 
         emitter
-            .emit_artifact_updated(
-                "art_123",
-                2,
-                "fn main() { println!(\"Hi\"); }",
-                Some("Added print statement"),
-                Some(1),
-            )
+            .emit_artifact_updated("art_123", "fn main() { println!(\"Hi\"); }", Some(1))
             .await;
 
         let message = rx.recv().await.unwrap();
         assert!(message.starts_with("event: artifact_updated\n"));
         assert!(message.contains("\"artifact_id\":\"art_123\""));
-        assert!(message.contains("\"version\":2"));
-        assert!(message.contains("\"change_description\":\"Added print statement\""));
+        assert!(message.contains("\"subtask_id\":1"));
     }
 
     #[tokio::test]
@@ -1251,7 +1235,7 @@ mod tests {
             )
             .await;
         emitter
-            .emit_artifact_updated("art_1", 2, "new content", None, None)
+            .emit_artifact_updated("art_1", "new content", None)
             .await;
         emitter.emit_artifact_deleted("art_1", None).await;
     }

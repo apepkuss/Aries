@@ -148,12 +148,6 @@ impl ArtifactCleaner {
                 // Continue with other artifacts
             }
 
-            // Delete version records
-            sqlx::query("DELETE FROM artifact_versions WHERE artifact_id = ?")
-                .bind(id)
-                .execute(self.store.pool())
-                .await?;
-
             // Delete metadata
             sqlx::query("DELETE FROM artifacts WHERE id = ?")
                 .bind(id)
@@ -166,22 +160,9 @@ impl ArtifactCleaner {
 
     /// Cleans up orphaned content (content without metadata)
     async fn cleanup_orphaned_content(&self) -> ArtifactResult<usize> {
-        // Delete version records without parent artifact
-        let result = sqlx::query(
-            r#"
-            DELETE FROM artifact_versions
-            WHERE artifact_id NOT IN (SELECT id FROM artifacts)
-            "#,
-        )
-        .execute(self.store.pool())
-        .await?;
-
-        let count = result.rows_affected() as usize;
-        if count > 0 {
-            dual_info!("Cleaned up {} orphaned version records", count);
-        }
-
-        Ok(count)
+        // No orphaned records to clean since versioning was removed.
+        // Content files are cleaned up when artifacts are purged.
+        Ok(0)
     }
 }
 

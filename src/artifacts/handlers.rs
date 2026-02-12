@@ -7,9 +7,6 @@
 //! - PUT /v1/artifacts/{id} - Update artifact
 //! - DELETE /v1/artifacts/{id} - Delete artifact
 //! - GET /v1/artifacts/{id}/download - Download artifact content (supports Range requests)
-//! - GET /v1/artifacts/{id}/versions - List versions
-//! - GET /v1/artifacts/{id}/versions/{version} - Get specific version content
-//! - POST /v1/artifacts/{id}/versions/{version}/restore - Restore to specific version
 //! - GET /v1/conversations/{conv_id}/artifacts - List artifacts by conversation
 
 use std::sync::Arc;
@@ -100,12 +97,6 @@ fn default_limit() -> i64 {
     20
 }
 
-/// Version query parameter
-#[derive(Debug, Deserialize)]
-pub struct VersionParams {
-    pub version: Option<i32>,
-}
-
 /// Binary upload request (from multipart form)
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -146,10 +137,6 @@ fn artifact_error_to_response(err: ArtifactError) -> Response<Body> {
         ArtifactError::NotFound(id) => error_response(
             StatusCode::NOT_FOUND,
             &format!("Artifact not found: {}", id),
-        ),
-        ArtifactError::VersionNotFound(id, v) => error_response(
-            StatusCode::NOT_FOUND,
-            &format!("Version {} not found for artifact {}", v, id),
         ),
         ArtifactError::ContentTooLarge(size, max) => error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
@@ -335,9 +322,8 @@ pub async fn update_artifact_handler(
             artifact.url = Some(format!("/v1/artifacts/{}/download", id));
 
             dual_info!(
-                "Updated artifact: {} (version={}) - request_id: {}",
+                "Updated artifact: {} - request_id: {}",
                 artifact.title,
-                artifact.version,
                 request_id
             );
 
@@ -407,7 +393,6 @@ pub async fn download_artifact_handler(
     State(state): State<Arc<ArtifactsState>>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Query(params): Query<VersionParams>,
 ) -> Response<Body> {
     let request_id = headers
         .get("x-request-id")
@@ -439,7 +424,6 @@ pub async fn download_artifact_handler(
         }
     };
 
-    let version = params.version.unwrap_or(artifact.version);
     let mime_type = artifact.artifact_type.mime_type();
     let filename = &artifact.title;
     let file_size = artifact.size;
@@ -452,10 +436,7 @@ pub async fn download_artifact_handler(
         if let Some((start, end)) = parse_range_header(range_str, file_size) {
             let length = end - start;
 
-            match store
-                .get_content_range(&id, version, start, Some(length))
-                .await
-            {
+            match store.get_content_range(&id, start, Some(length)).await {
                 Ok(content) => {
                     dual_info!(
                         "Serving range {}-{}/{} for artifact: {} - request_id: {}",
@@ -501,7 +482,7 @@ pub async fn download_artifact_handler(
         }
     } else {
         // Full content request
-        match store.get_content(&id, version).await {
+        match store.get_content(&id).await {
             Ok(content) => Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, mime_type)
@@ -521,165 +502,6 @@ pub async fn download_artifact_handler(
                 );
                 artifact_error_to_response(e)
             }
-        }
-    }
-}
-
-/// GET /v1/artifacts/{id}/versions - List artifact versions
-pub async fn list_versions_handler(
-    State(state): State<Arc<ArtifactsState>>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response<Body> {
-    let request_id = headers
-        .get("x-request-id")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("unknown");
-
-    dual_info!(
-        "Listing versions for artifact: {} - request_id: {}",
-        id,
-        request_id
-    );
-
-    let store = match state.get_store().await {
-        Ok(s) => s,
-        Err(e) => {
-            dual_error!("Failed to get store: {} - request_id: {}", e, request_id);
-            return artifact_error_to_response(e);
-        }
-    };
-
-    match store.get_versions(&id).await {
-        Ok(versions) => {
-            let response = ArtifactVersionListResponse {
-                total: versions.len(),
-                versions,
-            };
-
-            let body = serde_json::to_string(&response).unwrap_or_default();
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(body))
-                .unwrap()
-        }
-        Err(e) => {
-            dual_error!(
-                "Failed to list versions: {} - request_id: {}",
-                e,
-                request_id
-            );
-            artifact_error_to_response(e)
-        }
-    }
-}
-
-/// GET /v1/artifacts/{id}/versions/{version} - Get specific version content
-pub async fn get_version_content_handler(
-    State(state): State<Arc<ArtifactsState>>,
-    headers: HeaderMap,
-    Path((id, version)): Path<(String, i32)>,
-) -> Response<Body> {
-    let request_id = headers
-        .get("x-request-id")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("unknown");
-
-    dual_info!(
-        "Getting version {} content for artifact: {} - request_id: {}",
-        version,
-        id,
-        request_id
-    );
-
-    let store = match state.get_store().await {
-        Ok(s) => s,
-        Err(e) => {
-            dual_error!("Failed to get store: {} - request_id: {}", e, request_id);
-            return artifact_error_to_response(e);
-        }
-    };
-
-    match store.get_version_content(&id, version).await {
-        Ok(mut detail) => {
-            detail.artifact.url =
-                Some(format!("/v1/artifacts/{}/download?version={}", id, version));
-
-            let body = serde_json::to_string(&detail).unwrap_or_default();
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(body))
-                .unwrap()
-        }
-        Err(e) => {
-            dual_error!(
-                "Failed to get version {} for artifact {}: {} - request_id: {}",
-                version,
-                id,
-                e,
-                request_id
-            );
-            artifact_error_to_response(e)
-        }
-    }
-}
-
-/// POST /v1/artifacts/{id}/versions/{version}/restore - Restore to specific version
-pub async fn restore_version_handler(
-    State(state): State<Arc<ArtifactsState>>,
-    headers: HeaderMap,
-    Path((id, version)): Path<(String, i32)>,
-) -> Response<Body> {
-    let request_id = headers
-        .get("x-request-id")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("unknown");
-
-    dual_info!(
-        "Restoring artifact {} to version {} - request_id: {}",
-        id,
-        version,
-        request_id
-    );
-
-    let store = match state.get_store().await {
-        Ok(s) => s,
-        Err(e) => {
-            dual_error!("Failed to get store: {} - request_id: {}", e, request_id);
-            return artifact_error_to_response(e);
-        }
-    };
-
-    match store.restore_version(&id, version).await {
-        Ok(mut artifact) => {
-            artifact.url = Some(format!("/v1/artifacts/{}/download", id));
-
-            dual_info!(
-                "Restored artifact {} to version {} (new version={}) - request_id: {}",
-                id,
-                version,
-                artifact.version,
-                request_id
-            );
-
-            let body = serde_json::to_string(&artifact).unwrap_or_default();
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(body))
-                .unwrap()
-        }
-        Err(e) => {
-            dual_error!(
-                "Failed to restore artifact {} to version {}: {} - request_id: {}",
-                id,
-                version,
-                e,
-                request_id
-            );
-            artifact_error_to_response(e)
         }
     }
 }
@@ -1040,15 +862,6 @@ mod tests {
             serde_json::from_str(r#"{"limit": 50, "offset": 100}"#).unwrap();
         assert_eq!(params.limit, 50);
         assert_eq!(params.offset, 100);
-    }
-
-    #[test]
-    fn test_version_params() {
-        let params: VersionParams = serde_json::from_str(r#"{"version": 3}"#).unwrap();
-        assert_eq!(params.version, Some(3));
-
-        let params: VersionParams = serde_json::from_str("{}").unwrap();
-        assert_eq!(params.version, None);
     }
 
     #[test]

@@ -589,13 +589,8 @@ impl ArtifactCreatedEvent {
 pub struct ArtifactUpdatedEvent {
     /// Artifact ID.
     pub artifact_id: String,
-    /// New version number.
-    pub version: i32,
     /// Content preview (first 200 chars of new content).
     pub preview: String,
-    /// Optional change description.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub change_description: Option<String>,
     /// Optional subtask ID this update belongs to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subtask_id: Option<usize>,
@@ -604,7 +599,7 @@ pub struct ArtifactUpdatedEvent {
 #[allow(dead_code)]
 impl ArtifactUpdatedEvent {
     /// Creates a new ArtifactUpdatedEvent.
-    pub fn new(artifact_id: impl Into<String>, version: i32, content: &str) -> Self {
+    pub fn new(artifact_id: impl Into<String>, content: &str) -> Self {
         let preview = if content.len() > 200 {
             format!("{}...", &content[..200])
         } else {
@@ -613,17 +608,9 @@ impl ArtifactUpdatedEvent {
 
         Self {
             artifact_id: artifact_id.into(),
-            version,
             preview,
-            change_description: None,
             subtask_id: None,
         }
-    }
-
-    /// Sets the change description.
-    pub fn with_change_description(mut self, description: impl Into<String>) -> Self {
-        self.change_description = Some(description.into());
-        self
     }
 
     /// Sets the subtask ID.
@@ -1773,15 +1760,11 @@ mod tests {
 
     #[test]
     fn test_artifact_updated_event_serialization() {
-        let event = ArtifactUpdatedEvent::new("art_123", 2, "updated content here")
-            .with_change_description("Fixed bug in main function")
-            .with_subtask_id(1);
+        let event = ArtifactUpdatedEvent::new("art_123", "updated content here").with_subtask_id(1);
 
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("\"artifact_id\":\"art_123\""));
-        assert!(json.contains("\"version\":2"));
         assert!(json.contains("\"preview\":\"updated content here\""));
-        assert!(json.contains("\"change_description\":\"Fixed bug in main function\""));
         assert!(json.contains("\"subtask_id\":1"));
     }
 
@@ -1807,7 +1790,7 @@ mod tests {
         assert_eq!(created.event_type(), StreamEventType::ArtifactCreated);
 
         let updated =
-            StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new("art_1", 2, "new content"));
+            StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new("art_1", "new content"));
         assert_eq!(updated.event_type(), StreamEventType::ArtifactUpdated);
 
         let deleted = StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new("art_1"));
@@ -1830,12 +1813,11 @@ mod tests {
 
         let updated_event = StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new(
             "art_001",
-            2,
             "print('hello world')",
         ));
         let sse = format_stream_event(&updated_event);
         assert!(sse.starts_with("event: artifact_updated\n"));
-        assert!(sse.contains("\"version\":2"));
+        assert!(sse.contains("\"artifact_id\":\"art_001\""));
 
         let deleted_event = StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new("art_001"));
         let sse = format_stream_event(&deleted_event);
@@ -1877,10 +1859,10 @@ mod tests {
                 12,
                 "/v1/artifacts/art_001/download",
             ))),
-            format_stream_event(&StreamEvent::ArtifactUpdated(
-                ArtifactUpdatedEvent::new("art_001", 2, "fn main() { println!(\"Hi\"); }")
-                    .with_change_description("Added print statement"),
-            )),
+            format_stream_event(&StreamEvent::ArtifactUpdated(ArtifactUpdatedEvent::new(
+                "art_001",
+                "fn main() { println!(\"Hi\"); }",
+            ))),
             format_stream_event(&StreamEvent::ArtifactDeleted(ArtifactDeletedEvent::new(
                 "art_001",
             ))),

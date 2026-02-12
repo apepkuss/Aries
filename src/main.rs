@@ -498,7 +498,6 @@ async fn main() -> ServerResult<()> {
             let artifact_config = artifacts::ArtifactConfig {
                 max_content_size: art_config.max_content_size,
                 max_binary_size: art_config.max_binary_size,
-                max_versions: art_config.max_versions,
                 storage_path,
                 retention_days: art_config.retention_days,
                 cleanup_interval_secs: art_config.cleanup_interval_secs,
@@ -547,18 +546,6 @@ async fn main() -> ServerResult<()> {
                 .route(
                     "/v1/artifacts/{id}/download",
                     axum::routing::get(artifacts::download_artifact_handler),
-                )
-                .route(
-                    "/v1/artifacts/{id}/versions",
-                    axum::routing::get(artifacts::list_versions_handler),
-                )
-                .route(
-                    "/v1/artifacts/{id}/versions/{version}",
-                    axum::routing::get(artifacts::get_version_content_handler),
-                )
-                .route(
-                    "/v1/artifacts/{id}/versions/{version}/restore",
-                    axum::routing::post(artifacts::restore_version_handler),
                 )
                 .route(
                     "/v1/conversations/{conv_id}/artifacts",

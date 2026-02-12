@@ -91,7 +91,6 @@ impl ArtifactService {
         emitter: Option<&dyn EventEmitter>,
         subtask_id: Option<usize>,
     ) -> ArtifactResult<Artifact> {
-        let change_desc = request.change_description.clone();
         let new_content = request.content.clone();
 
         let artifact = self.store.update(id, request).await?;
@@ -99,13 +98,7 @@ impl ArtifactService {
         // Emit SSE event if emitter is provided and content was updated
         if let (Some(emitter), Some(ref content)) = (emitter, new_content) {
             emitter
-                .emit_artifact_updated(
-                    &artifact.id,
-                    artifact.version,
-                    content,
-                    change_desc.as_deref(),
-                    subtask_id,
-                )
+                .emit_artifact_updated(&artifact.id, content, subtask_id)
                 .await;
         }
 
@@ -215,7 +208,6 @@ mod tests {
             title: None,
             description: None,
             content: Some("fn main() { println!(\"Hi\"); }".to_string()),
-            change_description: Some("Added print".to_string()),
         };
 
         let updated = service
@@ -223,7 +215,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(updated.version, 2);
+        assert_eq!(updated.size, 29);
     }
 
     #[tokio::test]

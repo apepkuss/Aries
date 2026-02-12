@@ -182,7 +182,6 @@ impl Sanitize for ArtifactsConfig {
             storage_path: self.storage_path.clone(),
             max_content_size: self.max_content_size,
             max_binary_size: self.max_binary_size,
-            max_versions: self.max_versions,
             retention_days: self.retention_days,
             cleanup_interval_secs: self.cleanup_interval_secs,
             soft_delete_retention_days: self.soft_delete_retention_days,
@@ -312,7 +311,6 @@ mod tests {
 
         assert!(!sanitized.enabled);
         assert_eq!(sanitized.database_path, "data/artifacts.db");
-        assert_eq!(sanitized.max_versions, 10);
     }
 
     #[test]

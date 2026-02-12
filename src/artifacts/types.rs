@@ -259,8 +259,6 @@ pub struct Artifact {
     pub description: Option<String>,
     /// Artifact type
     pub artifact_type: ArtifactType,
-    /// Current version number
-    pub version: i32,
     /// Content size in bytes
     pub size: u64,
     /// Soft delete flag
@@ -269,30 +267,6 @@ pub struct Artifact {
     /// Download URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
-}
-
-// ============================================================================
-// Artifact Version
-// ============================================================================
-
-/// Artifact version history entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactVersion {
-    /// Version ID
-    pub id: i64,
-    /// Associated Artifact ID
-    pub artifact_id: String,
-    /// Version number
-    pub version: i32,
-    /// Content hash (SHA-256)
-    pub content_hash: String,
-    /// Content size in bytes
-    pub size: u64,
-    /// Creation timestamp
-    pub created_at: DateTime<Utc>,
-    /// Change description (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub change_description: Option<String>,
 }
 
 // ============================================================================
@@ -336,12 +310,9 @@ pub struct UpdateArtifactRequest {
     /// New description (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// New content (optional, creates new version if provided)
+    /// New content (optional, overwrites existing content if provided)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// Change description (used with content)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub change_description: Option<String>,
 }
 
 // ============================================================================
@@ -367,15 +338,6 @@ pub struct ArtifactDetailResponse {
     pub artifact: Artifact,
     /// Content
     pub content: String,
-}
-
-/// Version list response
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactVersionListResponse {
-    /// List of versions
-    pub versions: Vec<ArtifactVersion>,
-    /// Total count
-    pub total: usize,
 }
 
 // ============================================================================
@@ -478,7 +440,6 @@ mod tests {
             artifact_type: ArtifactType::Code {
                 language: "rust".into(),
             },
-            version: 1,
             size: 100,
             is_deleted: false,
             url: Some("/v1/artifacts/art_123/download".to_string()),
@@ -521,7 +482,6 @@ mod tests {
             title: Some("new_title.rs".to_string()),
             description: None,
             content: None,
-            change_description: None,
         };
 
         let json = serde_json::to_string(&request).unwrap();

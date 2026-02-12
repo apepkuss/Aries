@@ -1320,10 +1320,6 @@ pub struct ArtifactsConfig {
     #[serde(default = "default_artifacts_max_binary_size")]
     pub max_binary_size: u64,
 
-    /// Maximum versions to keep per artifact (default: 10)
-    #[serde(default = "default_artifacts_max_versions")]
-    pub max_versions: i32,
-
     // ========== Lifecycle Configuration ==========
     /// Artifact retention days (0 = never expire, default: 30)
     #[serde(default = "default_artifacts_retention_days")]
@@ -1358,10 +1354,6 @@ fn default_artifacts_max_binary_size() -> u64 {
     100 * 1024 * 1024 // 100MB
 }
 
-fn default_artifacts_max_versions() -> i32 {
-    10
-}
-
 fn default_artifacts_retention_days() -> u32 {
     30
 }
@@ -1386,7 +1378,6 @@ impl Default for ArtifactsConfig {
             storage_path: None,
             max_content_size: default_artifacts_max_size(),
             max_binary_size: default_artifacts_max_binary_size(),
-            max_versions: default_artifacts_max_versions(),
             retention_days: default_artifacts_retention_days(),
             cleanup_interval_secs: default_artifacts_cleanup_interval(),
             soft_delete_retention_days: default_artifacts_soft_delete_retention(),

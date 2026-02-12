@@ -265,7 +265,6 @@ mod tests {
             title: format!("Test {}", id),
             description: None,
             artifact_type: ArtifactType::Text,
-            version: 1,
             size: 100,
             is_deleted: false,
             url: None,
@@ -445,13 +444,13 @@ mod tests {
         cache.set(artifact.clone(), Some(b"v1".to_vec())).await;
 
         // Update with new content
-        artifact.version = 2;
+        artifact.size = 200;
         cache.set(artifact, Some(b"v2".to_vec())).await;
 
         let result = cache.get_with_content("art_1").await;
         assert!(result.is_some());
         let (art, content) = result.unwrap();
-        assert_eq!(art.version, 2);
+        assert_eq!(art.size, 200);
         assert_eq!(content, Some(b"v2".to_vec()));
 
         // Should still be only 1 entry

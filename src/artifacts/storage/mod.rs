@@ -47,23 +47,22 @@ pub trait ArtifactStorage: Send + Sync {
     ///
     /// # Arguments
     /// - `artifact_id`: Artifact unique identifier
-    /// - `version`: Version number
     /// - `content`: Content bytes
-    async fn store(&self, artifact_id: &str, version: i32, content: &[u8]) -> ArtifactResult<()>;
+    async fn store(&self, artifact_id: &str, content: &[u8]) -> ArtifactResult<()>;
 
     /// Read content
-    async fn read(&self, artifact_id: &str, version: i32) -> ArtifactResult<Vec<u8>>;
+    async fn read(&self, artifact_id: &str) -> ArtifactResult<Vec<u8>>;
 
-    /// Delete a specific version
-    async fn delete(&self, artifact_id: &str, version: i32) -> ArtifactResult<()>;
+    /// Delete artifact content
+    async fn delete(&self, artifact_id: &str) -> ArtifactResult<()>;
 
-    /// Delete all versions of an artifact
+    /// Delete all files of an artifact
     #[allow(dead_code)]
     async fn delete_all(&self, artifact_id: &str) -> ArtifactResult<()>;
 
-    /// Check if a version exists
+    /// Check if artifact content exists
     #[allow(dead_code)]
-    async fn exists(&self, artifact_id: &str, version: i32) -> ArtifactResult<bool>;
+    async fn exists(&self, artifact_id: &str) -> ArtifactResult<bool>;
 
     /// Get storage statistics
     #[allow(dead_code)]
@@ -80,47 +79,34 @@ pub trait ArtifactStorage: Send + Sync {
     ///
     /// # Arguments
     /// * `artifact_id` - Artifact ID
-    /// * `version` - Version number
     /// * `offset` - Start offset in bytes
     /// * `length` - Number of bytes to read (None = read to end)
     #[allow(dead_code)]
     async fn read_range(
         &self,
         artifact_id: &str,
-        version: i32,
         offset: u64,
         length: Option<u64>,
     ) -> ArtifactResult<Vec<u8>>;
 
     /// Get file size without reading content
     #[allow(dead_code)]
-    async fn file_size(&self, artifact_id: &str, version: i32) -> ArtifactResult<u64>;
+    async fn file_size(&self, artifact_id: &str) -> ArtifactResult<u64>;
 
     /// Store content from a stream (for large file uploads)
     ///
     /// # Arguments
     /// * `artifact_id` - Artifact ID
-    /// * `version` - Version number
     /// * `stream` - Byte stream to read from
     #[allow(dead_code)]
-    async fn store_stream(
-        &self,
-        artifact_id: &str,
-        version: i32,
-        stream: ByteStream,
-    ) -> ArtifactResult<u64>;
+    async fn store_stream(&self, artifact_id: &str, stream: ByteStream) -> ArtifactResult<u64>;
 
     /// Read content as a stream (for large file downloads)
     ///
     /// # Arguments
     /// * `artifact_id` - Artifact ID
-    /// * `version` - Version number
     /// * `chunk_size` - Size of each chunk in bytes
     #[allow(dead_code)]
-    async fn read_stream(
-        &self,
-        artifact_id: &str,
-        version: i32,
-        chunk_size: usize,
-    ) -> ArtifactResult<ByteStream>;
+    async fn read_stream(&self, artifact_id: &str, chunk_size: usize)
+    -> ArtifactResult<ByteStream>;
 }

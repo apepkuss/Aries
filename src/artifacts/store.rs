@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use thiserror::Error;
 use uuid::Uuid;
@@ -25,9 +24,6 @@ use crate::dual_info;
 pub enum ArtifactError {
     #[error("Artifact not found: {0}")]
     NotFound(String),
-
-    #[error("Version not found: artifact={0}, version={1}")]
-    VersionNotFound(String, i32),
 
     #[error("Content too large: {0} bytes (max: {1} bytes)")]
     ContentTooLarge(u64, u64),
@@ -58,8 +54,6 @@ pub struct ArtifactConfig {
     pub max_content_size: u64,
     /// Maximum content size for binary artifacts (default: 100MB)
     pub max_binary_size: u64,
-    /// Maximum versions to keep per artifact (default: 10)
-    pub max_versions: i32,
     /// Storage path for file system backend
     pub storage_path: Option<String>,
 
@@ -80,7 +74,6 @@ impl Default for ArtifactConfig {
         Self {
             max_content_size: 1024 * 1024,      // 1MB for text
             max_binary_size: 100 * 1024 * 1024, // 100MB for binary
-            max_versions: 10,
             storage_path: None,
             retention_days: 30,
             cleanup_interval_secs: 3600, // 1 hour
@@ -143,28 +136,8 @@ impl ArtifactStore {
                 title TEXT NOT NULL,
                 description TEXT,
                 artifact_type TEXT NOT NULL,
-                version INTEGER NOT NULL DEFAULT 1,
                 size INTEGER NOT NULL DEFAULT 0,
                 is_deleted INTEGER NOT NULL DEFAULT 0
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Artifact versions table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS artifact_versions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                artifact_id TEXT NOT NULL,
-                version INTEGER NOT NULL,
-                content_hash TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                change_description TEXT,
-                FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
-                UNIQUE(artifact_id, version)
             )
             "#,
         )
@@ -185,15 +158,6 @@ impl ArtifactStore {
             r#"
             CREATE INDEX IF NOT EXISTS idx_artifacts_user_id
             ON artifacts(user_id, is_deleted, updated_at DESC)
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_artifact_versions_artifact
-            ON artifact_versions(artifact_id, version DESC)
             "#,
         )
         .execute(&self.pool)
@@ -257,19 +221,18 @@ impl ArtifactStore {
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let content_hash = Self::compute_hash(content_bytes);
         let artifact_type_json = serde_json::to_string(&request.artifact_type)?;
 
         // Store content
-        self.storage.store(&id, 1, content_bytes).await?;
+        self.storage.store(&id, content_bytes).await?;
 
         // Insert metadata
         sqlx::query(
             r#"
             INSERT INTO artifacts (
                 id, conversation_id, user_id, created_at, updated_at,
-                title, description, artifact_type, version, size, is_deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0)
+                title, description, artifact_type, size, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             "#,
         )
         .bind(&id)
@@ -284,21 +247,6 @@ impl ArtifactStore {
         .execute(&self.pool)
         .await?;
 
-        // Insert version record
-        sqlx::query(
-            r#"
-            INSERT INTO artifact_versions (
-                artifact_id, version, content_hash, size, created_at, change_description
-            ) VALUES (?, 1, ?, ?, ?, 'Initial version')
-            "#,
-        )
-        .bind(&id)
-        .bind(&content_hash)
-        .bind(content_size as i64)
-        .bind(now.to_rfc3339())
-        .execute(&self.pool)
-        .await?;
-
         Ok(Artifact {
             id,
             conversation_id: request.conversation_id,
@@ -308,7 +256,6 @@ impl ArtifactStore {
             title: request.title,
             description: request.description,
             artifact_type: request.artifact_type,
-            version: 1,
             size: content_size,
             is_deleted: false,
             url: None,
@@ -343,19 +290,18 @@ impl ArtifactStore {
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        let content_hash = Self::compute_hash(&content);
         let artifact_type_json = serde_json::to_string(&artifact_type)?;
 
         // Store content
-        self.storage.store(&id, 1, &content).await?;
+        self.storage.store(&id, &content).await?;
 
         // Insert metadata
         sqlx::query(
             r#"
             INSERT INTO artifacts (
                 id, conversation_id, user_id, created_at, updated_at,
-                title, description, artifact_type, version, size, is_deleted
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0)
+                title, description, artifact_type, size, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             "#,
         )
         .bind(&id)
@@ -367,21 +313,6 @@ impl ArtifactStore {
         .bind(&description)
         .bind(&artifact_type_json)
         .bind(content_size as i64)
-        .execute(&self.pool)
-        .await?;
-
-        // Insert version record
-        sqlx::query(
-            r#"
-            INSERT INTO artifact_versions (
-                artifact_id, version, content_hash, size, created_at, change_description
-            ) VALUES (?, 1, ?, ?, ?, 'Initial version')
-            "#,
-        )
-        .bind(&id)
-        .bind(&content_hash)
-        .bind(content_size as i64)
-        .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
 
@@ -401,7 +332,6 @@ impl ArtifactStore {
             title,
             description,
             artifact_type,
-            version: 1,
             size: content_size,
             is_deleted: false,
             url: None,
@@ -413,7 +343,7 @@ impl ArtifactStore {
         let row = sqlx::query_as::<_, ArtifactRow>(
             r#"
             SELECT id, conversation_id, user_id, created_at, updated_at,
-                   title, description, artifact_type, version, size, is_deleted
+                   title, description, artifact_type, size, is_deleted
             FROM artifacts
             WHERE id = ? AND is_deleted = 0
             "#,
@@ -437,7 +367,7 @@ impl ArtifactStore {
 
         match artifact {
             Some(artifact) => {
-                let content_bytes = self.storage.read(id, artifact.version).await?;
+                let content_bytes = self.storage.read(id).await?;
                 let content = String::from_utf8_lossy(&content_bytes).to_string();
 
                 Ok(Some(ArtifactDetailResponse { artifact, content }))
@@ -446,28 +376,26 @@ impl ArtifactStore {
         }
     }
 
-    /// Get artifact content for a specific version
-    pub async fn get_content(&self, id: &str, version: i32) -> ArtifactResult<Vec<u8>> {
+    /// Get artifact content
+    pub async fn get_content(&self, id: &str) -> ArtifactResult<Vec<u8>> {
         // Verify artifact exists
         let artifact = self.get(id).await?;
         if artifact.is_none() {
             return Err(ArtifactError::NotFound(id.to_string()));
         }
 
-        self.storage.read(id, version).await
+        self.storage.read(id).await
     }
 
-    /// Get partial artifact content for a specific version (for Range requests)
+    /// Get partial artifact content (for Range requests)
     ///
     /// # Arguments
     /// * `id` - Artifact ID
-    /// * `version` - Version number
     /// * `offset` - Start offset in bytes
     /// * `length` - Number of bytes to read (None = read to end)
     pub async fn get_content_range(
         &self,
         id: &str,
-        version: i32,
         offset: u64,
         length: Option<u64>,
     ) -> ArtifactResult<Vec<u8>> {
@@ -477,7 +405,7 @@ impl ArtifactStore {
             return Err(ArtifactError::NotFound(id.to_string()));
         }
 
-        self.storage.read_range(id, version, offset, length).await
+        self.storage.read_range(id, offset, length).await
     }
 
     /// Update artifact
@@ -493,10 +421,9 @@ impl ArtifactStore {
             .ok_or_else(|| ArtifactError::NotFound(id.to_string()))?;
 
         let now = Utc::now();
-        let mut new_version = artifact.version;
         let mut new_size = artifact.size;
 
-        // Handle content update (creates new version)
+        // Handle content update (overwrite)
         if let Some(ref content) = request.content {
             let content_bytes = content.as_bytes();
             let content_size = content_bytes.len() as u64;
@@ -509,32 +436,10 @@ impl ArtifactStore {
                 ));
             }
 
-            new_version = artifact.version + 1;
             new_size = content_size;
-            let content_hash = Self::compute_hash(content_bytes);
 
-            // Store new version content
-            self.storage.store(id, new_version, content_bytes).await?;
-
-            // Insert version record
-            sqlx::query(
-                r#"
-                INSERT INTO artifact_versions (
-                    artifact_id, version, content_hash, size, created_at, change_description
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                "#,
-            )
-            .bind(id)
-            .bind(new_version)
-            .bind(&content_hash)
-            .bind(content_size as i64)
-            .bind(now.to_rfc3339())
-            .bind(&request.change_description)
-            .execute(&self.pool)
-            .await?;
-
-            // Clean up old versions if needed
-            self.cleanup_old_versions(id).await?;
+            // Overwrite content
+            self.storage.store(id, content_bytes).await?;
         }
 
         // Update metadata
@@ -544,13 +449,12 @@ impl ArtifactStore {
         sqlx::query(
             r#"
             UPDATE artifacts
-            SET title = ?, description = ?, version = ?, size = ?, updated_at = ?
+            SET title = ?, description = ?, size = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&new_title)
         .bind(&new_description)
-        .bind(new_version)
         .bind(new_size as i64)
         .bind(now.to_rfc3339())
         .bind(id)
@@ -566,7 +470,6 @@ impl ArtifactStore {
             title: new_title,
             description: new_description,
             artifact_type: artifact.artifact_type,
-            version: new_version,
             size: new_size,
             is_deleted: false,
             url: None,
@@ -618,7 +521,7 @@ impl ArtifactStore {
         let rows = sqlx::query_as::<_, ArtifactRow>(
             r#"
             SELECT id, conversation_id, user_id, created_at, updated_at,
-                   title, description, artifact_type, version, size, is_deleted
+                   title, description, artifact_type, size, is_deleted
             FROM artifacts
             WHERE conversation_id = ? AND is_deleted = 0
             ORDER BY updated_at DESC
@@ -637,224 +540,6 @@ impl ArtifactStore {
             .collect();
 
         Ok((artifacts, count.0))
-    }
-
-    /// Get version history for an artifact
-    pub async fn get_versions(&self, artifact_id: &str) -> ArtifactResult<Vec<ArtifactVersion>> {
-        let rows = sqlx::query_as::<_, ArtifactVersionRow>(
-            r#"
-            SELECT id, artifact_id, version, content_hash, size, created_at, change_description
-            FROM artifact_versions
-            WHERE artifact_id = ?
-            ORDER BY version DESC
-            "#,
-        )
-        .bind(artifact_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let versions: Vec<ArtifactVersion> = rows
-            .into_iter()
-            .filter_map(|r| r.into_version().ok())
-            .collect();
-
-        Ok(versions)
-    }
-
-    /// Restore artifact to a specific version
-    ///
-    /// Creates a new version with the content from the specified version.
-    /// This is a non-destructive operation - the old versions are preserved.
-    pub async fn restore_version(
-        &self,
-        artifact_id: &str,
-        target_version: i32,
-    ) -> ArtifactResult<Artifact> {
-        // Get current artifact
-        let artifact = self
-            .get(artifact_id)
-            .await?
-            .ok_or_else(|| ArtifactError::NotFound(artifact_id.to_string()))?;
-
-        // Verify target version exists
-        let version_exists: Option<(i32,)> = sqlx::query_as(
-            r#"
-            SELECT version FROM artifact_versions
-            WHERE artifact_id = ? AND version = ?
-            "#,
-        )
-        .bind(artifact_id)
-        .bind(target_version)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        if version_exists.is_none() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                target_version,
-            ));
-        }
-
-        // If already at target version, return current artifact
-        if artifact.version == target_version {
-            return Ok(artifact);
-        }
-
-        // Read content from target version
-        let content_bytes = self.storage.read(artifact_id, target_version).await?;
-        let content_size = content_bytes.len() as u64;
-        let content_hash = Self::compute_hash(&content_bytes);
-        let new_version = artifact.version + 1;
-        let now = Utc::now();
-
-        // Store as new version
-        self.storage
-            .store(artifact_id, new_version, &content_bytes)
-            .await?;
-
-        // Insert version record
-        let change_desc = format!("Restored from version {}", target_version);
-        sqlx::query(
-            r#"
-            INSERT INTO artifact_versions (
-                artifact_id, version, content_hash, size, created_at, change_description
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            "#,
-        )
-        .bind(artifact_id)
-        .bind(new_version)
-        .bind(&content_hash)
-        .bind(content_size as i64)
-        .bind(now.to_rfc3339())
-        .bind(&change_desc)
-        .execute(&self.pool)
-        .await?;
-
-        // Update artifact metadata
-        sqlx::query(
-            r#"
-            UPDATE artifacts
-            SET version = ?, size = ?, updated_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(new_version)
-        .bind(content_size as i64)
-        .bind(now.to_rfc3339())
-        .bind(artifact_id)
-        .execute(&self.pool)
-        .await?;
-
-        // Clean up old versions if needed
-        self.cleanup_old_versions(artifact_id).await?;
-
-        Ok(Artifact {
-            id: artifact_id.to_string(),
-            conversation_id: artifact.conversation_id,
-            user_id: artifact.user_id,
-            created_at: artifact.created_at,
-            updated_at: now,
-            title: artifact.title,
-            description: artifact.description,
-            artifact_type: artifact.artifact_type,
-            version: new_version,
-            size: content_size,
-            is_deleted: false,
-            url: None,
-        })
-    }
-
-    /// Get content for a specific version
-    pub async fn get_version_content(
-        &self,
-        artifact_id: &str,
-        version: i32,
-    ) -> ArtifactResult<ArtifactDetailResponse> {
-        // Get artifact metadata
-        let artifact = self
-            .get(artifact_id)
-            .await?
-            .ok_or_else(|| ArtifactError::NotFound(artifact_id.to_string()))?;
-
-        // Verify version exists
-        let version_info: Option<ArtifactVersionRow> = sqlx::query_as(
-            r#"
-            SELECT id, artifact_id, version, content_hash, size, created_at, change_description
-            FROM artifact_versions
-            WHERE artifact_id = ? AND version = ?
-            "#,
-        )
-        .bind(artifact_id)
-        .bind(version)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        if version_info.is_none() {
-            return Err(ArtifactError::VersionNotFound(
-                artifact_id.to_string(),
-                version,
-            ));
-        }
-
-        // Read content from storage
-        let content_bytes = self.storage.read(artifact_id, version).await?;
-        let content = String::from_utf8_lossy(&content_bytes).to_string();
-
-        // Return artifact with the requested version info
-        let mut versioned_artifact = artifact;
-        versioned_artifact.version = version;
-
-        Ok(ArtifactDetailResponse {
-            artifact: versioned_artifact,
-            content,
-        })
-    }
-
-    // ========================================================================
-    // Helper Methods
-    // ========================================================================
-
-    /// Compute SHA-256 hash of content
-    fn compute_hash(content: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(content);
-        format!("{:x}", hasher.finalize())
-    }
-
-    /// Clean up old versions beyond max_versions limit
-    async fn cleanup_old_versions(&self, artifact_id: &str) -> ArtifactResult<()> {
-        // Get versions to delete
-        let old_versions: Vec<(i32,)> = sqlx::query_as(
-            r#"
-            SELECT version FROM artifact_versions
-            WHERE artifact_id = ?
-            ORDER BY version DESC
-            LIMIT -1 OFFSET ?
-            "#,
-        )
-        .bind(artifact_id)
-        .bind(self.config.max_versions)
-        .fetch_all(&self.pool)
-        .await?;
-
-        for (version,) in old_versions {
-            // Delete from storage
-            let _ = self.storage.delete(artifact_id, version).await;
-
-            // Delete from database
-            sqlx::query(
-                r#"
-                DELETE FROM artifact_versions
-                WHERE artifact_id = ? AND version = ?
-                "#,
-            )
-            .bind(artifact_id)
-            .bind(version)
-            .execute(&self.pool)
-            .await?;
-        }
-
-        Ok(())
     }
 
     // ========================================================================
@@ -892,7 +577,6 @@ struct ArtifactRow {
     title: String,
     description: Option<String>,
     artifact_type: String,
-    version: i32,
     size: i64,
     is_deleted: i32,
 }
@@ -916,39 +600,9 @@ impl ArtifactRow {
             title: self.title,
             description: self.description,
             artifact_type,
-            version: self.version,
             size: self.size as u64,
             is_deleted: self.is_deleted != 0,
             url: None,
-        })
-    }
-}
-
-#[derive(sqlx::FromRow)]
-struct ArtifactVersionRow {
-    id: i64,
-    artifact_id: String,
-    version: i32,
-    content_hash: String,
-    size: i64,
-    created_at: String,
-    change_description: Option<String>,
-}
-
-impl ArtifactVersionRow {
-    fn into_version(self) -> ArtifactResult<ArtifactVersion> {
-        let created_at = chrono::DateTime::parse_from_rfc3339(&self.created_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
-
-        Ok(ArtifactVersion {
-            id: self.id,
-            artifact_id: self.artifact_id,
-            version: self.version,
-            content_hash: self.content_hash,
-            size: self.size as u64,
-            created_at,
-            change_description: self.change_description,
         })
     }
 }
@@ -992,7 +646,6 @@ mod tests {
 
         assert!(!artifact.id.is_empty());
         assert_eq!(artifact.title, "test.rs");
-        assert_eq!(artifact.version, 1);
         assert_eq!(artifact.size, 12);
     }
 
@@ -1043,7 +696,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_creates_new_version() {
+    async fn test_update_overwrites_content() {
         let store = setup_test_store().await;
 
         // Create
@@ -1066,19 +719,16 @@ mod tests {
                     title: None,
                     description: None,
                     content: Some("fn main() { println!(\"hello\"); }".to_string()),
-                    change_description: Some("Added print".to_string()),
                 },
             )
             .await
             .unwrap();
 
-        assert_eq!(updated.version, 2);
+        assert_eq!(updated.size, 32);
 
-        // Check versions
-        let versions = store.get_versions(&artifact.id).await.unwrap();
-        assert_eq!(versions.len(), 2);
-        assert_eq!(versions[0].version, 2);
-        assert_eq!(versions[1].version, 1);
+        // Verify content was overwritten
+        let detail = store.get_with_content(&artifact.id).await.unwrap().unwrap();
+        assert_eq!(detail.content, "fn main() { println!(\"hello\"); }");
     }
 
     #[tokio::test]
@@ -1177,287 +827,16 @@ mod tests {
                     title: Some("new_title.txt".to_string()),
                     description: None,
                     content: None,
-                    change_description: None,
                 },
             )
             .await
             .unwrap();
 
         assert_eq!(updated.title, "new_title.txt");
-        assert_eq!(updated.version, 1); // Version should not change
     }
 
     // ========================================================================
-    // Version Management Tests (P2.5)
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_restore_version() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "versioned.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "version 1 content".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Update to version 2
-        store
-            .update(
-                &artifact.id,
-                UpdateArtifactRequest {
-                    title: None,
-                    description: None,
-                    content: Some("version 2 content".to_string()),
-                    change_description: Some("Updated to v2".to_string()),
-                },
-            )
-            .await
-            .unwrap();
-
-        // Update to version 3
-        store
-            .update(
-                &artifact.id,
-                UpdateArtifactRequest {
-                    title: None,
-                    description: None,
-                    content: Some("version 3 content".to_string()),
-                    change_description: Some("Updated to v3".to_string()),
-                },
-            )
-            .await
-            .unwrap();
-
-        // Restore to version 1
-        let restored = store.restore_version(&artifact.id, 1).await.unwrap();
-
-        // Should be version 4 (new version with v1 content)
-        assert_eq!(restored.version, 4);
-
-        // Content should match version 1
-        let detail = store.get_with_content(&artifact.id).await.unwrap().unwrap();
-        assert_eq!(detail.content, "version 1 content");
-
-        // Should have 4 versions now
-        let versions = store.get_versions(&artifact.id).await.unwrap();
-        assert_eq!(versions.len(), 4);
-
-        // Latest version should have restore description
-        assert!(
-            versions[0]
-                .change_description
-                .as_ref()
-                .unwrap()
-                .contains("Restored from version 1")
-        );
-    }
-
-    #[tokio::test]
-    async fn test_restore_version_not_found() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "test.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "content".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Try to restore to non-existent version
-        let result = store.restore_version(&artifact.id, 999).await;
-        assert!(matches!(
-            result,
-            Err(ArtifactError::VersionNotFound(_, 999))
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_restore_current_version_no_op() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "test.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "content".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Restore to current version (should be no-op)
-        let restored = store.restore_version(&artifact.id, 1).await.unwrap();
-
-        assert_eq!(restored.version, 1);
-
-        // Should still have only 1 version
-        let versions = store.get_versions(&artifact.id).await.unwrap();
-        assert_eq!(versions.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_get_version_content() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "multi_version.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "original content".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Update to version 2
-        store
-            .update(
-                &artifact.id,
-                UpdateArtifactRequest {
-                    title: None,
-                    description: None,
-                    content: Some("updated content".to_string()),
-                    change_description: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        // Get version 1 content
-        let v1_detail = store.get_version_content(&artifact.id, 1).await.unwrap();
-        assert_eq!(v1_detail.content, "original content");
-        assert_eq!(v1_detail.artifact.version, 1);
-
-        // Get version 2 content
-        let v2_detail = store.get_version_content(&artifact.id, 2).await.unwrap();
-        assert_eq!(v2_detail.content, "updated content");
-        assert_eq!(v2_detail.artifact.version, 2);
-    }
-
-    #[tokio::test]
-    async fn test_get_version_content_not_found() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "test.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "content".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Try to get non-existent version
-        let result = store.get_version_content(&artifact.id, 999).await;
-        assert!(matches!(
-            result,
-            Err(ArtifactError::VersionNotFound(_, 999))
-        ));
-    }
-
-    #[tokio::test]
-    async fn test_version_cleanup() {
-        // Create store with max 3 versions
-        let pool = SqlitePoolOptions::new()
-            .connect("sqlite::memory:")
-            .await
-            .expect("Failed to create test pool");
-
-        let config = ArtifactConfig {
-            max_content_size: 1024 * 1024,
-            max_versions: 3,
-            storage_path: None,
-            ..Default::default()
-        };
-        let store = ArtifactStore::new(pool, config).await.unwrap();
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "cleanup_test.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "v1".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Create 4 more versions (total 5)
-        for i in 2..=5 {
-            store
-                .update(
-                    &artifact.id,
-                    UpdateArtifactRequest {
-                        title: None,
-                        description: None,
-                        content: Some(format!("v{}", i)),
-                        change_description: None,
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Should only have 3 versions (max_versions)
-        let versions = store.get_versions(&artifact.id).await.unwrap();
-        assert_eq!(versions.len(), 3);
-
-        // Should have versions 5, 4, 3 (newest first)
-        assert_eq!(versions[0].version, 5);
-        assert_eq!(versions[1].version, 4);
-        assert_eq!(versions[2].version, 3);
-    }
-
-    #[tokio::test]
-    async fn test_version_change_description() {
-        let store = setup_test_store().await;
-
-        // Create artifact
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_1".to_string(),
-            title: "test.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "initial".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Update with change description
-        store
-            .update(
-                &artifact.id,
-                UpdateArtifactRequest {
-                    title: None,
-                    description: None,
-                    content: Some("updated".to_string()),
-                    change_description: Some("Fixed bug in line 42".to_string()),
-                },
-            )
-            .await
-            .unwrap();
-
-        // Check version has correct description
-        let versions = store.get_versions(&artifact.id).await.unwrap();
-        assert_eq!(
-            versions[0].change_description.as_deref(),
-            Some("Fixed bug in line 42")
-        );
-        assert_eq!(
-            versions[1].change_description.as_deref(),
-            Some("Initial version")
-        );
-    }
-
-    // ========================================================================
-    // Performance Tests (P5.4)
+    // Performance Tests
     // ========================================================================
 
     #[tokio::test]
@@ -1589,89 +968,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_perf_version_operations() {
-        let store = setup_test_store().await;
-        let version_count = 20;
-
-        // Create artifact with multiple versions
-        let request = CreateArtifactRequest {
-            conversation_id: "conv_version_perf".to_string(),
-            title: "versioned.txt".to_string(),
-            description: None,
-            artifact_type: ArtifactType::Text,
-            content: "Version 1".to_string(),
-        };
-        let artifact = store.create(request, None).await.unwrap();
-
-        // Create multiple versions
-        for i in 2..=version_count {
-            store
-                .update(
-                    &artifact.id,
-                    UpdateArtifactRequest {
-                        title: None,
-                        description: None,
-                        content: Some(format!("Version {} with more content here", i)),
-                        change_description: Some(format!("Update to version {}", i)),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        // Benchmark get_versions
-        let iterations = 50;
-        let start = std::time::Instant::now();
-
-        for _ in 0..iterations {
-            let versions = store.get_versions(&artifact.id).await.unwrap();
-            assert!(!versions.is_empty());
-        }
-
-        let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
-
-        println!(
-            "get_versions {} iterations in {:?} (avg: {:.2}ms)",
-            iterations, elapsed, avg_ms
-        );
-
-        // Performance assertion: should average less than 5ms
-        assert!(
-            avg_ms < 5.0,
-            "Average get_versions time {:.2}ms exceeds 5ms threshold",
-            avg_ms
-        );
-
-        // Benchmark get_version_content
-        let start = std::time::Instant::now();
-
-        for _ in 0..iterations {
-            // Read random version
-            let version = (iterations % version_count) as i32 + 1;
-            store
-                .get_version_content(&artifact.id, version)
-                .await
-                .unwrap();
-        }
-
-        let elapsed = start.elapsed();
-        let avg_ms = elapsed.as_millis() as f64 / iterations as f64;
-
-        println!(
-            "get_version_content {} iterations in {:?} (avg: {:.2}ms)",
-            iterations, elapsed, avg_ms
-        );
-
-        // Performance assertion: should average less than 10ms
-        assert!(
-            avg_ms < 10.0,
-            "Average get_version_content time {:.2}ms exceeds 10ms threshold",
-            avg_ms
-        );
-    }
-
-    #[tokio::test]
     async fn test_perf_concurrent_access() {
         use std::sync::Arc;
 
@@ -1756,10 +1052,7 @@ mod tests {
         assert!(matches!(artifact.artifact_type, ArtifactType::Image { .. }));
 
         // Verify content can be retrieved
-        let content = store
-            .get_content(&artifact.id, artifact.version)
-            .await
-            .unwrap();
+        let content = store.get_content(&artifact.id).await.unwrap();
         assert_eq!(content, binary_content);
     }
 
@@ -1855,21 +1148,21 @@ mod tests {
 
         // Test range read - first 10 bytes
         let range1 = store
-            .get_content_range(&artifact.id, artifact.version, 0, Some(10))
+            .get_content_range(&artifact.id, 0, Some(10))
             .await
             .unwrap();
         assert_eq!(range1, (0..10u8).collect::<Vec<u8>>());
 
         // Test range read - middle bytes
         let range2 = store
-            .get_content_range(&artifact.id, artifact.version, 50, Some(20))
+            .get_content_range(&artifact.id, 50, Some(20))
             .await
             .unwrap();
         assert_eq!(range2, (50..70u8).collect::<Vec<u8>>());
 
         // Test range read - to end
         let range3 = store
-            .get_content_range(&artifact.id, artifact.version, 90, None)
+            .get_content_range(&artifact.id, 90, None)
             .await
             .unwrap();
         assert_eq!(range3, (90..100u8).collect::<Vec<u8>>());
@@ -1900,56 +1193,8 @@ mod tests {
         assert_eq!(artifact.size, large_content.len() as u64);
 
         // Verify content is stored correctly
-        let retrieved = store
-            .get_content(&artifact.id, artifact.version)
-            .await
-            .unwrap();
+        let retrieved = store.get_content(&artifact.id).await.unwrap();
         assert_eq!(retrieved.len(), large_content.len());
         assert_eq!(retrieved, large_content);
-    }
-
-    #[tokio::test]
-    async fn test_binary_versioning() {
-        let store = setup_test_store().await;
-
-        // Create initial version
-        let content_v1 = vec![1u8; 50];
-        let artifact = store
-            .create_binary(
-                "conv_versioned".to_string(),
-                "versioned.bin".to_string(),
-                None,
-                ArtifactType::Binary {
-                    mime_type: "application/octet-stream".to_string(),
-                },
-                content_v1.clone(),
-                None,
-            )
-            .await
-            .unwrap();
-
-        // Update with new binary content
-        let content_v2 = vec![2u8; 75];
-        let updated = store
-            .update(
-                &artifact.id,
-                UpdateArtifactRequest {
-                    title: None,
-                    description: None,
-                    content: Some(String::from_utf8_lossy(&content_v2).to_string()),
-                    change_description: None,
-                },
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(updated.version, 2);
-
-        // Get specific version content
-        let v1_response = store.get_version_content(&artifact.id, 1).await.unwrap();
-        assert_eq!(v1_response.artifact.version, 1);
-
-        let v2_response = store.get_version_content(&artifact.id, 2).await.unwrap();
-        assert_eq!(v2_response.artifact.version, 2);
     }
 }
