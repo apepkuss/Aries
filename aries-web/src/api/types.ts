@@ -202,7 +202,6 @@ export interface SanitizedArtifactsConfig {
   storage_path?: string;
   max_content_size: number;
   max_binary_size: number;
-  max_versions: number;
   retention_days: number;
   cleanup_interval_secs: number;
   soft_delete_retention_days: number;
@@ -427,19 +426,8 @@ export interface Artifact {
   title: string;
   content: string;
   language?: string;
-  version: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface ArtifactVersion {
-  version: number;
-  content: string;
-  created_at: string;
-}
-
-export interface ArtifactVersionsResponse {
-  versions: ArtifactVersion[];
 }
 
 // ============================================================================
