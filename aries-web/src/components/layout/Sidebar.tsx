@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X, Blocks } from 'lucide-react';
+import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X, Blocks, Server } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -54,6 +54,7 @@ export function Sidebar() {
   const memoryEnabled = config?.memory?.enable ?? false;
   const sessionEnabled = config?.session?.enable ?? false;
   const skillsEnabled = config?.skill?.enabled ?? false;
+  const mcpEnabled = !!config?.mcp;
 
   // Use session history as primary source; fall back to memory conversations
   const useSessionHistory = sessionEnabled;
@@ -152,6 +153,20 @@ export function Sidebar() {
           >
             <Blocks className="h-3.5 w-3.5" />
             Skills
+          </button>
+        )}
+        {mcpEnabled && (
+          <button
+            onClick={() => setActiveView('mcp')}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
+              activeView === 'mcp'
+                ? 'bg-secondary text-secondary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+            )}
+          >
+            <Server className="h-3.5 w-3.5" />
+            MCP
           </button>
         )}
       </div>
@@ -280,6 +295,16 @@ export function Sidebar() {
           <div className="py-3 px-1">
             <p className="text-xs text-muted-foreground text-center">
               点击右侧查看 Skills 详情
+            </p>
+          </div>
+        </ScrollArea>
+      )}
+
+      {activeView === 'mcp' && (
+        <ScrollArea className="flex-1 px-2">
+          <div className="py-3 px-1">
+            <p className="text-xs text-muted-foreground text-center">
+              点击右侧管理 MCP Servers
             </p>
           </div>
         </ScrollArea>

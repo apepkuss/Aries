@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 type Theme = 'light' | 'dark' | 'system';
-type ActiveView = 'chat' | 'skills';
+type ActiveView = 'chat' | 'skills' | 'mcp';
 
 interface UIState {
   // Sidebar

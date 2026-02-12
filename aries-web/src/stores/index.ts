@@ -11,3 +11,4 @@ export {
   useHitlRequestCount,
 } from './hitl';
 export { useSkillsStore } from './skills';
+export { useMcpStore } from './mcp';

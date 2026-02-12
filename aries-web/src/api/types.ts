@@ -184,8 +184,32 @@ export interface SanitizedMcpToolServer {
   name: string;
   transport: string;
   url?: string;
+  command?: string;
   enable: boolean;
   tools_count: number;
+  api_key_configured: boolean;
+  api_key_param?: string;
+}
+
+// ============================================================================
+// MCP Management API Types
+// ============================================================================
+
+export interface McpServerListResponse {
+  servers: SanitizedMcpToolServer[];
+  total: number;
+  enabled_count: number;
+}
+
+export interface ToggleMcpServerResponse {
+  success: boolean;
+  message: string;
+  server: SanitizedMcpToolServer;
+}
+
+export interface UpdateApiKeyResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface SanitizedSkillConfig {
