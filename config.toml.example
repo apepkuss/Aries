@@ -186,7 +186,7 @@ min_time_per_subtask = 30             # Minimum time in seconds required per sub
 # support for hot-reload when the configuration file changes.
 
 [config_api]
-hot_reload_enabled = false            # Enable configuration file hot-reload
+hot_reload_enabled = true            # Enable configuration file hot-reload
 hot_reload_debounce_ms = 500          # Debounce delay for file change events (ms)
 hot_reload_keep_on_invalid = true     # Keep current config when new config is invalid
 hot_reload_audit = false              # Log all hot-reload changes for auditing
@@ -465,13 +465,16 @@ transport = "stream-http"
 url       = "http://127.0.0.1:8011/mcp"
 enable    = false
 
-# The following config is for the zapier-mcp server.
+# The following config is for the zapier-mcp server (Connect URL mode).
 # The details about the server are available at https://mcp.zapier.com/mcp/servers
+# To get your Connect URL and token, visit: https://mcp.zapier.com
 [[mcp.server.tool]]
-name      = "zapier-mcp"
-transport = "stream-http"
-oauth_url = "https://mcp.zapier.com/api/mcp/a/23683142/mcp?serverId=67bdebee-2595-4e58-bc11-62359d74a8ef"
-enable    = false
+name          = "zapier-mcp"
+transport     = "stream-http"
+url           = "https://mcp.zapier.com/api/v1/connect"
+api_key_param = "token"
+api_key       = ""
+enable        = false
 
 # The following config is for the AMap Maps mcp server.
 # The details about the server are available at https://lbs.amap.com/api/mcp-server/summary

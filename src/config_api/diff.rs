@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::types::UPDATABLE_FIELDS;
 use crate::config::{
-    ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig, ServerConfig,
+    ChatConfig, Config, EmbeddingConfig, McpConfig, MemoryConfig, RagConfig, ServerConfig,
     SummarizationStrategy,
 };
 
@@ -419,6 +419,107 @@ pub fn diff_optional_config<T, F>(
 }
 
 // ============================================================================
+// MCP Config Diff
+// ============================================================================
+
+/// Compare two McpConfig instances
+///
+/// MCP config is a list of tool servers, so we compare by server names:
+/// - Servers added (present in new, not in old)
+/// - Servers removed (present in old, not in new)
+/// - Servers modified (same name, different serialized config)
+fn diff_mcp_config_inner(old: &McpConfig, new: &McpConfig, changes: &mut Vec<ConfigChange>) {
+    let old_names: Vec<&str> = old
+        .server
+        .tool_servers
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    let new_names: Vec<&str> = new
+        .server
+        .tool_servers
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+
+    // Check for added servers
+    for new_server in &new.server.tool_servers {
+        if !old_names.contains(&new_server.name.as_str()) {
+            changes.push(ConfigChange::new(
+                "mcp (section)",
+                serde_json::Value::Null,
+                json!({"added": &new_server.name}),
+                true,
+            ));
+            return; // One change is enough to trigger full MCP reload
+        }
+    }
+
+    // Check for removed servers
+    for old_server in &old.server.tool_servers {
+        if !new_names.contains(&old_server.name.as_str()) {
+            changes.push(ConfigChange::new(
+                "mcp (section)",
+                json!({"removed": &old_server.name}),
+                serde_json::Value::Null,
+                true,
+            ));
+            return;
+        }
+    }
+
+    // Check for modified servers (compare serialized form, excluding runtime fields)
+    for old_server in &old.server.tool_servers {
+        if let Some(new_server) = new
+            .server
+            .tool_servers
+            .iter()
+            .find(|s| s.name == old_server.name)
+        {
+            let old_json = serde_json::to_value(old_server).unwrap_or_default();
+            let new_json = serde_json::to_value(new_server).unwrap_or_default();
+            if old_json != new_json {
+                changes.push(ConfigChange::new(
+                    "mcp (section)",
+                    json!({"modified": &old_server.name}),
+                    json!({"modified": &new_server.name}),
+                    true,
+                ));
+                return;
+            }
+        }
+    }
+}
+
+/// Compare MCP config with optional handling
+pub fn diff_mcp_config(
+    old: Option<&McpConfig>,
+    new: Option<&McpConfig>,
+    changes: &mut Vec<ConfigChange>,
+) {
+    match (old, new) {
+        (Some(o), Some(n)) => diff_mcp_config_inner(o, n, changes),
+        (None, Some(_)) => {
+            changes.push(ConfigChange::new(
+                "mcp (section)",
+                serde_json::Value::Null,
+                json!("configured"),
+                true,
+            ));
+        }
+        (Some(_), None) => {
+            changes.push(ConfigChange::new(
+                "mcp (section)",
+                json!("configured"),
+                serde_json::Value::Null,
+                true,
+            ));
+        }
+        (None, None) => {}
+    }
+}
+
+// ============================================================================
 // Main Diff Function
 // ============================================================================
 
@@ -443,6 +544,7 @@ pub fn diff_configs(old: &Config, new: &Config) -> Vec<ConfigChange> {
     diff_embedding_config(old.embedding.as_ref(), new.embedding.as_ref(), &mut changes);
     diff_memory_config(old.memory.as_ref(), new.memory.as_ref(), &mut changes);
     diff_rag_config(old.rag.as_ref(), new.rag.as_ref(), &mut changes);
+    diff_mcp_config(old.mcp.as_ref(), new.mcp.as_ref(), &mut changes);
 
     changes
 }
@@ -965,7 +1067,10 @@ pub fn apply_single_change(config: &mut Config, change: &ConfigChange) -> ApplyC
             }
         }
 
-        // Section changes (not hot-updatable)
+        // MCP section changes (handled by update_config_sections + reload_mcp_services)
+        "mcp (section)" => ApplyChangeResult::success_with_reload("mcp"),
+
+        // Other section changes (not hot-updatable)
         field if field.ends_with(" (section)") => ApplyChangeResult::failed(format!(
             "Configuration section '{}' cannot be added or removed at runtime",
             field.trim_end_matches(" (section)")

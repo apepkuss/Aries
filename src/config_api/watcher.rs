@@ -31,6 +31,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use endpoints::chat::McpTransport;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::RwLock;
 
@@ -38,7 +39,9 @@ use super::{
     diff::{ConfigChange, apply_changes, diff_configs},
     reload::{determine_services_to_reload, reload_chat_service, reload_embedding_service},
 };
-use crate::{AppState, config::Config, dual_debug, dual_error, dual_info, dual_warn};
+use crate::{
+    AppState, config::Config, dual_debug, dual_error, dual_info, dual_warn, mcp::MCP_SERVICES,
+};
 
 // ============================================================================
 // ConfigWatcher Structure
@@ -71,6 +74,9 @@ struct WatcherState {
     last_event_time: RwLock<Option<Instant>>,
     /// Last modification time of the config file (for conflict detection)
     last_file_mtime: RwLock<Option<SystemTime>>,
+    /// Tokio runtime handle for spawning async tasks from non-Tokio threads
+    /// (e.g., the notify fsevents thread)
+    runtime_handle: tokio::runtime::Handle,
 }
 
 impl WatcherState {
@@ -81,6 +87,7 @@ impl WatcherState {
             debounce_ms,
             last_event_time: RwLock::new(None),
             last_file_mtime: RwLock::new(None),
+            runtime_handle: tokio::runtime::Handle::current(),
         }
     }
 }
@@ -131,10 +138,13 @@ impl ConfigWatcher {
         let watcher_state = Arc::new(WatcherState::new(state, config_path.clone(), debounce_ms));
 
         // Record the initial file modification time
+        // Use try_write() instead of blocking_write() because blocking_write()
+        // panics when called from within an async runtime (e.g., #[tokio::main]).
+        // Since the lock was just created, try_write() will always succeed.
         if let Ok(metadata) = std::fs::metadata(&config_path)
             && let Ok(mtime) = metadata.modified()
+            && let Ok(mut last_mtime) = watcher_state.last_file_mtime.try_write()
         {
-            let mut last_mtime = watcher_state.last_file_mtime.blocking_write();
             *last_mtime = Some(mtime);
         }
 
@@ -193,9 +203,12 @@ fn handle_file_event(state: &Arc<WatcherState>, event: Event) {
         EventKind::Modify(_) | EventKind::Create(_) => {
             dual_debug!("Detected config file change event: {:?}", event.kind);
 
-            // Spawn an async task to handle the event with debouncing
+            // Spawn an async task to handle the event with debouncing.
+            // Must use runtime_handle.spawn() instead of tokio::spawn() because
+            // this callback runs on the notify fsevents thread, not a Tokio thread.
             let state = Arc::clone(state);
-            tokio::spawn(async move {
+            let handle = state.runtime_handle.clone();
+            handle.spawn(async move {
                 handle_modify_event(&state).await;
             });
         }
@@ -393,7 +406,83 @@ async fn apply_hot_updates(
         }
     }
 
+    // Step 6: Handle MCP service cleanup for removed/disabled servers
+    let has_mcp_changes = changes.iter().any(|c| c.field == "mcp (section)");
+    if has_mcp_changes {
+        reload_mcp_services(&state.app_state, new_config).await;
+    }
+
     Ok(())
+}
+
+/// Reload MCP services after configuration changes
+///
+/// This function:
+/// 1. Collects the set of server names that should remain active
+/// 2. Removes any MCP services that are no longer in the config or were disabled
+/// 3. Stops stdio processes for removed/disabled stdio servers
+async fn reload_mcp_services(app_state: &Arc<AppState>, new_config: &Config) {
+    // Collect server names that are still configured (regardless of enable status)
+    // and which ones are enabled
+    let mut configured_server_names = std::collections::HashSet::new();
+    let mut disabled_servers = Vec::new();
+
+    if let Some(mcp_config) = &new_config.mcp {
+        for server in &mcp_config.server.tool_servers {
+            let svc_name = server.server_name.as_deref().unwrap_or(&server.name);
+            configured_server_names.insert(server.name.clone());
+            // Also track by service_name since MCP_SERVICES uses service_name as key
+            configured_server_names.insert(svc_name.to_string());
+            if !server.enable {
+                disabled_servers.push((
+                    server.name.clone(),
+                    svc_name.to_string(),
+                    server.transport,
+                ));
+            }
+        }
+    }
+
+    // Remove MCP services that are no longer in config
+    if let Some(services) = MCP_SERVICES.get() {
+        let services_read = services.read().await;
+        let current_service_names: Vec<String> = services_read.keys().cloned().collect();
+        drop(services_read);
+
+        for svc_name in current_service_names {
+            if !configured_server_names.contains(&svc_name) {
+                let mut services_write = services.write().await;
+                if services_write.remove(&svc_name).is_some() {
+                    dual_info!(
+                        "Hot-reload: removed MCP service '{}' (no longer in config)",
+                        svc_name
+                    );
+                }
+            }
+        }
+    }
+
+    // Disconnect disabled servers that might still be in MCP_SERVICES
+    for (name, svc_name, transport) in &disabled_servers {
+        match transport {
+            McpTransport::Stdio => {
+                if let Err(e) = app_state.stdio_manager.stop_process(name).await {
+                    dual_debug!("Hot-reload: failed to stop stdio process '{}': {}", name, e);
+                }
+            }
+            McpTransport::Sse | McpTransport::StreamHttp => {
+                if let Some(services) = MCP_SERVICES.get() {
+                    let mut services_write = services.write().await;
+                    if services_write.remove(svc_name).is_some() {
+                        dual_info!(
+                            "Hot-reload: disconnected disabled MCP service '{}'",
+                            svc_name
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Update configuration sections from the new config
@@ -427,6 +516,10 @@ fn update_config_sections(config: &mut Config, new_config: &Config, changes: &[C
                     dual_info!("Updating rag configuration section");
                     config.rag.clone_from(&new_config.rag);
                 }
+            }
+            "mcp (section)" => {
+                dual_info!("Updating MCP configuration section");
+                config.mcp.clone_from(&new_config.mcp);
             }
             _ => {}
         }

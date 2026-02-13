@@ -40,6 +40,8 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "hitl.default_timeout_secs",
     "hitl.default_timeout_behavior",
     "hitl.confirmation_threshold",
+    // MCP config - section-level hot update
+    "mcp (section)",
 ];
 
 /// Fields that require service reload after update
