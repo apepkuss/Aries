@@ -64,9 +64,9 @@ export function McpPage() {
                 {servers.length} server{servers.length !== 1 ? 's' : ''} configured
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {servers.map((server) => (
+                {servers.map((server, index) => (
                   <McpServerCard
-                    key={server.name}
+                    key={`${server.name}-${index}`}
                     server={server}
                     isToggling={togglingServer === server.name}
                     toggleError={serverErrors[server.name]}
