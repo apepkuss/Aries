@@ -14,6 +14,7 @@ use super::{
     error::ExecutionError,
     traits::Executor,
     types::{ExecuteRequest, ResourceLimits, ScriptOutput},
+    wasmtime::WasmtimeExecutor,
 };
 use crate::{config::ExecutionConfig, skills::types::ScriptInfo};
 
@@ -256,6 +257,25 @@ impl ScriptExecutorManager {
                 }
                 Err(e) => {
                     warn!("Failed to initialize Docker executor: {}", e);
+                }
+            }
+        }
+
+        // Register Wasmtime executor if configured and enabled
+        if let Some(ref wasmtime_config) = config.wasmtime
+            && wasmtime_config.enabled
+        {
+            match WasmtimeExecutor::with_config(wasmtime_config.clone()) {
+                Ok(executor) => {
+                    info!(
+                        cache_enabled = wasmtime_config.cache_enabled,
+                        max_memory_mb = wasmtime_config.max_memory_bytes / (1024 * 1024),
+                        "Wasmtime executor initialized"
+                    );
+                    manager.register(Arc::new(executor));
+                }
+                Err(e) => {
+                    warn!("Failed to initialize Wasmtime executor: {}", e);
                 }
             }
         }

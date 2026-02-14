@@ -43,10 +43,7 @@ mod types;
 // Executor implementations
 pub mod deno;
 pub mod docker;
-
-// Future executor implementations (feature-gated)
-// #[cfg(feature = "executor-wasmedge")]
-// mod wasmedge;
+pub mod wasmtime;
 
 #[allow(unused_imports)]
 pub use deno::{DenoConfig, DenoExecutor};
@@ -58,6 +55,9 @@ pub use manager::{EXECUTOR_MANAGER, ScriptExecutorManager};
 pub use traits::{Executor, IsolationLevel};
 #[allow(unused_imports)]
 pub use types::{ExecuteRequest, FilesystemPolicy, ResourceLimits, ResourceUsage, ScriptOutput};
+
+#[allow(unused_imports)]
+pub use self::wasmtime::{WasmtimeConfig, WasmtimeExecutor};
 
 #[cfg(test)]
 mod benchmark_tests;

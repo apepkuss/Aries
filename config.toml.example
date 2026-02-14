@@ -149,6 +149,18 @@ bash = "alpine:latest"             # Bash scripts
 rb = "ruby:3.2-slim"               # Ruby scripts
 # js = "node:20-slim"              # Node.js (if needed, usually handled by Deno)
 
+# Wasmtime executor configuration (for WebAssembly)
+# Supported extensions: wasm, wat
+# NOTE: Wasmtime provides the strongest sandboxing among all executors.
+# WASM modules run in isolated linear memory with no host access unless explicitly granted.
+[skill.execution.wasmtime]
+enabled = false                   # Enable/disable wasmtime executor
+cache_enabled = true             # Module compilation cache
+max_memory_bytes = 268435456     # Maximum WASM memory: 256MB (default)
+epoch_tick_ms = 10               # Timeout check interval in ms
+fuel_enabled = false             # CPU instruction-level limiting (has overhead)
+fuel_amount = 1000000000         # ~1 billion instructions
+
 
 # ============================================================================
 # SECTION 1.6: REFLECTION SYSTEM CONFIGURATION

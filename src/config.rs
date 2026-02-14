@@ -29,7 +29,7 @@ use url::Url;
 use crate::{
     dual_debug, dual_error, dual_info, dual_warn,
     error::{ServerError, ServerResult},
-    executor::{DenoConfig, DockerConfig, ResourceLimits},
+    executor::{DenoConfig, DockerConfig, ResourceLimits, WasmtimeConfig},
     mcp::{MCP_SERVICES, McpService},
     mcp_stdio::{self, StdioConfig, StdioProcessConfig},
 };
@@ -1691,6 +1691,10 @@ pub struct ExecutionConfig {
     /// Docker executor configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub docker: Option<DockerConfig>,
+
+    /// Wasmtime executor configuration (WebAssembly sandbox)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wasmtime: Option<WasmtimeConfig>,
 }
 
 fn default_execution_enabled() -> bool {
@@ -1709,6 +1713,7 @@ impl Default for ExecutionConfig {
             limits: ResourceLimits::default(),
             deno: None,
             docker: None,
+            wasmtime: None,
         }
     }
 }
