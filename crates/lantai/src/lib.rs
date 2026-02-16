@@ -5,6 +5,7 @@ pub mod error;
 pub mod indexer;
 pub mod search;
 pub mod store;
+pub mod watcher;
 
 pub use chunking::MarkdownChunker;
 pub use config::LantaiConfig;
