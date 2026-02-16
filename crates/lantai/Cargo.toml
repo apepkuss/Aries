@@ -1,0 +1,19 @@
+[package]
+name        = "lantai"
+version     = "0.1.0"
+edition     = "2024"
+description = "File-system based persistent memory with semantic search"
+license     = "Apache-2.0"
+
+[features]
+default = ["openai"]
+openai  = ["dep:reqwest"]
+
+[dependencies]
+thiserror   = "2.0"
+serde       = { version = "1.0", features = ["derive"] }
+toml        = "0.9"
+tracing     = "0.1"
+shellexpand = "3.1"
+dirs        = "6.0"
+reqwest     = { version = "0.12", optional = true, features = ["rustls-tls", "json"] }

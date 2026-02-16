@@ -1,3 +1,7 @@
+[workspace]
+members  = [".", "crates/lantai"]
+resolver = "3"
+
 [package]
 name    = "aries"
 version = "0.0.1"
