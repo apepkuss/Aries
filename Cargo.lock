@@ -2494,6 +2494,7 @@ dependencies = [
  "sha2",
  "shellexpand",
  "sqlite-vec",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
