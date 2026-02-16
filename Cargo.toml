@@ -1,5 +1,5 @@
 [workspace]
-members  = [".", "crates/lantai"]
+members  = [".", "crates/lantai", "crates/lantai-cli"]
 resolver = "3"
 
 [package]
