@@ -676,13 +676,16 @@ impl SubAgentExecutor {
             let tool_name_clone = tool_name.to_string();
             let active_skills = self.active_skills.clone();
             let conv_id = self.conversation_id.clone();
+            let state_clone = Arc::clone(&self.state);
             let result = hitl_caller
                 .check_and_execute(tool_name, args, &context, |args| {
                     let tool_name = tool_name_clone.clone();
                     let skills = active_skills.clone();
                     let conv_id = conv_id.clone();
+                    let state = state_clone.clone();
                     async move {
-                        Self::dispatch_tool_execution(&tool_name, &args, &skills, &conv_id).await
+                        Self::dispatch_tool_execution(&state, &tool_name, &args, &skills, &conv_id)
+                            .await
                     }
                 })
                 .await;
@@ -727,6 +730,7 @@ impl SubAgentExecutor {
         } else {
             // 没有 HITL，直接执行
             Self::dispatch_tool_execution(
+                &self.state,
                 tool_name,
                 args,
                 &self.active_skills,
@@ -739,20 +743,23 @@ impl SubAgentExecutor {
 
     /// 统一工具执行分发：根据工具名称前缀路由到 internal 或 MCP 执行路径
     async fn dispatch_tool_execution(
+        state: &Arc<AppState>,
         tool_name: &str,
         args: &serde_json::Value,
         active_skills: &[LoadedSkill],
         conversation_id: &str,
     ) -> Result<String, String> {
         if is_internal_tool(tool_name) {
-            Self::execute_internal_tool(tool_name, args, active_skills, conversation_id).await
+            Self::execute_internal_tool(state, tool_name, args, active_skills, conversation_id)
+                .await
         } else {
             Self::execute_mcp_tool(tool_name, args).await
         }
     }
 
-    /// 执行 internal 工具调用（skill_run_script, skill_load_asset）
+    /// 执行 internal 工具调用（skill_run_script, skill_load_asset, lantai_search, lantai_stats）
     async fn execute_internal_tool(
+        state: &Arc<AppState>,
         full_tool_name: &str,
         args: &serde_json::Value,
         active_skills: &[LoadedSkill],
@@ -849,6 +856,66 @@ impl SubAgentExecutor {
                 Ok(format!(
                     "Asset '{}' loaded successfully.\n\nContent:\n{}",
                     asset_name, content
+                ))
+            }
+            "lantai_search" => {
+                let lantai_arc = state
+                    .lantai()
+                    .ok_or_else(|| "Lantai knowledge base is not initialized".to_string())?;
+
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_search requires 'query' argument".to_string())?;
+
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(5);
+
+                let guard = lantai_arc.lock().await;
+                let search_query = lantai::SearchQuery::new(query, limit);
+                let results = guard
+                    .search_with_options(&search_query)
+                    .await
+                    .map_err(|e| format!("Lantai search failed: {e}"))?;
+
+                if results.is_empty() {
+                    Ok("No results found.".to_string())
+                } else {
+                    let mut lines = Vec::new();
+                    for (i, r) in results.iter().enumerate() {
+                        lines.push(format!(
+                            "### Result {} (score: {:.4})\n**Source:** {}:{}-{}\n",
+                            i + 1,
+                            r.score,
+                            r.source_path,
+                            r.start_line,
+                            r.end_line,
+                        ));
+                        if !r.heading_path.is_empty() {
+                            lines.push(format!("**Path:** {}\n", r.heading_path));
+                        }
+                        lines.push(r.content.clone());
+                        lines.push(String::new());
+                    }
+                    Ok(lines.join("\n"))
+                }
+            }
+            "lantai_stats" => {
+                let lantai_arc = state
+                    .lantai()
+                    .ok_or_else(|| "Lantai knowledge base is not initialized".to_string())?;
+
+                let guard = lantai_arc.lock().await;
+                let stats = guard
+                    .stats()
+                    .map_err(|e| format!("Lantai stats failed: {e}"))?;
+
+                Ok(format!(
+                    "Knowledge Base Statistics:\n- Files: {}\n- Chunks: {}\n- Cached embeddings: {}",
+                    stats.total_files, stats.total_chunks, stats.total_cached_embeddings,
                 ))
             }
             _ => Err(format!("Unknown internal tool: {tool_name}")),

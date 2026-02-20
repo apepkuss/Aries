@@ -1,5 +1,5 @@
 use std::sync::{
-    Once,
+    Mutex, MutexGuard, Once,
     atomic::{AtomicI64, Ordering},
 };
 
@@ -25,8 +25,11 @@ fn register_sqlite_vec() {
 }
 
 /// lantai SQLite 数据库封装
+///
+/// `Connection` is wrapped in `std::sync::Mutex` so that `Database` (and hence `Lantai`)
+/// implements `Sync`, which is required for `tokio::sync::MutexGuard<Lantai>` to be `Send`.
 pub struct Database {
-    conn: Connection,
+    conn: Mutex<Connection>,
     /// 每个 Database 实例独立的 rowid 计数器
     next_rowid: AtomicI64,
 }
@@ -53,9 +56,9 @@ impl Database {
         Self::configure_and_init(conn)
     }
 
-    /// 获取底层连接的不可变引用
-    pub fn conn(&self) -> &Connection {
-        &self.conn
+    /// 获取底层连接的锁守卫
+    pub fn conn(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().expect("Database mutex poisoned")
     }
 
     /// 获取下一个 rowid（原子递增）
@@ -79,7 +82,7 @@ impl Database {
             .map_err(|e| LantaiError::Database(format!("Failed to query max rowid: {e}")))?;
 
         Ok(Self {
-            conn,
+            conn: Mutex::new(conn),
             next_rowid: AtomicI64::new(max_rowid + 1),
         })
     }

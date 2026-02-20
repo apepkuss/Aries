@@ -13,6 +13,12 @@ pub const SKILL_RUN_SCRIPT_TOOL: &str = "skill_run_script";
 /// Skill asset loading tool name (without prefix)
 pub const SKILL_LOAD_ASSET_TOOL: &str = "skill_load_asset";
 
+/// Lantai knowledge base search tool name (without prefix)
+pub const LANTAI_SEARCH_TOOL: &str = "lantai_search";
+
+/// Lantai knowledge base stats tool name (without prefix)
+pub const LANTAI_STATS_TOOL: &str = "lantai_stats";
+
 /// Generate full internal tool name from short name.
 ///
 /// # Example

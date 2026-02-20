@@ -13,8 +13,8 @@ pub struct FileRecord {
 impl Database {
     /// 查询文件记录
     pub fn get_file(&self, path: &str) -> LantaiResult<Option<FileRecord>> {
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT path, content_hash, modified_at, indexed_at FROM files WHERE path = ?1",
             )
@@ -37,37 +37,37 @@ impl Database {
 
     /// 插入或更新文件记录
     pub fn upsert_file(&self, record: &FileRecord) -> LantaiResult<()> {
-        self.conn()
-            .execute(
-                "INSERT INTO files (path, content_hash, modified_at, indexed_at) \
-                 VALUES (?1, ?2, ?3, ?4) \
-                 ON CONFLICT(path) DO UPDATE SET \
-                 content_hash = excluded.content_hash, \
-                 modified_at = excluded.modified_at, \
-                 indexed_at = excluded.indexed_at",
-                rusqlite::params![
-                    record.path,
-                    record.content_hash,
-                    record.modified_at,
-                    record.indexed_at,
-                ],
-            )
-            .map_err(|e| LantaiError::Database(format!("Failed to upsert file: {e}")))?;
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO files (path, content_hash, modified_at, indexed_at) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(path) DO UPDATE SET \
+             content_hash = excluded.content_hash, \
+             modified_at = excluded.modified_at, \
+             indexed_at = excluded.indexed_at",
+            rusqlite::params![
+                record.path,
+                record.content_hash,
+                record.modified_at,
+                record.indexed_at,
+            ],
+        )
+        .map_err(|e| LantaiError::Database(format!("Failed to upsert file: {e}")))?;
         Ok(())
     }
 
     /// 删除文件记录（级联删除相关 chunks）
     pub fn delete_file(&self, path: &str) -> LantaiResult<()> {
-        self.conn()
-            .execute("DELETE FROM files WHERE path = ?1", [path])
+        let conn = self.conn();
+        conn.execute("DELETE FROM files WHERE path = ?1", [path])
             .map_err(|e| LantaiError::Database(format!("Failed to delete file: {e}")))?;
         Ok(())
     }
 
     /// 列出所有已索引的文件路径
     pub fn list_indexed_files(&self) -> LantaiResult<Vec<String>> {
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare("SELECT path FROM files ORDER BY path")
             .map_err(|e| LantaiError::Database(format!("Failed to prepare list_files: {e}")))?;
 

@@ -12,8 +12,8 @@ pub struct IndexStats {
 impl Database {
     /// FTS5 BM25 搜索，返回 (chunk_composite_id, bm25_score)
     pub fn search_fts(&self, query: &str, limit: usize) -> LantaiResult<Vec<(String, f64)>> {
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT c.composite_id, rank \
                  FROM chunks_fts f \
@@ -39,8 +39,8 @@ impl Database {
     pub fn search_vec(&self, embedding: &[f32], limit: usize) -> LantaiResult<Vec<(String, f64)>> {
         let blob: &[u8] = bytemuck::cast_slice(embedding);
 
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT c.composite_id, v.distance \
                  FROM chunks_vec v \
@@ -74,8 +74,8 @@ impl Database {
              FROM chunks WHERE composite_id IN ({placeholders})"
         );
 
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| LantaiError::Database(format!("Failed to prepare get_chunks: {e}")))?;
 
@@ -107,18 +107,17 @@ impl Database {
 
     /// 获取索引统计信息
     pub fn get_stats(&self) -> LantaiResult<IndexStats> {
-        let total_files: usize = self
-            .conn()
+        let conn = self.conn();
+
+        let total_files: usize = conn
             .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
             .map_err(|e| LantaiError::Database(format!("Failed to count files: {e}")))?;
 
-        let total_chunks: usize = self
-            .conn()
+        let total_chunks: usize = conn
             .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
             .map_err(|e| LantaiError::Database(format!("Failed to count chunks: {e}")))?;
 
-        let total_cached_embeddings: usize = self
-            .conn()
+        let total_cached_embeddings: usize = conn
             .query_row("SELECT COUNT(*) FROM embedding_cache", [], |row| row.get(0))
             .map_err(|e| LantaiError::Database(format!("Failed to count cache: {e}")))?;
 

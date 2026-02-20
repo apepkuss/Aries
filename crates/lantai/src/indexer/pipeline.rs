@@ -45,7 +45,7 @@ impl<'a> IndexPipeline<'a> {
     /// 索引指定目录
     pub async fn index_directories(&self, dirs: &[&str]) -> LantaiResult<IndexReport> {
         // 确保 vec 表存在
-        schema::ensure_vec_table(self.db.conn(), self.embedding.dimensions())?;
+        schema::ensure_vec_table(&self.db.conn(), self.embedding.dimensions())?;
 
         // 1. 扫描目录，收集所有 .md 文件
         let scanned = self.scan_directories(dirs)?;

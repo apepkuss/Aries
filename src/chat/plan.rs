@@ -70,8 +70,8 @@ use crate::{
         LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
         SkillSummary,
         constants::{
-            INTERNAL_TOOL_PREFIX, SKILL_LOAD_ASSET_TOOL, SKILL_RUN_SCRIPT_TOOL, internal_tool_name,
-            is_internal_tool, parse_internal_tool_name,
+            INTERNAL_TOOL_PREFIX, LANTAI_SEARCH_TOOL, LANTAI_STATS_TOOL, SKILL_LOAD_ASSET_TOOL,
+            SKILL_RUN_SCRIPT_TOOL, internal_tool_name, is_internal_tool, parse_internal_tool_name,
         },
     },
     subagent::{
@@ -2980,6 +2980,37 @@ async fn get_available_tools(state: &Arc<AppState>) -> Vec<ToolDescription> {
         });
     }
 
+    // Add Lantai knowledge base tools
+    if state.has_lantai() {
+        tools.push(ToolDescription {
+            name: internal_tool_name(LANTAI_SEARCH_TOOL),
+            description: "Search the knowledge base for relevant information. Returns semantically matched document chunks from indexed markdown files.".to_string(),
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to find relevant knowledge"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default: 5)",
+                        "default": 5
+                    }
+                },
+                "required": ["query"]
+            })),
+        });
+        tools.push(ToolDescription {
+            name: internal_tool_name(LANTAI_STATS_TOOL),
+            description: "Get statistics about the knowledge base index, including file count, chunk count, and cached embeddings count.".to_string(),
+            parameters: Some(serde_json::json!({
+                "type": "object",
+                "properties": {}
+            })),
+        });
+    }
+
     // Add Sub-Agent tools
     for tool_desc in all_subagent_tool_descriptions() {
         tools.push(ToolDescription {
@@ -3767,9 +3798,10 @@ async fn execute_tool_call(
         .await;
     }
 
-    // Check if this is an internal tool (skill tools)
+    // Check if this is an internal tool (skill tools, lantai tools)
     if is_internal_tool(&tool_call.function.name) {
         return execute_internal_tool(
+            state,
             &tool_call.function.name,
             tool_args,
             active_skills,
@@ -4194,7 +4226,9 @@ async fn execute_subagent_tool(
 /// - `internal__skill_load_asset`: Load an asset file from the active skill
 ///   - Arguments: `asset_name` (required), `variables` (optional object), `parse_as` (optional)
 ///   - Requires an active skill to be loaded
+#[allow(clippy::too_many_arguments)]
 async fn execute_internal_tool(
+    state: &Arc<AppState>,
     full_tool_name: &str,
     tool_args: serde_json::Value,
     active_skills: &[LoadedSkill],
@@ -4238,6 +4272,12 @@ async fn execute_internal_tool(
             )
             .await
         }
+        LANTAI_SEARCH_TOOL => {
+            execute_lantai_search(state, tool_args, &mut tool_trace, iter_trace, start_time).await
+        }
+        LANTAI_STATS_TOOL => {
+            execute_lantai_stats(state, &mut tool_trace, iter_trace, start_time).await
+        }
         _ => {
             let err_msg = format!("Unknown internal tool: {}", tool_name);
             tool_trace.set_error(err_msg.clone(), start_time.elapsed());
@@ -4245,6 +4285,108 @@ async fn execute_internal_tool(
             Err(ServerError::Operation(err_msg))
         }
     }
+}
+
+/// Executes the lantai_search internal tool.
+async fn execute_lantai_search(
+    state: &Arc<AppState>,
+    tool_args: serde_json::Value,
+    tool_trace: &mut ToolCallTrace,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+) -> ServerResult<String> {
+    let lantai_arc = state.lantai().ok_or_else(|| {
+        let err_msg = "Lantai knowledge base is not initialized".to_string();
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let query = tool_args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_search requires 'query' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let limit = tool_args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(5);
+
+    let guard = lantai_arc.lock().await;
+    let search_query = lantai::SearchQuery::new(query, limit);
+    let results = guard
+        .search_with_options(&search_query)
+        .await
+        .map_err(|e| {
+            let err_msg = format!("Lantai search failed: {e}");
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let output = if results.is_empty() {
+        "No results found.".to_string()
+    } else {
+        let mut lines = Vec::new();
+        for (i, r) in results.iter().enumerate() {
+            lines.push(format!(
+                "### Result {} (score: {:.4})\n**Source:** {}:{}-{}\n",
+                i + 1,
+                r.score,
+                r.source_path,
+                r.start_line,
+                r.end_line,
+            ));
+            if !r.heading_path.is_empty() {
+                lines.push(format!("**Path:** {}\n", r.heading_path));
+            }
+            lines.push(r.content.clone());
+            lines.push(String::new());
+        }
+        lines.join("\n")
+    };
+
+    tool_trace.set_result(output.clone(), start_time.elapsed());
+    iter_trace.add_tool_call(tool_trace.clone());
+    Ok(output)
+}
+
+/// Executes the lantai_stats internal tool.
+async fn execute_lantai_stats(
+    state: &Arc<AppState>,
+    tool_trace: &mut ToolCallTrace,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+) -> ServerResult<String> {
+    let lantai_arc = state.lantai().ok_or_else(|| {
+        let err_msg = "Lantai knowledge base is not initialized".to_string();
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let guard = lantai_arc.lock().await;
+    let stats = guard.stats().map_err(|e| {
+        let err_msg = format!("Lantai stats failed: {e}");
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let output = format!(
+        "Knowledge Base Statistics:\n- Files: {}\n- Chunks: {}\n- Cached embeddings: {}",
+        stats.total_files, stats.total_chunks, stats.total_cached_embeddings,
+    );
+
+    tool_trace.set_result(output.clone(), start_time.elapsed());
+    iter_trace.add_tool_call(tool_trace.clone());
+    Ok(output)
 }
 
 /// Executes the skill_run_script internal tool.

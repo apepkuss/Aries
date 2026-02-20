@@ -12,7 +12,7 @@ const DIMS: usize = 64;
 /// 创建测试用的 Database + vec 表
 fn test_db() -> Database {
     let db = Database::open_in_memory().unwrap();
-    schema::ensure_vec_table(db.conn(), DIMS).unwrap();
+    schema::ensure_vec_table(&db.conn(), DIMS).unwrap();
     db
 }
 

@@ -39,6 +39,8 @@ pub struct AppState {
     pub(crate) privacy_detector: Option<PrivacyDetector>,
     /// stdio MCP process manager (shared reference to global instance)
     pub(crate) stdio_manager: Arc<StdioProcessManager>,
+    /// Lantai knowledge base instance (wrapped in Mutex because rusqlite::Connection is not Sync)
+    pub(crate) lantai: Option<Arc<tokio::sync::Mutex<lantai::Lantai>>>,
 }
 
 impl AppState {
@@ -60,6 +62,7 @@ impl AppState {
             last_config_update_time: RwLock::new(None),
             privacy_detector,
             stdio_manager: mcp_stdio::get_stdio_process_manager().clone(),
+            lantai: None,
         }
     }
 
@@ -117,6 +120,21 @@ impl AppState {
     /// Get the stdio process manager reference
     pub fn stdio_manager(&self) -> &Arc<StdioProcessManager> {
         &self.stdio_manager
+    }
+
+    pub fn with_lantai(mut self, lantai: Arc<tokio::sync::Mutex<lantai::Lantai>>) -> Self {
+        self.lantai = Some(lantai);
+        self
+    }
+
+    /// Check if Lantai knowledge base is enabled
+    pub fn has_lantai(&self) -> bool {
+        self.lantai.is_some()
+    }
+
+    /// Get the Lantai instance reference (if enabled)
+    pub fn lantai(&self) -> Option<&Arc<tokio::sync::Mutex<lantai::Lantai>>> {
+        self.lantai.as_ref()
     }
 
     pub async fn register_downstream_server(&self, server: server::Server) -> ServerResult<()> {

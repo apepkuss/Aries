@@ -3,7 +3,7 @@ use super::{chunks::ChunkRecord, connection::Database, files::FileRecord, schema
 /// 创建带 vec 表的测试数据库
 fn test_db(dimensions: usize) -> Database {
     let db = Database::open_in_memory().unwrap();
-    schema::ensure_vec_table(db.conn(), dimensions).unwrap();
+    schema::ensure_vec_table(&db.conn(), dimensions).unwrap();
     db
 }
 
@@ -12,8 +12,8 @@ fn test_open_database() {
     let db = Database::open_in_memory().unwrap();
 
     // schema 已初始化：lantai_meta 应包含 schema_version
-    let version: String = db
-        .conn()
+    let conn = db.conn();
+    let version: String = conn
         .query_row(
             "SELECT value FROM lantai_meta WHERE key = 'schema_version'",
             [],
@@ -23,22 +23,19 @@ fn test_open_database() {
     assert_eq!(version, "1");
 
     // files 表应存在
-    let count: i64 = db
-        .conn()
+    let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 0);
 
     // chunks 表应存在
-    let count: i64 = db
-        .conn()
+    let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM chunks", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 0);
 
     // sqlite-vec 扩展应已加载
-    let vec_version: String = db
-        .conn()
+    let vec_version: String = conn
         .query_row("SELECT vec_version()", [], |row| row.get(0))
         .unwrap();
     assert!(!vec_version.is_empty());

@@ -18,8 +18,8 @@ pub struct ChunkRecord {
 impl Database {
     /// 批量插入 chunks（含 embedding 写入 chunks_vec）
     pub fn insert_chunks(&self, chunks: &[ChunkRecord]) -> LantaiResult<()> {
-        let tx = self
-            .conn()
+        let conn = self.conn();
+        let tx = conn
             .unchecked_transaction()
             .map_err(|e| LantaiError::Database(format!("Failed to begin transaction: {e}")))?;
 
@@ -74,8 +74,8 @@ impl Database {
 
     /// 删除指定文件的所有 chunks（同时清理 chunks_vec）
     pub fn delete_chunks_by_file(&self, source_path: &str) -> LantaiResult<()> {
-        let tx = self
-            .conn()
+        let conn = self.conn();
+        let tx = conn
             .unchecked_transaction()
             .map_err(|e| LantaiError::Database(format!("Failed to begin transaction: {e}")))?;
 
@@ -111,8 +111,8 @@ impl Database {
 
     /// 查询指定文件的所有 chunk composite_id
     pub fn get_chunk_ids_by_file(&self, source_path: &str) -> LantaiResult<Vec<String>> {
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare("SELECT composite_id FROM chunks WHERE source_path = ?1")
             .map_err(|e| {
                 LantaiError::Database(format!("Failed to prepare chunk_ids query: {e}"))
@@ -133,8 +133,8 @@ impl Database {
         content_hash: &str,
         model: &str,
     ) -> LantaiResult<Option<Vec<f32>>> {
-        let mut stmt = self
-            .conn()
+        let conn = self.conn();
+        let mut stmt = conn
             .prepare(
                 "SELECT embedding FROM embedding_cache \
                  WHERE content_hash = ?1 AND embedding_model = ?2",
@@ -161,13 +161,13 @@ impl Database {
         embedding: &[f32],
     ) -> LantaiResult<()> {
         let blob: &[u8] = bytemuck::cast_slice(embedding);
-        self.conn()
-            .execute(
-                "INSERT OR REPLACE INTO embedding_cache \
-                 (content_hash, embedding_model, embedding) VALUES (?1, ?2, ?3)",
-                rusqlite::params![content_hash, model, blob],
-            )
-            .map_err(|e| LantaiError::Database(format!("Failed to cache embedding: {e}")))?;
+        let conn = self.conn();
+        conn.execute(
+            "INSERT OR REPLACE INTO embedding_cache \
+             (content_hash, embedding_model, embedding) VALUES (?1, ?2, ?3)",
+            rusqlite::params![content_hash, model, blob],
+        )
+        .map_err(|e| LantaiError::Database(format!("Failed to cache embedding: {e}")))?;
         Ok(())
     }
 }

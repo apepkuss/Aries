@@ -82,6 +82,9 @@ pub struct Config {
     /// Privacy detection configuration for smart privacy mode
     #[serde(skip_serializing_if = "Option::is_none")]
     pub privacy_detection: Option<crate::services::privacy::PrivacyDetectorConfig>,
+    /// Lantai knowledge base configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lantai: Option<AriesLantaiConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -186,6 +189,7 @@ impl Default for Config {
             hitl: None,
             session: None,
             privacy_detection: None,
+            lantai: None,
         }
     }
 }
@@ -1816,6 +1820,196 @@ impl Default for SessionConfig {
         Self {
             enable: default_session_enabled(),
             storage_path: default_session_storage_path(),
+        }
+    }
+}
+
+// ─── Lantai knowledge base configuration ─────────────────────────────────────
+
+/// Lantai knowledge base configuration for Aries integration.
+///
+/// Requires `[embedding]` section to be configured for generating embeddings.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AriesLantaiConfig {
+    /// Enable or disable Lantai knowledge base
+    #[serde(default)]
+    pub enabled: bool,
+    /// Directory containing markdown files to index
+    #[serde(default = "default_lantai_memory_dir")]
+    pub memory_dir: String,
+    /// Path to SQLite database file
+    #[serde(default = "default_lantai_database_path")]
+    pub database_path: String,
+    /// Embedding model configuration (URL and API key come from [embedding] section)
+    #[serde(default)]
+    pub embedding: LantaiEmbeddingSubConfig,
+    /// Chunking configuration
+    #[serde(default)]
+    pub chunking: LantaiChunkingSubConfig,
+    /// Search configuration
+    #[serde(default)]
+    pub search: LantaiSearchSubConfig,
+    /// File watcher configuration
+    #[serde(default)]
+    pub watch: LantaiWatchSubConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LantaiEmbeddingSubConfig {
+    #[serde(default = "default_lantai_embedding_model")]
+    pub model: String,
+    #[serde(default = "default_lantai_embedding_dimensions")]
+    pub dimensions: usize,
+    #[serde(default = "default_lantai_embedding_batch_size")]
+    pub batch_size: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LantaiChunkingSubConfig {
+    #[serde(default = "default_lantai_max_chunk_lines")]
+    pub max_chunk_lines: usize,
+    #[serde(default = "default_lantai_min_chunk_lines")]
+    pub min_chunk_lines: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LantaiSearchSubConfig {
+    #[serde(default = "default_lantai_search_limit")]
+    pub default_limit: usize,
+    #[serde(default = "default_lantai_vec_weight")]
+    pub vec_weight: f64,
+    #[serde(default = "default_lantai_bm25_weight")]
+    pub bm25_weight: f64,
+    #[serde(default = "default_lantai_rrf_k")]
+    pub rrf_k: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LantaiWatchSubConfig {
+    #[serde(default = "default_lantai_watch_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_lantai_watch_debounce_ms")]
+    pub debounce_ms: u64,
+}
+
+// Default value functions
+fn default_lantai_memory_dir() -> String {
+    "~/.lantai/memory".to_string()
+}
+fn default_lantai_database_path() -> String {
+    "~/.lantai/lantai.db".to_string()
+}
+fn default_lantai_embedding_model() -> String {
+    "text-embedding-3-small".to_string()
+}
+fn default_lantai_embedding_dimensions() -> usize {
+    1536
+}
+fn default_lantai_embedding_batch_size() -> usize {
+    32
+}
+fn default_lantai_max_chunk_lines() -> usize {
+    50
+}
+fn default_lantai_min_chunk_lines() -> usize {
+    5
+}
+fn default_lantai_search_limit() -> usize {
+    5
+}
+fn default_lantai_vec_weight() -> f64 {
+    0.6
+}
+fn default_lantai_bm25_weight() -> f64 {
+    0.4
+}
+fn default_lantai_rrf_k() -> u32 {
+    60
+}
+fn default_lantai_watch_enabled() -> bool {
+    true
+}
+fn default_lantai_watch_debounce_ms() -> u64 {
+    1500
+}
+
+impl Default for AriesLantaiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            memory_dir: default_lantai_memory_dir(),
+            database_path: default_lantai_database_path(),
+            embedding: LantaiEmbeddingSubConfig::default(),
+            chunking: LantaiChunkingSubConfig::default(),
+            search: LantaiSearchSubConfig::default(),
+            watch: LantaiWatchSubConfig::default(),
+        }
+    }
+}
+
+impl Default for LantaiEmbeddingSubConfig {
+    fn default() -> Self {
+        Self {
+            model: default_lantai_embedding_model(),
+            dimensions: default_lantai_embedding_dimensions(),
+            batch_size: default_lantai_embedding_batch_size(),
+        }
+    }
+}
+
+impl Default for LantaiChunkingSubConfig {
+    fn default() -> Self {
+        Self {
+            max_chunk_lines: default_lantai_max_chunk_lines(),
+            min_chunk_lines: default_lantai_min_chunk_lines(),
+        }
+    }
+}
+
+impl Default for LantaiSearchSubConfig {
+    fn default() -> Self {
+        Self {
+            default_limit: default_lantai_search_limit(),
+            vec_weight: default_lantai_vec_weight(),
+            bm25_weight: default_lantai_bm25_weight(),
+            rrf_k: default_lantai_rrf_k(),
+        }
+    }
+}
+
+impl Default for LantaiWatchSubConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_lantai_watch_enabled(),
+            debounce_ms: default_lantai_watch_debounce_ms(),
+        }
+    }
+}
+
+impl AriesLantaiConfig {
+    /// Convert to lantai crate's LantaiConfig, with expanded paths.
+    pub fn to_lantai_config(&self, memory_dir: &str, database_path: &str) -> lantai::LantaiConfig {
+        lantai::LantaiConfig {
+            memory_dir: memory_dir.to_string(),
+            database_path: database_path.to_string(),
+            chunking: lantai::config::ChunkingConfig {
+                max_chunk_lines: self.chunking.max_chunk_lines,
+                min_chunk_lines: self.chunking.min_chunk_lines,
+            },
+            embedding: lantai::config::EmbeddingConfig {
+                model: self.embedding.model.clone(),
+                dimensions: self.embedding.dimensions,
+                batch_size: self.embedding.batch_size,
+            },
+            search: lantai::config::SearchConfig {
+                default_limit: self.search.default_limit,
+                vec_weight: self.search.vec_weight,
+                bm25_weight: self.search.bm25_weight,
+                rrf_k: self.search.rrf_k,
+            },
+            watch: Some(lantai::config::WatchConfig {
+                debounce_ms: self.watch.debounce_ms,
+            }),
         }
     }
 }

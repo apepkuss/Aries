@@ -178,6 +178,7 @@ dependencies = [
  "hex",
  "http",
  "humantime-serde",
+ "lantai",
  "md5",
  "mime_guess",
  "notify 6.1.1",

@@ -378,7 +378,42 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 
 
 # ============================================================================
-# SECTION 1.12: SMART PRIVACY DETECTION CONFIGURATION
+# SECTION 1.12: LANTAI KNOWLEDGE BASE CONFIGURATION
+# ============================================================================
+# Lantai is a file-system persistent memory with semantic search.
+# It indexes markdown files, generates embeddings, and provides hybrid
+# (vector + BM25) search for the LLM to query knowledge base content.
+#
+# Requires [embedding] section to be configured (URL and API key).
+# Lantai reuses the embedding service for generating vectors.
+
+# [lantai]
+# enabled = true                              # Enable Lantai knowledge base (default: false)
+# memory_dir = "~/.lantai/memory"             # Directory containing markdown files to index
+# database_path = "~/.lantai/lantai.db"       # Path to SQLite database file
+
+# [lantai.embedding]
+# model = "text-embedding-3-small"            # Embedding model name
+# dimensions = 1536                           # Vector dimensions
+# batch_size = 32                             # Batch size for embedding API calls
+
+# [lantai.chunking]
+# max_chunk_lines = 50                        # Maximum lines per chunk
+# min_chunk_lines = 5                         # Minimum lines per chunk (merge small chunks)
+
+# [lantai.search]
+# default_limit = 5                           # Default number of search results
+# vec_weight = 0.6                            # Vector search weight in hybrid scoring
+# bm25_weight = 0.4                           # BM25 search weight in hybrid scoring
+# rrf_k = 60                                  # Reciprocal Rank Fusion constant
+
+# [lantai.watch]
+# enabled = true                              # Enable file watcher for auto-indexing
+# debounce_ms = 1500                          # Debounce delay for file change events
+
+
+# ============================================================================
+# SECTION 1.13: SMART PRIVACY DETECTION CONFIGURATION
 # ============================================================================
 # The smart privacy detection system automatically detects privacy-sensitive
 # content in user queries and prompts users to confirm whether to use privacy

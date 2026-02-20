@@ -216,6 +216,10 @@ async fn main() -> ServerResult<()> {
     // Save config API settings before moving config into AppState
     let config_api_settings = config.config_api.clone();
 
+    // Save lantai config before moving config into AppState
+    let lantai_config = config.lantai.clone();
+    let embedding_config_for_lantai = config.embedding.clone();
+
     // Initialize HITL system if configured
     if let Some(ref hitl_cfg) = hitl_config {
         if hitl_cfg.enabled {
@@ -261,6 +265,106 @@ async fn main() -> ServerResult<()> {
     } else {
         aries::dual_info!("Session history is not configured");
     }
+
+    // Initialize Lantai knowledge base if enabled
+    let _lantai_cancel_token = if let Some(ref lantai_cfg) = lantai_config
+        && lantai_cfg.enabled
+    {
+        // Lantai requires embedding service for generating vectors
+        if let Some(ref emb_cfg) = embedding_config_for_lantai {
+            aries::dual_info!("Initializing Lantai knowledge base...");
+
+            // Expand paths
+            let memory_dir = shellexpand::tilde(&lantai_cfg.memory_dir).to_string();
+            let database_path = shellexpand::tilde(&lantai_cfg.database_path).to_string();
+
+            // Ensure directories exist
+            if let Err(e) = std::fs::create_dir_all(&memory_dir) {
+                aries::dual_error!("Failed to create Lantai memory directory: {e}");
+            }
+            if let Some(parent) = std::path::Path::new(&database_path).parent()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                aries::dual_error!("Failed to create Lantai database directory: {e}");
+            }
+
+            // Build LantaiConfig from Aries config
+            let l_config = lantai_cfg.to_lantai_config(&memory_dir, &database_path);
+
+            // Create OpenAI embedding provider using Aries embedding URL + lantai model/dimensions
+            let api_key = emb_cfg.get_api_key().unwrap_or_default();
+            let embedding = lantai::embedding::OpenAIEmbedding::new(
+                &emb_cfg.url,
+                &api_key,
+                &lantai_cfg.embedding.model,
+                lantai_cfg.embedding.dimensions,
+            );
+
+            match lantai::Lantai::new(l_config, Box::new(embedding)) {
+                Ok(lantai_instance) => {
+                    // Run initial index
+                    let lantai_arc = Arc::new(tokio::sync::Mutex::new(lantai_instance));
+
+                    {
+                        let guard = lantai_arc.lock().await;
+                        match guard.index(&[memory_dir.as_str()]).await {
+                            Ok(report) => {
+                                aries::dual_info!(
+                                    "Lantai initial index: +{} ~{} -{} files, +{} -{} chunks",
+                                    report.files_added,
+                                    report.files_updated,
+                                    report.files_deleted,
+                                    report.chunks_added,
+                                    report.chunks_deleted,
+                                );
+                            }
+                            Err(e) => {
+                                aries::dual_warn!("Lantai initial index failed: {e}");
+                            }
+                        }
+                    }
+
+                    // Start background watcher if enabled
+                    let cancel_token = if lantai_cfg.watch.enabled {
+                        let token = CancellationToken::new();
+                        let watcher = lantai::watcher::LantaiMutexWatcher::new(
+                            Arc::clone(&lantai_arc),
+                            vec![PathBuf::from(&memory_dir)],
+                            lantai_cfg.watch.debounce_ms,
+                        );
+                        let cancel_clone = token.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = watcher.watch(cancel_clone).await {
+                                aries::dual_error!("Lantai watcher error: {e}");
+                            }
+                        });
+                        aries::dual_info!("Lantai file watcher started");
+                        Some(token)
+                    } else {
+                        None
+                    };
+
+                    state = state.with_lantai(lantai_arc);
+                    aries::dual_info!("Lantai knowledge base initialized successfully");
+                    cancel_token
+                }
+                Err(e) => {
+                    aries::dual_error!("Failed to initialize Lantai: {e}");
+                    None
+                }
+            }
+        } else {
+            aries::dual_warn!(
+                "Lantai is enabled but [embedding] section is not configured. Lantai requires embedding service."
+            );
+            None
+        }
+    } else {
+        if lantai_config.as_ref().is_some_and(|c| !c.enabled) {
+            aries::dual_info!("Lantai knowledge base is disabled in config");
+        }
+        None
+    };
 
     let state = Arc::new(state);
 
@@ -691,6 +795,12 @@ async fn main() -> ServerResult<()> {
 
     // Start the server
     let server_result = server.await;
+
+    // Shutdown Lantai watcher
+    if let Some(ref token) = _lantai_cancel_token {
+        token.cancel();
+        aries::dual_info!("Lantai file watcher stopped");
+    }
 
     // Shutdown stdio MCP child processes with timeout to prevent hanging
     aries::dual_info!("Shutting down stdio MCP child processes...");

@@ -30,7 +30,7 @@ impl Lantai {
         let db = Database::open(&config.database_path)?;
 
         // 确保 vec 表存在
-        store::schema::ensure_vec_table(db.conn(), embedding.dimensions())?;
+        store::schema::ensure_vec_table(&db.conn(), embedding.dimensions())?;
 
         let chunker = MarkdownChunker::new(
             config.chunking.max_chunk_lines,
@@ -52,7 +52,7 @@ impl Lantai {
     ) -> LantaiResult<Self> {
         let db = Database::open_in_memory()?;
 
-        store::schema::ensure_vec_table(db.conn(), embedding.dimensions())?;
+        store::schema::ensure_vec_table(&db.conn(), embedding.dimensions())?;
 
         let chunker = MarkdownChunker::new(
             config.chunking.max_chunk_lines,
