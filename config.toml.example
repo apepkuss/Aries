@@ -388,10 +388,10 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 # Lantai reuses the embedding service for generating vectors.
 # Embedding model, dimensions, and batch size are configured via the Settings UI (Memory tab).
 
-# [lantai]
-# enabled = true                              # Enable Lantai knowledge base (default: false)
-# memory_dir = "~/.lantai/memory"             # Directory containing markdown files to index
-# database_path = "~/.lantai/lantai.db"       # Path to SQLite database file
+[lantai]
+enabled = true                             # Enable Lantai knowledge base (default: false)
+memory_dir = "~/.aries/memory"             # Directory containing markdown files to index
+database_path = "~/.aries/lantai.db"       # Path to SQLite database file
 
 # [lantai.chunking]
 # max_chunk_lines = 50                        # Maximum lines per chunk
