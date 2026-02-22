@@ -43,6 +43,7 @@ mod types;
 // Executor implementations
 pub mod deno;
 pub mod docker;
+pub mod native;
 pub mod wasmtime;
 
 #[allow(unused_imports)]
@@ -51,6 +52,8 @@ pub use deno::{DenoConfig, DenoExecutor};
 pub use docker::{DockerConfig, DockerExecutor};
 pub use error::ExecutionError;
 pub use manager::{EXECUTOR_MANAGER, ScriptExecutorManager};
+#[allow(unused_imports)]
+pub use native::NativeExecutor;
 #[allow(unused_imports)]
 pub use traits::{Executor, IsolationLevel};
 #[allow(unused_imports)]

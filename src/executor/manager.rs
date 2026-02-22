@@ -12,6 +12,7 @@ use super::{
     deno::DenoExecutor,
     docker::DockerExecutor,
     error::ExecutionError,
+    native::NativeExecutor,
     traits::Executor,
     types::{ExecuteRequest, ResourceLimits, ScriptOutput},
     wasmtime::WasmtimeExecutor,
@@ -140,17 +141,12 @@ impl ScriptExecutorManager {
         env: HashMap<String, String>,
         limits: Option<ResourceLimits>,
     ) -> Result<ScriptOutput, ExecutionError> {
-        // Get extension
+        // Get extension; fall back to "" for extension-less native binaries
         let ext = script
             .path
             .extension()
             .and_then(|e| e.to_str())
-            .ok_or_else(|| {
-                ExecutionError::UnsupportedScript(format!(
-                    "no extension: {}",
-                    script.path.display()
-                ))
-            })?;
+            .unwrap_or("");
 
         // Find executor
         let executor = self
@@ -229,6 +225,9 @@ impl ScriptExecutorManager {
         config: ExecutionConfig,
     ) -> Result<&'static ScriptExecutorManager, ExecutionError> {
         let mut manager = ScriptExecutorManager::new(config.limits.clone());
+
+        // Register Native executor for extension-less binary files (always enabled)
+        manager.register(Arc::new(NativeExecutor::new()));
 
         // Register Deno executor if configured or use defaults
         let deno_config = config.deno.unwrap_or_default();

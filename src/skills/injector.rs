@@ -167,9 +167,13 @@ The following skill instructions guide how to complete this task:
 
     /// Generate script execution instructions based on skill's available scripts
     ///
-    /// Automatically creates a section explaining how to call scripts via
-    /// `internal__skill_run_script`, so SKILL.md doesn't need to hardcode
-    /// internal tool names.
+    /// Automatically creates a section explaining how to call scripts.
+    /// Scripts are handled in two ways based on file extension:
+    ///
+    /// - **Native binaries** (no extension): Inject absolute path, instruct Claude
+    ///   to use the Bash tool to execute directly.
+    /// - **Managed scripts** (with extension, e.g. `.js`, `.py`, `.ts`): Use
+    ///   `internal__skill_run_script` tool which routes through the executor manager.
     ///
     /// # Arguments
     /// * `skill` - The loaded skill containing script information
@@ -182,23 +186,50 @@ The following skill instructions guide how to complete this task:
             return String::new();
         }
 
-        let tool_full_name = internal_tool_name(SKILL_RUN_SCRIPT_TOOL);
-
-        let script_list = skill
+        // Partition into native binaries (no file extension) and managed scripts (with extension)
+        let (native_scripts, managed_scripts): (Vec<_>, Vec<_>) = skill
             .scripts
             .iter()
-            .map(|s| format!("- `{}`", s.name))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .partition(|s| s.path.extension().is_none());
 
-        let example_script = &skill.scripts[0].name;
+        let mut sections: Vec<String> = Vec::new();
 
-        format!(
-            r#"
+        // Native binary scripts: use Bash tool with absolute path
+        if !native_scripts.is_empty() {
+            let native_list = native_scripts
+                .iter()
+                .map(|s| format!("- `{}` (`{}`)", s.name, s.path.display()))
+                .collect::<Vec<_>>()
+                .join("\n");
 
-## Available Scripts
+            let example_path = native_scripts[0].path.display();
 
-This skill provides the following executable scripts:
+            sections.push(format!(
+                r#"The following are native binary scripts. Execute them directly using the Bash tool with their absolute paths:
+
+{native_list}
+
+Example:
+```bash
+{example_path} "arg1" "arg2"
+```"#
+            ));
+        }
+
+        // Managed scripts: use internal__skill_run_script tool
+        if !managed_scripts.is_empty() {
+            let tool_full_name = internal_tool_name(SKILL_RUN_SCRIPT_TOOL);
+
+            let script_list = managed_scripts
+                .iter()
+                .map(|s| format!("- `{}`", s.name))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let example_script = &managed_scripts[0].name;
+
+            sections.push(format!(
+                r#"This skill provides the following executable scripts:
 
 {script_list}
 
@@ -209,9 +240,11 @@ To execute a script, use the `{tool_full_name}` tool:
 Example:
 ```json
 {{"script_name": "{example_script}", "args": ["arg1", "arg2"]}}
-```
-"#
-        )
+```"#
+            ));
+        }
+
+        format!("\n\n## Available Scripts\n\n{}", sections.join("\n\n"))
     }
 
     /// Generate injection text for multiple skills
@@ -1317,6 +1350,55 @@ fn main() {
         assert!(result.contains("internal__skill_run_script"));
         assert!(result.contains("script_name"));
         assert!(result.contains("args"));
+    }
+
+    #[test]
+    fn test_generate_scripts_section_native_binary() {
+        let mut skill = create_test_skill("moss-weather", "Content");
+        skill.scripts = vec![ScriptInfo {
+            name: "moss-weather".to_string(),
+            path: PathBuf::from("/Users/sam/.aries/skills/moss-weather/scripts/moss-weather"),
+            executable: true,
+        }];
+
+        let result = SkillInjector::generate_scripts_section(&skill);
+
+        assert!(result.contains("## Available Scripts"));
+        assert!(result.contains("`moss-weather`"));
+        // Native binaries should NOT use internal__skill_run_script
+        assert!(!result.contains("internal__skill_run_script"));
+        // Should show the absolute path for Bash tool invocation
+        assert!(result.contains("/Users/sam/.aries/skills/moss-weather/scripts/moss-weather"));
+        // Should instruct to use Bash tool
+        assert!(result.contains("Bash"));
+    }
+
+    #[test]
+    fn test_generate_scripts_section_mixed_native_and_managed() {
+        let mut skill = create_test_skill("mixed-skill", "Content");
+        skill.scripts = vec![
+            ScriptInfo {
+                name: "run-binary".to_string(),
+                path: PathBuf::from("/skills/mixed-skill/scripts/run-binary"),
+                executable: true,
+            },
+            ScriptInfo {
+                name: "helper.js".to_string(),
+                path: PathBuf::from("/skills/mixed-skill/scripts/helper.js"),
+                executable: true,
+            },
+        ];
+
+        let result = SkillInjector::generate_scripts_section(&skill);
+
+        assert!(result.contains("## Available Scripts"));
+        // Native binary section
+        assert!(result.contains("`run-binary`"));
+        assert!(result.contains("/skills/mixed-skill/scripts/run-binary"));
+        assert!(result.contains("Bash"));
+        // Managed script section
+        assert!(result.contains("`helper.js`"));
+        assert!(result.contains("internal__skill_run_script"));
     }
 
     #[test]

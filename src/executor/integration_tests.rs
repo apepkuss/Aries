@@ -215,8 +215,12 @@ async fn test_unsupported_script_type() {
 }
 
 /// Test error handling for scripts without extension
+///
+/// Extension-less scripts are routed to the NativeExecutor (registered under "").
+/// Without any executor registered the manager returns NoExecutorFound("").
 #[tokio::test]
 async fn test_script_without_extension() {
+    // Default manager has no executors registered, so "" key is also missing
     let manager = ScriptExecutorManager::default();
 
     let no_ext_script = ScriptInfo {
@@ -229,7 +233,9 @@ async fn test_script_without_extension() {
         .execute(&no_ext_script, vec![], HashMap::new(), None)
         .await;
     assert!(result.is_err());
-    assert!(matches!(result, Err(ExecutionError::UnsupportedScript(_))));
+    // Extension-less files now use "" as the lookup key; with no executor registered
+    // the error is NoExecutorFound, not UnsupportedScript.
+    assert!(matches!(result, Err(ExecutionError::NoExecutorFound(_))));
 }
 
 /// Test error propagation from executor
