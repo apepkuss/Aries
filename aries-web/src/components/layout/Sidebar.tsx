@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X, Blocks, Server } from 'lucide-react';
+import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -21,7 +21,7 @@ import { SessionList } from '@/components/session/SessionList';
 import { SessionBatchDeleteDialog } from '@/components/session/SessionBatchDeleteDialog';
 
 export function Sidebar() {
-  const { sidebarOpen, activeView, setActiveView } = useUIStore();
+  const { sidebarOpen, activeView } = useUIStore();
   const {
     conversations,
     currentId: currentConvId,
@@ -53,8 +53,6 @@ export function Sidebar() {
   // Feature flags
   const memoryEnabled = config?.memory?.enable ?? false;
   const sessionEnabled = config?.session?.enable ?? false;
-  const skillsEnabled = config?.skill?.enabled ?? false;
-  const mcpEnabled = !!config?.mcp;
 
   // Use session history as primary source; fall back to memory conversations
   const useSessionHistory = sessionEnabled;
@@ -126,49 +124,12 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-64 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
-      {/* Navigation tabs */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-border/50">
-        <button
-          onClick={() => setActiveView('chat')}
-          className={cn(
-            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-            activeView === 'chat'
-              ? 'bg-secondary text-secondary-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-          )}
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-          Chat
-        </button>
-        {skillsEnabled && (
-          <button
-            onClick={() => setActiveView('skills')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-              activeView === 'skills'
-                ? 'bg-secondary text-secondary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-            )}
-          >
-            <Blocks className="h-3.5 w-3.5" />
-            Skills
-          </button>
-        )}
-        {mcpEnabled && (
-          <button
-            onClick={() => setActiveView('mcp')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors',
-              activeView === 'mcp'
-                ? 'bg-secondary text-secondary-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-            )}
-          >
-            <Server className="h-3.5 w-3.5" />
-            MCP
-          </button>
-        )}
+    <aside className="w-60 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
+      {/* Panel title */}
+      <div className="px-3 py-2.5 border-b border-border/50">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {activeView === 'skills' ? 'Skills' : activeView === 'mcp' ? 'MCP Servers' : 'Chat History'}
+        </span>
       </div>
 
       {activeView === 'chat' && (
@@ -290,25 +251,6 @@ export function Sidebar() {
         </>
       )}
 
-      {activeView === 'skills' && (
-        <ScrollArea className="flex-1 px-2">
-          <div className="py-3 px-1">
-            <p className="text-xs text-muted-foreground text-center">
-              点击右侧查看 Skills 详情
-            </p>
-          </div>
-        </ScrollArea>
-      )}
-
-      {activeView === 'mcp' && (
-        <ScrollArea className="flex-1 px-2">
-          <div className="py-3 px-1">
-            <p className="text-xs text-muted-foreground text-center">
-              点击右侧管理 MCP Servers
-            </p>
-          </div>
-        </ScrollArea>
-      )}
     </aside>
   );
 }

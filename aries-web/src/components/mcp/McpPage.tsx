@@ -39,7 +39,7 @@ export function McpPage() {
               disabled={isLoading}
             >
               <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
-              Refresh
+              刷新
             </Button>
           </div>
         </div>

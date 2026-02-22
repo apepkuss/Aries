@@ -14,6 +14,9 @@ interface UIState {
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
 
+  // Activity bar click handler (VSCode-style toggle)
+  handleActivityBarClick: (view: ActiveView) => void;
+
   // Artifacts panel
   artifactsPanelOpen: boolean;
   toggleArtifactsPanel: () => void;
@@ -43,6 +46,19 @@ export const useUIStore = create<UIState>()(
       // Active view
       activeView: 'chat',
       setActiveView: (view) => set({ activeView: view }),
+
+      // Activity bar click: chat toggles panel, skills/mcp switch view only
+      handleActivityBarClick: (view) =>
+        set((state) => {
+          if (view === 'chat') {
+            if (state.activeView === 'chat' && state.sidebarOpen) {
+              return { sidebarOpen: false };
+            }
+            return { activeView: 'chat', sidebarOpen: true };
+          }
+          // Skills/MCP: switch view, close panel
+          return { activeView: view, sidebarOpen: false };
+        }),
 
       // Artifacts panel
       artifactsPanelOpen: false,

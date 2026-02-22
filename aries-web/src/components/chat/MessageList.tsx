@@ -17,8 +17,7 @@ export function MessageList() {
     return (
       <div className="flex-1 min-h-0 flex items-center justify-center">
         <div className="text-center text-muted-foreground">
-          <p className="text-lg font-medium">Welcome to Aries</p>
-          <p className="text-sm">Start a conversation by typing a message below</p>
+          <p className="text-lg font-medium">老板好，我是小苔藓，有事儿请吩咐！</p>
         </div>
       </div>
     );

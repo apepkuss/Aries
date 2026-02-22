@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Header } from './Header';
+import { ActivityBar } from './ActivityBar';
 import { Sidebar } from './Sidebar';
 import { SkillsPage } from '@/components/skills';
 import { McpPage } from '@/components/mcp';
@@ -27,6 +28,7 @@ export function Layout({ children }: LayoutProps) {
     <div className="h-screen flex flex-col">
       <Header />
       <div className="flex-1 flex overflow-hidden">
+        <ActivityBar />
         <Sidebar />
         <main className="flex-1 overflow-hidden">
           {renderContent()}

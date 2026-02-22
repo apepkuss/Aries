@@ -198,7 +198,7 @@ export function ChatInput() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
+              placeholder="输入消息..."
               className="w-full min-h-[20px] max-h-[200px] resize-none bg-transparent text-sm leading-5 outline-none placeholder:text-muted-foreground/60 disabled:cursor-not-allowed disabled:opacity-50"
               rows={1}
               disabled={isStreaming}

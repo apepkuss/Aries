@@ -1,4 +1,4 @@
-import { Settings, PanelLeftClose, PanelLeft, Moon, Sun, Monitor, SquarePen } from 'lucide-react';
+import { Settings, Moon, Sun, Monitor, SquarePen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -10,7 +10,7 @@ import { useUIStore, useChatStore, useServiceStore } from '@/stores';
 import { toast } from 'sonner';
 
 export function Header() {
-  const { sidebarOpen, toggleSidebar, theme, setTheme, setSettingsOpen } = useUIStore();
+  const { theme, setTheme, setSettingsOpen } = useUIStore();
   const { clearMessages } = useChatStore();
   const { chat } = useServiceStore();
 
@@ -22,18 +22,6 @@ export function Header() {
     <header className={`h-14 border-b bg-background sticky top-0 z-50 flex items-center justify-between px-4 electron-drag ${isElectronMac ? 'pl-24' : ''}`}>
       <div className="flex items-center gap-3 electron-no-drag">
         <div className="flex items-center border border-border/60 rounded-lg overflow-hidden">
-          <button
-            onClick={toggleSidebar}
-            className="p-2 hover:bg-muted/60 transition-colors"
-            title={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-          >
-            {sidebarOpen ? (
-              <PanelLeftClose className="h-[18px] w-[18px] text-foreground/80" />
-            ) : (
-              <PanelLeft className="h-[18px] w-[18px] text-foreground/80" />
-            )}
-          </button>
-          <div className="w-px h-5 bg-border/60" />
           <button
             onClick={() => {
               if (!isChatConfigured) {
@@ -49,9 +37,6 @@ export function Header() {
             <SquarePen className="h-[18px] w-[18px] text-foreground/80" />
           </button>
         </div>
-        <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent italic">
-          Aries
-        </h1>
       </div>
 
       <div className="flex items-center gap-2 electron-no-drag">
