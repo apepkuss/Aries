@@ -90,7 +90,7 @@ fn build_lantai(cli: &Cli, config: &LantaiConfig) -> anyhow::Result<lantai::Lant
         &config.embedding.model,
         config.embedding.dimensions,
     );
-    let lantai = lantai::Lantai::new(config.clone(), Box::new(embedding))?;
+    let lantai = lantai::Lantai::new(config.clone(), Some(Box::new(embedding)))?;
     Ok(lantai)
 }
 
