@@ -13,7 +13,10 @@ use axum::{
 
 use super::{
     persist::persist_config,
-    reload::{determine_services_to_reload, reload_chat_service, reload_embedding_service},
+    reload::{
+        determine_services_to_reload, reload_chat_service, reload_embedding_service,
+        reload_lantai_embedding,
+    },
     sanitize::Sanitize,
     types::{
         ConfigSchemaResponse, ConfigSchemaSection, ConfigUpdateRequest, ConfigUpdateResponse,
@@ -275,7 +278,8 @@ pub async fn update_config_handler(
     drop(config);
 
     // Step 6: Reload services if needed
-    let (reload_chat, reload_embedding) = determine_services_to_reload(&side_effect_fields);
+    let (reload_chat, reload_embedding, reload_lantai_emb) =
+        determine_services_to_reload(&side_effect_fields);
 
     if reload_chat {
         dual_info!(
@@ -319,6 +323,30 @@ pub async fn update_config_handler(
                 "embedding",
                 &format!(
                     "service_reload_failed: {}",
+                    reload_result.error.unwrap_or_default()
+                ),
+            );
+        }
+    }
+
+    if reload_lantai_emb {
+        dual_info!(
+            "Triggering Lantai embedding provider reload - request_id: {}",
+            request_id
+        );
+        let reload_result = reload_lantai_embedding(&state).await;
+        if reload_result.success {
+            response = response.with_action("lantai_embedding", "provider_reloaded");
+        } else {
+            dual_warn!(
+                "Lantai embedding provider reload failed - request_id: {} - error: {:?}",
+                request_id,
+                reload_result.error
+            );
+            response = response.with_action(
+                "lantai_embedding",
+                &format!(
+                    "provider_reload_failed: {}",
                     reload_result.error.unwrap_or_default()
                 ),
             );

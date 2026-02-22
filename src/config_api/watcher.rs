@@ -37,7 +37,10 @@ use tokio::sync::RwLock;
 
 use super::{
     diff::{ConfigChange, apply_changes, diff_configs},
-    reload::{determine_services_to_reload, reload_chat_service, reload_embedding_service},
+    reload::{
+        determine_services_to_reload, reload_chat_service, reload_embedding_service,
+        reload_lantai_embedding,
+    },
 };
 use crate::{
     AppState, config::Config, dual_debug, dual_error, dual_info, dual_warn, mcp::MCP_SERVICES,
@@ -383,7 +386,8 @@ async fn apply_hot_updates(
 
     // Step 5: Trigger service reloads if needed
     if !side_effect_fields.is_empty() {
-        let (reload_chat, reload_embedding) = determine_services_to_reload(&side_effect_fields);
+        let (reload_chat, reload_embedding, reload_lantai_emb) =
+            determine_services_to_reload(&side_effect_fields);
 
         if reload_chat {
             let result = reload_chat_service(&state.app_state).await;
@@ -400,6 +404,16 @@ async fn apply_hot_updates(
             if !result.success {
                 dual_error!(
                     "Failed to reload embedding service: {}",
+                    result.error.as_deref().unwrap_or("Unknown error")
+                );
+            }
+        }
+
+        if reload_lantai_emb {
+            let result = reload_lantai_embedding(&state.app_state).await;
+            if !result.success {
+                dual_error!(
+                    "Failed to reload Lantai embedding provider: {}",
                     result.error.as_deref().unwrap_or("Unknown error")
                 );
             }

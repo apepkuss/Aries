@@ -70,7 +70,8 @@ use crate::{
         LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
         SkillSummary,
         constants::{
-            INTERNAL_TOOL_PREFIX, LANTAI_SEARCH_TOOL, LANTAI_STATS_TOOL, SKILL_LOAD_ASSET_TOOL,
+            INTERNAL_TOOL_PREFIX, LANTAI_DELETE_MEMORY_TOOL, LANTAI_SEARCH_TOOL, LANTAI_STATS_TOOL,
+            LANTAI_UPDATE_MEMORY_TOOL, LANTAI_WRITE_MEMORY_TOOL, SKILL_LOAD_ASSET_TOOL,
             SKILL_RUN_SCRIPT_TOOL, internal_tool_name, is_internal_tool, parse_internal_tool_name,
         },
     },
@@ -249,10 +250,15 @@ pub(crate) async fn chat(
     let time_budget = TimeBudget::new(plan_timeout_secs);
 
     // Initialize reflection system (if enabled)
+    let reflection_model = request
+        .model
+        .clone()
+        .unwrap_or_else(|| "default".to_string());
     let reflection_engine = if reflection_config.enabled {
         let server_info = Arc::new(tokio::sync::RwLock::new(LlmServerInfo {
             url: chat_server.url.clone(),
             api_key: chat_server.api_key.clone(),
+            model: reflection_model.clone(),
         }));
         Some(ReflectionEngine::new(
             server_info,
@@ -281,6 +287,7 @@ pub(crate) async fn chat(
         let server_info = Arc::new(tokio::sync::RwLock::new(LlmServerInfo {
             url: chat_server.url.clone(),
             api_key: chat_server.api_key.clone(),
+            model: reflection_model.clone(),
         }));
         Some(DynamicReplanner::with_defaults(server_info))
     } else {
@@ -387,7 +394,7 @@ pub(crate) async fn chat(
         .unwrap_or_else(|| "default".to_string());
 
     // Create task planner
-    let planner = TaskPlanner::with_chat_llm(
+    let mut planner = TaskPlanner::with_chat_llm(
         format!("{}/chat/completions", chat_server.url.trim_end_matches('/')),
         chat_server.api_key.clone(),
         model_name.clone(),
@@ -395,6 +402,34 @@ pub(crate) async fn chat(
     )
     .with_tools(available_tools.clone())
     .with_skills(skills_summaries.clone());
+
+    // Add memory guidance and context when memory tools are available
+    if state.has_memory_writer() {
+        let mut memory_rules = vec![
+            "You have access to a knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). If the user's request involves saving, remembering, or looking up information (preferences, decisions, facts, instructions), you MUST create a task plan with subtasks — do NOT use DirectAnswer for such requests.".to_string(),
+        ];
+
+        // Inject recent memory context into planner so DirectAnswer can leverage past knowledge
+        let lantai_cfg = state.config.read().await.lantai.clone();
+        let context_injection_enabled = lantai_cfg
+            .as_ref()
+            .map(|l| l.auto_memory.context_injection)
+            .unwrap_or(true);
+        if context_injection_enabled && let Some(writer) = state.memory_writer() {
+            let max_chars = lantai_cfg
+                .as_ref()
+                .map(|l| l.auto_memory.max_context_chars)
+                .unwrap_or(2000);
+            let memory_context = load_memory_context(writer, max_chars).await;
+            if !memory_context.is_empty() {
+                memory_rules.push(format!(
+                    "\n## Recent Memory Context\n{memory_context}\n\nUse this context to inform your responses when relevant."
+                ));
+            }
+        }
+
+        planner = planner.with_extra_rules(memory_rules);
+    }
 
     // Generate task plan or direct answer
     let planner_output = match planner.plan(&user_request).await {
@@ -431,6 +466,28 @@ pub(crate) async fn chat(
             // Write assistant message to session history
             write_assistant_to_session(&state, &session_id, &request, &answer.answer, is_privacy)
                 .await;
+
+            // Trigger async memory recording for direct answer (fire-and-forget)
+            if !is_privacy && state.has_memory_writer() {
+                let state_clone = Arc::clone(&state);
+                let chat_url =
+                    format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
+                let api_key = chat_server.api_key.clone();
+                let model = model_name.clone();
+                let user_msg = user_request.clone();
+                let assistant_msg = answer.answer.clone();
+                tokio::spawn(async move {
+                    trigger_direct_answer_memory(
+                        &state_clone,
+                        &chat_url,
+                        api_key.as_deref(),
+                        &model,
+                        &user_msg,
+                        &assistant_msg,
+                    )
+                    .await;
+                });
+            }
 
             // Build and return response directly
             return build_direct_answer_response(
@@ -1160,6 +1217,27 @@ pub(crate) async fn chat(
     // Write assistant message to session history
     write_assistant_to_session(&state, &session_id, &request, &final_content, is_privacy).await;
 
+    // Trigger async memory recording for plan result (fire-and-forget)
+    if !is_privacy && state.has_memory_writer() {
+        let state_clone = Arc::clone(&state);
+        let chat_url = format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
+        let api_key = chat_server.api_key.clone();
+        let model = model_name.clone();
+        let user_msg = user_request.clone();
+        let plan_result = final_content.clone();
+        tokio::spawn(async move {
+            trigger_plan_memory(
+                &state_clone,
+                &chat_url,
+                api_key.as_deref(),
+                &model,
+                &user_msg,
+                &plan_result,
+            )
+            .await;
+        });
+    }
+
     // Finalize trace
     trace.finalize(TraceStatus::Success);
     dual_info!("Plan trace: {}", trace.summary());
@@ -1525,7 +1603,7 @@ async fn execute_chat_plan_realtime(
         .unwrap_or_else(|| "default".to_string());
 
     // Create task planner
-    let planner = TaskPlanner::with_chat_llm(
+    let mut planner = TaskPlanner::with_chat_llm(
         format!("{}/chat/completions", chat_server.url.trim_end_matches('/')),
         chat_server.api_key.clone(),
         model_name.clone(),
@@ -1533,6 +1611,34 @@ async fn execute_chat_plan_realtime(
     )
     .with_tools(available_tools.clone())
     .with_skills(skills_summaries.clone());
+
+    // Add memory guidance and context when memory tools are available
+    if state.has_memory_writer() {
+        let mut memory_rules = vec![
+            "You have access to a knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). If the user's request involves saving, remembering, or looking up information (preferences, decisions, facts, instructions), you MUST create a task plan with subtasks — do NOT use DirectAnswer for such requests.".to_string(),
+        ];
+
+        // Inject recent memory context into planner so DirectAnswer can leverage past knowledge
+        let lantai_cfg = state.config.read().await.lantai.clone();
+        let context_injection_enabled = lantai_cfg
+            .as_ref()
+            .map(|l| l.auto_memory.context_injection)
+            .unwrap_or(true);
+        if context_injection_enabled && let Some(writer) = state.memory_writer() {
+            let max_chars = lantai_cfg
+                .as_ref()
+                .map(|l| l.auto_memory.max_context_chars)
+                .unwrap_or(2000);
+            let memory_context = load_memory_context(writer, max_chars).await;
+            if !memory_context.is_empty() {
+                memory_rules.push(format!(
+                    "\n## Recent Memory Context\n{memory_context}\n\nUse this context to inform your responses when relevant."
+                ));
+            }
+        }
+
+        planner = planner.with_extra_rules(memory_rules);
+    }
 
     // Generate task plan or direct answer
     let planner_output = match planner.plan(&user_request).await {
@@ -1578,6 +1684,28 @@ async fn execute_chat_plan_realtime(
             // Write assistant message to session history
             write_assistant_to_session(&state, &session_id, &request, &answer.answer, is_privacy)
                 .await;
+
+            // Trigger async memory recording for direct answer (fire-and-forget)
+            if !is_privacy && state.has_memory_writer() {
+                let state_clone = Arc::clone(&state);
+                let chat_url =
+                    format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
+                let api_key = chat_server.api_key.clone();
+                let model = model_name.clone();
+                let user_msg = user_request.clone();
+                let assistant_msg = answer.answer.clone();
+                tokio::spawn(async move {
+                    trigger_direct_answer_memory(
+                        &state_clone,
+                        &chat_url,
+                        api_key.as_deref(),
+                        &model,
+                        &user_msg,
+                        &assistant_msg,
+                    )
+                    .await;
+                });
+            }
 
             // Send text events for direct answer
             let text_chunks = gen_chunks_with_formatting(&answer.answer, 10);
@@ -2422,6 +2550,27 @@ async fn execute_chat_plan_realtime(
     // Write assistant message to session history
     write_assistant_to_session(&state, &session_id, &request, &final_content, is_privacy).await;
 
+    // Trigger async memory recording for plan result (fire-and-forget)
+    if !is_privacy && state.has_memory_writer() {
+        let state_clone = Arc::clone(&state);
+        let chat_url = format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
+        let api_key = chat_server.api_key.clone();
+        let model = model_name.clone();
+        let user_msg = user_request.clone();
+        let plan_result = final_content.clone();
+        tokio::spawn(async move {
+            trigger_plan_memory(
+                &state_clone,
+                &chat_url,
+                api_key.as_deref(),
+                &model,
+                &user_msg,
+                &plan_result,
+            )
+            .await;
+        });
+    }
+
     // Finalize trace
     trace.finalize(TraceStatus::Success);
     dual_info!("Plan trace: {}", trace.summary());
@@ -3009,6 +3158,76 @@ async fn get_available_tools(state: &Arc<AppState>) -> Vec<ToolDescription> {
                 "properties": {}
             })),
         });
+
+        // Memory tools (require MemoryWriter)
+        if state.has_memory_writer() {
+            tools.push(ToolDescription {
+                name: internal_tool_name(LANTAI_WRITE_MEMORY_TOOL),
+                description: "Save important information to the knowledge base. Default category is 'daily' (session notes). Use 'core' for long-term knowledge (user preferences, key decisions), 'experience' for practical tips and problem-solving patterns. Core entries are automatically dated.".to_string(),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "Information to save"
+                        },
+                        "category": {
+                            "type": "string",
+                            "enum": ["daily", "core", "experience"],
+                            "description": "Memory category (default: 'daily')",
+                            "default": "daily"
+                        },
+                        "heading": {
+                            "type": "string",
+                            "description": "Section heading for MEMORY.md / EXPERIENCE.md organization"
+                        }
+                    },
+                    "required": ["content"]
+                })),
+            });
+            tools.push(ToolDescription {
+                name: internal_tool_name(LANTAI_UPDATE_MEMORY_TOOL),
+                description: "Update an existing section in MEMORY.md or EXPERIENCE.md. Replaces the entire content under the specified heading. Use to fix outdated information or merge duplicates. Only works on 'core' and 'experience' categories.".to_string(),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["core", "experience"],
+                            "description": "Target file category"
+                        },
+                        "heading": {
+                            "type": "string",
+                            "description": "Exact heading of the section to update"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "New content to replace the section body"
+                        }
+                    },
+                    "required": ["category", "heading", "content"]
+                })),
+            });
+            tools.push(ToolDescription {
+                name: internal_tool_name(LANTAI_DELETE_MEMORY_TOOL),
+                description: "Delete an entire section from MEMORY.md or EXPERIENCE.md by heading. Use to remove outdated or irrelevant sections. Only works on 'core' and 'experience' categories.".to_string(),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["core", "experience"],
+                            "description": "Target file category"
+                        },
+                        "heading": {
+                            "type": "string",
+                            "description": "Exact heading of the section to delete"
+                        }
+                    },
+                    "required": ["category", "heading"]
+                })),
+            });
+        }
     }
 
     // Add Sub-Agent tools
@@ -3099,6 +3318,37 @@ async fn execute_subtask_with_react(
         file_attachments,
     )
     .await;
+
+    // Inject memory context into system prompt (if MemoryWriter is available)
+    if state.has_memory_writer() {
+        let lantai_cfg = state.config.read().await.lantai.clone();
+        let context_injection_enabled = lantai_cfg
+            .as_ref()
+            .map(|l| l.auto_memory.context_injection)
+            .unwrap_or(true);
+        if context_injection_enabled && let Some(writer) = state.memory_writer() {
+            let max_chars = lantai_cfg
+                .as_ref()
+                .map(|l| l.auto_memory.max_context_chars)
+                .unwrap_or(2000);
+            let memory_context = load_memory_context(writer, max_chars).await;
+            if !memory_context.is_empty() {
+                // Append memory context to the system message
+                if let Some(ChatCompletionRequestMessage::System(sys_msg)) = messages.first_mut() {
+                    let new_content = format!(
+                        "{}\n\n## Recent Memory Context\n{}\n\nYou have a knowledge base with experience notes and historical logs. Use `internal__lantai_search` to look up past solutions or recent conversations when relevant.",
+                        sys_msg.content(),
+                        memory_context
+                    );
+                    *sys_msg = ChatCompletionSystemMessage::new(new_content, None);
+                }
+            }
+        }
+    }
+
+    // Memory checkpoint: track whether we've already triggered a checkpoint
+    // to avoid repeated saves during the same React loop execution.
+    let mut checkpoint_triggered = false;
 
     // React loop
     let mut iteration_count: u32 = 0;
@@ -3199,15 +3449,88 @@ async fn execute_subtask_with_react(
             }
         }?;
 
-        // Parse response
-        let chat_completion: ChatCompletionObject = ds_response
-            .json()
+        // Parse response — read body as text first to enable detailed error logging
+        let response_text = ds_response
+            .text()
             .await
-            .map_err(|e| ServerError::Operation(format!("Failed to parse response: {e}")))?;
+            .map_err(|e| ServerError::Operation(format!("Failed to read response body: {e}")))?;
+        let chat_completion: ChatCompletionObject =
+            serde_json::from_str(&response_text).map_err(|e| {
+                let preview = if response_text.len() > 500 {
+                    &response_text[..500]
+                } else {
+                    &response_text
+                };
+                dual_error!(
+                    "Failed to parse LLM response: {}. Body preview: {}",
+                    e,
+                    preview
+                );
+                ServerError::Operation(format!("Failed to parse response: {e}"))
+            })?;
 
         // Record token usage
         let usage = &chat_completion.usage;
         iter_trace.llm_tokens = TokenUsage::new(usage.prompt_tokens, usage.completion_tokens);
+
+        // Memory checkpoint: when prompt_tokens exceeds threshold, async-save conversation context
+        if !checkpoint_triggered && state.has_memory_writer() {
+            let config_guard = state.config.read().await;
+            let model_ctx_size = config_guard
+                .chat
+                .as_ref()
+                .map(|c| c.model_context_size)
+                .unwrap_or(0);
+            let ratio = config_guard
+                .lantai
+                .as_ref()
+                .map(|l| l.auto_memory.checkpoint_token_ratio)
+                .unwrap_or(0.75);
+            drop(config_guard);
+
+            if model_ctx_size > 0 {
+                let threshold = (model_ctx_size as f64 * ratio as f64) as u64;
+                if usage.prompt_tokens as u64 >= threshold {
+                    checkpoint_triggered = true;
+                    dual_info!(
+                        "Memory checkpoint triggered: prompt_tokens={} >= threshold={} ({}*{:.2}) - request_id: {}",
+                        usage.prompt_tokens,
+                        threshold,
+                        model_ctx_size,
+                        ratio,
+                        request_id
+                    );
+                    // Fire-and-forget: extract key info from conversation and save to daily log
+                    if let Some(writer) = state.memory_writer() {
+                        let writer = writer.clone();
+                        let chat_url =
+                            format!("{}/chat/completions", chat_server.url.trim_end_matches('/'));
+                        let chat_api_key = chat_server.api_key.clone();
+                        let checkpoint_model = model.to_string();
+                        // Collect recent user/assistant content from messages for summarization
+                        let conversation_snippet = extract_conversation_snippet(&messages, 3000);
+                        let rid = request_id.to_string();
+                        tokio::spawn(async move {
+                            if let Err(e) = trigger_memory_checkpoint(
+                                &writer,
+                                &chat_url,
+                                chat_api_key.as_deref(),
+                                &checkpoint_model,
+                                &conversation_snippet,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    "Memory checkpoint failed (request_id: {}): {}",
+                                    rid,
+                                    e
+                                );
+                            }
+                        });
+                    }
+                }
+            }
+        }
 
         // Check for tool calls - support both OpenAI JSON format and XML JSON-embedded format
         let json_tool_calls = &chat_completion.choices[0].message.tool_calls;
@@ -3783,11 +4106,17 @@ async fn execute_tool_call(
     let tool_args: serde_json::Value =
         serde_json::from_str(&tool_call.function.arguments).unwrap_or(serde_json::json!({}));
 
+    // Strip "functions." prefix that some models add to tool names
+    let tool_name_raw = &tool_call.function.name;
+    let tool_name_cleaned = tool_name_raw
+        .strip_prefix("functions.")
+        .unwrap_or(tool_name_raw);
+
     // Check if this is a Sub-Agent tool
-    if is_subagent_tool(&tool_call.function.name) {
+    if is_subagent_tool(tool_name_cleaned) {
         return execute_subagent_tool(
             state,
-            &tool_call.function.name,
+            tool_name_cleaned,
             tool_args,
             request_id,
             iter_trace,
@@ -3799,10 +4128,10 @@ async fn execute_tool_call(
     }
 
     // Check if this is an internal tool (skill tools, lantai tools)
-    if is_internal_tool(&tool_call.function.name) {
+    if is_internal_tool(tool_name_cleaned) {
         return execute_internal_tool(
             state,
-            &tool_call.function.name,
+            tool_name_cleaned,
             tool_args,
             active_skills,
             conv_id,
@@ -3814,11 +4143,10 @@ async fn execute_tool_call(
     }
 
     // Parse MCP tool name and server name
-    let (server_name, tool_name) =
-        parse_mcp_tool_name(&tool_call.function.name).ok_or_else(|| {
-            let err_msg = format!("Invalid tool name format: {}", tool_call.function.name);
-            ServerError::Operation(err_msg)
-        })?;
+    let (server_name, tool_name) = parse_mcp_tool_name(tool_name_cleaned).ok_or_else(|| {
+        let err_msg = format!("Invalid tool name format: {}", tool_name_cleaned);
+        ServerError::Operation(err_msg)
+    })?;
 
     // Initialize tool trace
     let mut tool_trace = ToolCallTrace::new(
@@ -4278,6 +4606,18 @@ async fn execute_internal_tool(
         LANTAI_STATS_TOOL => {
             execute_lantai_stats(state, &mut tool_trace, iter_trace, start_time).await
         }
+        LANTAI_WRITE_MEMORY_TOOL => {
+            execute_lantai_write_memory(state, tool_args, &mut tool_trace, iter_trace, start_time)
+                .await
+        }
+        LANTAI_UPDATE_MEMORY_TOOL => {
+            execute_lantai_update_memory(state, tool_args, &mut tool_trace, iter_trace, start_time)
+                .await
+        }
+        LANTAI_DELETE_MEMORY_TOOL => {
+            execute_lantai_delete_memory(state, tool_args, &mut tool_trace, iter_trace, start_time)
+                .await
+        }
         _ => {
             let err_msg = format!("Unknown internal tool: {}", tool_name);
             tool_trace.set_error(err_msg.clone(), start_time.elapsed());
@@ -4387,6 +4727,621 @@ async fn execute_lantai_stats(
     tool_trace.set_result(output.clone(), start_time.elapsed());
     iter_trace.add_tool_call(tool_trace.clone());
     Ok(output)
+}
+
+/// Executes the lantai_write_memory internal tool.
+async fn execute_lantai_write_memory(
+    state: &Arc<AppState>,
+    tool_args: serde_json::Value,
+    tool_trace: &mut ToolCallTrace,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+) -> ServerResult<String> {
+    let writer = state.memory_writer().ok_or_else(|| {
+        let err_msg = "MemoryWriter is not initialized".to_string();
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let content = tool_args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_write_memory requires 'content' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let category_str = tool_args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .unwrap_or("daily");
+    let heading = tool_args.get("heading").and_then(|v| v.as_str());
+
+    let category = match category_str {
+        "daily" => lantai::writer::MemoryCategory::Daily,
+        "core" => lantai::writer::MemoryCategory::Core,
+        "experience" => lantai::writer::MemoryCategory::Experience,
+        _ => {
+            let err_msg = format!(
+                "Invalid category: {category_str}. Must be 'daily', 'core', or 'experience'"
+            );
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            return Err(ServerError::Operation(err_msg));
+        }
+    };
+
+    let request = lantai::writer::MemoryWriteRequest {
+        content: content.to_string(),
+        category,
+        heading: heading.map(|s| s.to_string()),
+    };
+
+    let output = writer.write(&request).await.map_err(|e| {
+        let err_msg = format!("Failed to write memory: {e}");
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    // Post-write compaction trigger for Core/Experience categories
+    if matches!(
+        category,
+        lantai::writer::MemoryCategory::Core | lantai::writer::MemoryCategory::Experience
+    ) {
+        let config_guard = state.config.read().await;
+        let compaction_enabled = config_guard
+            .lantai
+            .as_ref()
+            .map(|l| l.auto_memory.compaction_enabled)
+            .unwrap_or(true);
+        let threshold = config_guard
+            .lantai
+            .as_ref()
+            .map(|l| l.auto_memory.compaction_threshold)
+            .unwrap_or(4000);
+        let chat_info = config_guard.chat.clone();
+        drop(config_guard);
+
+        if compaction_enabled {
+            let file_size = writer.file_size(category).await;
+            if file_size > threshold as u64 {
+                dual_info!(
+                    "Memory compaction triggered: {} file size {} > threshold {}",
+                    category_str,
+                    file_size,
+                    threshold
+                );
+                if let Some(chat_cfg) = chat_info {
+                    let writer = writer.clone();
+                    let chat_url =
+                        format!("{}/chat/completions", chat_cfg.url.trim_end_matches('/'));
+                    let api_key = chat_cfg.get_api_key();
+                    let cat_label = category_str.to_string();
+                    let model = chat_cfg.model.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = trigger_memory_compaction(
+                            &writer,
+                            category,
+                            &chat_url,
+                            api_key.as_deref(),
+                            &model,
+                        )
+                        .await
+                        {
+                            tracing::warn!("Memory compaction failed for {}: {}", cat_label, e);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    tool_trace.set_result(output.clone(), start_time.elapsed());
+    iter_trace.add_tool_call(tool_trace.clone());
+    Ok(output)
+}
+
+/// Executes the lantai_update_memory internal tool.
+async fn execute_lantai_update_memory(
+    state: &Arc<AppState>,
+    tool_args: serde_json::Value,
+    tool_trace: &mut ToolCallTrace,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+) -> ServerResult<String> {
+    let writer = state.memory_writer().ok_or_else(|| {
+        let err_msg = "MemoryWriter is not initialized".to_string();
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let category_str = tool_args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_update_memory requires 'category' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+    let heading = tool_args
+        .get("heading")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_update_memory requires 'heading' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+    let content = tool_args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_update_memory requires 'content' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let category = match category_str {
+        "core" => lantai::writer::MemoryCategory::Core,
+        "experience" => lantai::writer::MemoryCategory::Experience,
+        _ => {
+            let err_msg = format!(
+                "Invalid category for update: {category_str}. Must be 'core' or 'experience'"
+            );
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            return Err(ServerError::Operation(err_msg));
+        }
+    };
+
+    writer
+        .update_section(category, heading, content)
+        .await
+        .map_err(|e| {
+            let err_msg = format!("Failed to update memory section: {e}");
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let output = format!("Updated section '{heading}' in {category_str}");
+    tool_trace.set_result(output.clone(), start_time.elapsed());
+    iter_trace.add_tool_call(tool_trace.clone());
+    Ok(output)
+}
+
+/// Executes the lantai_delete_memory internal tool.
+async fn execute_lantai_delete_memory(
+    state: &Arc<AppState>,
+    tool_args: serde_json::Value,
+    tool_trace: &mut ToolCallTrace,
+    iter_trace: &mut IterationTrace,
+    start_time: Instant,
+) -> ServerResult<String> {
+    let writer = state.memory_writer().ok_or_else(|| {
+        let err_msg = "MemoryWriter is not initialized".to_string();
+        tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+        iter_trace.add_tool_call(tool_trace.clone());
+        ServerError::Operation(err_msg)
+    })?;
+
+    let category_str = tool_args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_delete_memory requires 'category' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+    let heading = tool_args
+        .get("heading")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let err_msg = "lantai_delete_memory requires 'heading' argument".to_string();
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let category = match category_str {
+        "core" => lantai::writer::MemoryCategory::Core,
+        "experience" => lantai::writer::MemoryCategory::Experience,
+        _ => {
+            let err_msg = format!(
+                "Invalid category for delete: {category_str}. Must be 'core' or 'experience'"
+            );
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            return Err(ServerError::Operation(err_msg));
+        }
+    };
+
+    writer
+        .delete_section(category, heading)
+        .await
+        .map_err(|e| {
+            let err_msg = format!("Failed to delete memory section: {e}");
+            tool_trace.set_error(err_msg.clone(), start_time.elapsed());
+            iter_trace.add_tool_call(tool_trace.clone());
+            ServerError::Operation(err_msg)
+        })?;
+
+    let output = format!("Deleted section '{heading}' from {category_str}");
+    tool_trace.set_result(output.clone(), start_time.elapsed());
+    iter_trace.add_tool_call(tool_trace.clone());
+    Ok(output)
+}
+
+/// Load memory context for system prompt injection.
+///
+/// Reads MEMORY.md (full) + today's daily log (last 5 entries) and concatenates
+/// them into a context string, truncated to `max_chars`.
+async fn load_memory_context(writer: &lantai::writer::MemoryWriter, max_chars: usize) -> String {
+    let mut parts = Vec::new();
+
+    // Core memory (highest priority)
+    if let Ok(Some(core)) = writer.read_core_memory().await
+        && !core.trim().is_empty()
+    {
+        parts.push(format!("### Core Memory\n{core}"));
+    }
+
+    // Today's daily log (last 5 bullet points)
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    if let Ok(Some(daily)) = writer.read_daily_log(&today).await {
+        let recent = truncate_to_last_n_lines(&daily, 5);
+        if !recent.is_empty() {
+            parts.push(format!("### Today's Recent Activity\n{recent}"));
+        }
+    }
+
+    // Concatenate with priority-based truncation
+    let mut result = String::new();
+    for part in parts {
+        if result.len() + part.len() > max_chars {
+            let remaining = max_chars.saturating_sub(result.len());
+            if remaining > 100 {
+                result.push_str(&part[..remaining]);
+                result.push_str("\n...(truncated)");
+            }
+            break;
+        }
+        if !result.is_empty() {
+            result.push_str("\n\n");
+        }
+        result.push_str(&part);
+    }
+    result
+}
+
+/// Return the last N lines from content.
+fn truncate_to_last_n_lines(content: &str, n: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() <= n {
+        content.to_string()
+    } else {
+        lines[lines.len() - n..].join("\n")
+    }
+}
+
+/// Extract a conversation snippet from messages for checkpoint summarization.
+///
+/// Collects user and assistant message content, truncated to `max_chars`.
+fn extract_conversation_snippet(
+    messages: &[ChatCompletionRequestMessage],
+    max_chars: usize,
+) -> String {
+    let mut snippet = String::new();
+    for msg in messages {
+        let (role, text): (&str, &str) = match msg {
+            ChatCompletionRequestMessage::User(u) => {
+                let content_ref = u.content();
+                if let ChatCompletionUserMessageContent::Text(t) = content_ref {
+                    ("User", t.as_str())
+                } else {
+                    continue;
+                }
+            }
+            ChatCompletionRequestMessage::Assistant(a) => {
+                if let Some(c) = a.content() {
+                    ("Assistant", c.as_str())
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        if snippet.len() + text.len() + role.len() + 3 > max_chars {
+            let remaining = max_chars.saturating_sub(snippet.len() + role.len() + 3);
+            if remaining > 50 {
+                // Truncate at char boundary
+                let end = text
+                    .char_indices()
+                    .take_while(|(i, _)| *i < remaining)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                snippet.push_str(&format!("{role}: {}\n", &text[..end]));
+            }
+            break;
+        }
+        snippet.push_str(&format!("{role}: {text}\n"));
+    }
+    snippet
+}
+
+/// Fire-and-forget: record a DirectAnswer Q&A exchange to the daily log.
+///
+/// Checks config to see if auto_summary is enabled, then calls LLM to summarize the
+/// user question + assistant answer and writes the result to today's daily log.
+async fn trigger_direct_answer_memory(
+    state: &AppState,
+    chat_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+    user_message: &str,
+    assistant_response: &str,
+) {
+    // Check if auto_summary is enabled in config
+    let auto_summary_enabled = {
+        let config = state.config.read().await;
+        config
+            .lantai
+            .as_ref()
+            .map(|l| l.auto_memory.auto_summary)
+            .unwrap_or(true)
+    };
+
+    if !auto_summary_enabled {
+        return;
+    }
+
+    let writer = match state.memory_writer() {
+        Some(w) => w,
+        None => return,
+    };
+
+    // Build a simple conversation snippet for the checkpoint
+    let snippet = format!(
+        "User: {}\nAssistant: {}",
+        user_message,
+        if assistant_response.len() > 2000 {
+            &assistant_response[..2000]
+        } else {
+            assistant_response
+        }
+    );
+
+    if let Err(e) = trigger_memory_checkpoint(writer, chat_url, api_key, model, &snippet).await {
+        tracing::warn!("Failed to record direct answer to memory: {}", e);
+    }
+}
+
+/// Fire-and-forget: summarize a completed task plan and write to daily memory log.
+async fn trigger_plan_memory(
+    state: &AppState,
+    chat_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+    user_message: &str,
+    final_response: &str,
+) {
+    // Check if auto_summary is enabled in config
+    let auto_summary_enabled = {
+        let config = state.config.read().await;
+        config
+            .lantai
+            .as_ref()
+            .map(|l| l.auto_memory.auto_summary)
+            .unwrap_or(true)
+    };
+
+    if !auto_summary_enabled {
+        return;
+    }
+
+    let writer = match state.memory_writer() {
+        Some(w) => w,
+        None => return,
+    };
+
+    // Build a conversation snippet from user request + final synthesized response
+    let snippet = format!(
+        "User: {}\nAssistant (task plan result): {}",
+        user_message,
+        if final_response.len() > 2000 {
+            &final_response[..2000]
+        } else {
+            final_response
+        }
+    );
+
+    if let Err(e) = trigger_memory_checkpoint(writer, chat_url, api_key, model, &snippet).await {
+        tracing::warn!("Failed to record plan result to memory: {}", e);
+    }
+}
+
+/// Fire-and-forget: call LLM to extract key info from conversation, then write to daily log.
+async fn trigger_memory_checkpoint(
+    writer: &lantai::writer::MemoryWriter,
+    chat_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+    conversation_snippet: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if conversation_snippet.trim().is_empty() {
+        return Ok(());
+    }
+
+    let prompt = format!(
+        "Summarize this conversation in ONE concise sentence. \
+         Use the same language as the conversation. \
+         Focus on the key topic and outcome. \
+         Output ONLY the summary sentence, nothing else.\n\n\
+         Conversation:\n{conversation_snippet}"
+    );
+
+    let request_json = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a concise note-taker. Summarize conversations in a single sentence using the same language as the conversation."},
+            {"role": "user", "content": prompt}
+        ],
+        "stream": false
+    });
+
+    let mut req = reqwest::Client::new().post(chat_url);
+    if let Some(key) = api_key {
+        let auth = if key.starts_with("Bearer ") {
+            key.to_string()
+        } else {
+            format!("Bearer {key}")
+        };
+        req = req.header("Authorization", auth);
+    }
+    req = req.header("Content-Type", "application/json");
+
+    let resp = req.json(&request_json).send().await?;
+    let body: serde_json::Value = resp.json().await?;
+
+    let summary = body["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if summary.is_empty() {
+        return Ok(());
+    }
+
+    // Write to daily log as a single-line entry
+    let write_req = lantai::writer::MemoryWriteRequest {
+        content: summary,
+        category: lantai::writer::MemoryCategory::Daily,
+        heading: None,
+    };
+    writer.write(&write_req).await.map_err(|e| {
+        Box::new(std::io::Error::other(e.to_string())) as Box<dyn std::error::Error + Send + Sync>
+    })?;
+
+    tracing::info!("Memory checkpoint saved to daily log");
+    Ok(())
+}
+
+/// Alias for subagent executor to call compaction.
+pub(crate) async fn trigger_memory_compaction_bg(
+    writer: &lantai::writer::MemoryWriter,
+    category: lantai::writer::MemoryCategory,
+    chat_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    trigger_memory_compaction(writer, category, chat_url, api_key, model).await
+}
+
+/// Auto-compact a memory file (MEMORY.md or EXPERIENCE.md) when it grows beyond threshold.
+///
+/// Reads the current file, asks LLM to consolidate/deduplicate, then rewrites atomically.
+async fn trigger_memory_compaction(
+    writer: &lantai::writer::MemoryWriter,
+    category: lantai::writer::MemoryCategory,
+    chat_url: &str,
+    api_key: Option<&str>,
+    model: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let current_content = match category {
+        lantai::writer::MemoryCategory::Core => writer.read_core_memory().await,
+        lantai::writer::MemoryCategory::Experience => writer.read_experience_memory().await,
+        _ => return Ok(()),
+    };
+
+    let content = match current_content {
+        Ok(Some(c)) if !c.trim().is_empty() => c,
+        _ => return Ok(()),
+    };
+
+    let category_label = match category {
+        lantai::writer::MemoryCategory::Core => "MEMORY.md (core preferences and decisions)",
+        lantai::writer::MemoryCategory::Experience => {
+            "EXPERIENCE.md (experience notes and patterns)"
+        }
+        _ => unreachable!(),
+    };
+
+    let prompt = format!(
+        "You are compacting a knowledge base file: {category_label}.\n\
+         The file uses ## headings to organize sections. Each section contains bullet-point entries.\n\n\
+         Your task:\n\
+         1. Merge duplicate or near-duplicate entries within each section.\n\
+         2. Remove outdated entries that are superseded by newer ones.\n\
+         3. Preserve all unique, valuable information.\n\
+         4. Keep the same ## heading structure.\n\
+         5. For Core memory: keep date prefixes (e.g., '- 2026-02-15: ...') on entries.\n\
+         6. Output ONLY the compacted markdown, no explanation.\n\n\
+         Current content:\n{content}"
+    );
+
+    let request_json = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "You are a precise note compactor. Consolidate and deduplicate while preserving all unique information."},
+            {"role": "user", "content": prompt}
+        ],
+        "stream": false
+    });
+
+    let mut req = reqwest::Client::new().post(chat_url);
+    if let Some(key) = api_key {
+        let auth = if key.starts_with("Bearer ") {
+            key.to_string()
+        } else {
+            format!("Bearer {key}")
+        };
+        req = req.header("Authorization", auth);
+    }
+    req = req.header("Content-Type", "application/json");
+
+    let resp = req.json(&request_json).send().await?;
+    let body: serde_json::Value = resp.json().await?;
+
+    let compacted = body["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if compacted.is_empty() || compacted.len() >= content.len() {
+        // Compaction didn't reduce size; skip rewrite
+        tracing::debug!(
+            "Memory compaction produced no reduction ({} >= {}), skipping",
+            compacted.len(),
+            content.len()
+        );
+        return Ok(());
+    }
+
+    writer
+        .rewrite_file(category, &compacted)
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::other(e.to_string()))
+                as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
+    tracing::info!(
+        "Memory compaction complete: {} chars -> {} chars",
+        content.len(),
+        compacted.len()
+    );
+    Ok(())
 }
 
 /// Executes the skill_run_script internal tool.

@@ -6,16 +6,18 @@ use crate::{
 };
 
 /// 混合搜索引擎（向量 + FTS5 + RRF 融合）
+///
+/// `embedding` 为 `None` 时退化为 BM25-only 搜索。
 pub struct HybridSearch<'a> {
     db: &'a Database,
-    embedding: &'a dyn EmbeddingProvider,
+    embedding: Option<&'a dyn EmbeddingProvider>,
     config: &'a SearchConfig,
 }
 
 impl<'a> HybridSearch<'a> {
     pub fn new(
         db: &'a Database,
-        embedding: &'a dyn EmbeddingProvider,
+        embedding: Option<&'a dyn EmbeddingProvider>,
         config: &'a SearchConfig,
     ) -> Self {
         Self {
@@ -25,15 +27,31 @@ impl<'a> HybridSearch<'a> {
         }
     }
 
-    /// 执行混合搜索
+    /// 执行搜索
+    ///
+    /// 有 embedding 时使用混合搜索（向量 + BM25 + RRF 融合），否则使用 BM25-only。
     pub async fn search(&self, query: &SearchQuery) -> LantaiResult<Vec<SearchResult>> {
         let limit = query.limit;
+
+        match self.embedding {
+            Some(emb) => self.search_hybrid(emb, query, limit).await,
+            None => self.search_bm25_only(query, limit),
+        }
+    }
+
+    /// 混合搜索路径（向量 + BM25 + RRF 融合）
+    async fn search_hybrid(
+        &self,
+        embedding: &dyn EmbeddingProvider,
+        query: &SearchQuery,
+        limit: usize,
+    ) -> LantaiResult<Vec<SearchResult>> {
         let vec_weight = query.vec_weight.unwrap_or(self.config.vec_weight);
         let bm25_weight = query.bm25_weight.unwrap_or(self.config.bm25_weight);
         let rrf_k = self.config.rrf_k;
 
         // 1. 计算 query embedding
-        let query_embedding = self.embedding.embed(&query.text).await?;
+        let query_embedding = embedding.embed(&query.text).await?;
 
         // 2. 执行两路搜索（取较大的候选集）
         let candidate_limit = limit * 3;
@@ -53,6 +71,45 @@ impl<'a> HybridSearch<'a> {
 
         // 5. 按 merged 分数排序组装 SearchResult
         let score_map: HashMap<&str, f64> = merged
+            .iter()
+            .map(|(id, score)| (id.as_str(), *score))
+            .collect();
+
+        let mut results: Vec<SearchResult> = chunks
+            .into_iter()
+            .map(|c| SearchResult {
+                score: score_map
+                    .get(c.composite_id.as_str())
+                    .copied()
+                    .unwrap_or(0.0),
+                chunk_id: c.composite_id,
+                source_path: c.source_path,
+                heading_path: c.heading_path,
+                content: c.content,
+                start_line: c.start_line as usize,
+                end_line: c.end_line as usize,
+            })
+            .collect();
+
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Ok(results)
+    }
+
+    /// BM25-only 搜索路径（无 embedding 时使用）
+    fn search_bm25_only(
+        &self,
+        query: &SearchQuery,
+        limit: usize,
+    ) -> LantaiResult<Vec<SearchResult>> {
+        let fts_results = self.db.search_fts(&query.text, limit)?;
+        let top_ids: Vec<&str> = fts_results.iter().map(|(id, _)| id.as_str()).collect();
+        let chunks = self.db.get_chunks_by_ids(&top_ids)?;
+
+        let score_map: HashMap<&str, f64> = fts_results
             .iter()
             .map(|(id, score)| (id.as_str(), *score))
             .collect();

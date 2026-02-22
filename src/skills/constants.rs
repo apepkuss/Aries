@@ -19,6 +19,15 @@ pub const LANTAI_SEARCH_TOOL: &str = "lantai_search";
 /// Lantai knowledge base stats tool name (without prefix)
 pub const LANTAI_STATS_TOOL: &str = "lantai_stats";
 
+/// Lantai memory write tool name (without prefix)
+pub const LANTAI_WRITE_MEMORY_TOOL: &str = "lantai_write_memory";
+
+/// Lantai memory update tool name (without prefix)
+pub const LANTAI_UPDATE_MEMORY_TOOL: &str = "lantai_update_memory";
+
+/// Lantai memory delete tool name (without prefix)
+pub const LANTAI_DELETE_MEMORY_TOOL: &str = "lantai_delete_memory";
+
 /// Generate full internal tool name from short name.
 ///
 /// # Example

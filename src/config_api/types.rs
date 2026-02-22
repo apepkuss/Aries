@@ -40,13 +40,28 @@ pub const UPDATABLE_FIELDS: &[&str] = &[
     "hitl.default_timeout_secs",
     "hitl.default_timeout_behavior",
     "hitl.confirmation_threshold",
+    // Chat config - simple hot update
+    "chat.model_context_size",
+    // Lantai auto memory config
+    "lantai_auto_memory.auto_summary",
+    "lantai_auto_memory.checkpoint_token_ratio",
+    // Lantai embedding config - requires Lantai embedding provider reload
+    "lantai_auto_memory.embedding_model",
+    "lantai_auto_memory.embedding_dimensions",
+    "lantai_auto_memory.embedding_batch_size",
     // MCP config - section-level hot update
     "mcp (section)",
 ];
 
 /// Fields that require service reload after update
 #[allow(dead_code)]
-pub const SIDE_EFFECT_FIELDS: &[&str] = &["embedding.url", "embedding.api_key"];
+pub const SIDE_EFFECT_FIELDS: &[&str] = &[
+    "embedding.url",
+    "embedding.api_key",
+    "lantai_auto_memory.embedding_model",
+    "lantai_auto_memory.embedding_dimensions",
+    "lantai_auto_memory.embedding_batch_size",
+];
 
 // ============================================================================
 // Sanitized Config Response Types
@@ -100,6 +115,10 @@ pub struct SanitizedConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<SanitizedSessionConfig>,
 
+    /// Lantai auto memory configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lantai_auto_memory: Option<SanitizedLantaiAutoMemoryConfig>,
+
     /// List of fields that can be updated at runtime
     pub updatable_fields: Vec<String>,
 }
@@ -128,6 +147,8 @@ pub struct SanitizedChatConfig {
     pub api_key_configured: bool,
     /// Model used for chat completions
     pub model: String,
+    /// Model context window size in tokens (0 = disable token-aware features)
+    pub model_context_size: u64,
 }
 
 /// Sanitized embedding service configuration
@@ -263,6 +284,21 @@ pub struct SanitizedSessionConfig {
     pub storage_path: String,
 }
 
+/// Sanitized lantai auto memory configuration
+#[derive(Debug, Clone, Serialize)]
+pub struct SanitizedLantaiAutoMemoryConfig {
+    /// Enable auto-summary of conversations to daily log
+    pub auto_summary: bool,
+    /// Checkpoint trigger ratio: prompt_tokens >= model_context_size * ratio
+    pub checkpoint_token_ratio: f32,
+    /// Embedding model name used by Lantai (from lantai.embedding.model)
+    pub embedding_model: String,
+    /// Embedding vector dimensions (from lantai.embedding.dimensions)
+    pub embedding_dimensions: usize,
+    /// Embedding batch size (from lantai.embedding.batch_size)
+    pub embedding_batch_size: usize,
+}
+
 // ============================================================================
 // Config Update Request Types
 // ============================================================================
@@ -298,6 +334,10 @@ pub struct ConfigUpdateRequest {
     /// HITL configuration updates
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hitl: Option<HitlConfigUpdate>,
+
+    /// Lantai auto memory configuration updates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lantai_auto_memory: Option<LantaiAutoMemoryConfigUpdate>,
 }
 
 /// Server configuration updatable fields
@@ -321,6 +361,7 @@ pub struct ChatConfigUpdate {
     pub url: Option<String>,
     pub api_key: Option<String>,
     pub model: Option<String>,
+    pub model_context_size: Option<u64>,
 }
 
 /// Embedding configuration updatable fields
@@ -370,6 +411,22 @@ pub struct HitlConfigUpdate {
     pub default_timeout_behavior: Option<String>,
     /// Minimum risk level that requires confirmation (low, medium, high, critical)
     pub confirmation_threshold: Option<String>,
+}
+
+/// Lantai auto memory configuration updatable fields
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct LantaiAutoMemoryConfigUpdate {
+    /// Enable auto-summary of conversations to daily log
+    pub auto_summary: Option<bool>,
+    /// Checkpoint trigger ratio (0.5 ~ 0.95)
+    pub checkpoint_token_ratio: Option<f32>,
+    /// Embedding model name (e.g., "text-embedding-3-small")
+    pub embedding_model: Option<String>,
+    /// Embedding vector dimensions (e.g., 768, 1536)
+    pub embedding_dimensions: Option<usize>,
+    /// Embedding batch size (e.g., 32)
+    pub embedding_batch_size: Option<usize>,
 }
 
 // ============================================================================
@@ -582,6 +639,7 @@ mod tests {
                 url: "http://localhost:8080/v1".to_string(),
                 api_key_configured: true,
                 model: "gpt-4".to_string(),
+                model_context_size: 128000,
             }),
             embedding: None,
             memory: None,
@@ -592,6 +650,7 @@ mod tests {
             subagent: None,
             hitl: None,
             session: None,
+            lantai_auto_memory: None,
             updatable_fields: vec!["server.max_tools_per_iteration".to_string()],
         };
 
@@ -651,6 +710,9 @@ mod tests {
     #[test]
     fn test_updatable_fields_list() {
         assert!(UPDATABLE_FIELDS.contains(&"server.max_tools_per_iteration"));
+        assert!(UPDATABLE_FIELDS.contains(&"chat.model_context_size"));
+        assert!(UPDATABLE_FIELDS.contains(&"lantai_auto_memory.auto_summary"));
+        assert!(UPDATABLE_FIELDS.contains(&"lantai_auto_memory.checkpoint_token_ratio"));
         assert!(!UPDATABLE_FIELDS.contains(&"chat.url"));
         assert!(!UPDATABLE_FIELDS.contains(&"chat.api_key"));
         assert!(!UPDATABLE_FIELDS.contains(&"chat.model"));
@@ -664,6 +726,9 @@ mod tests {
         assert!(!SIDE_EFFECT_FIELDS.contains(&"chat.api_key"));
         assert!(SIDE_EFFECT_FIELDS.contains(&"embedding.url"));
         assert!(SIDE_EFFECT_FIELDS.contains(&"embedding.api_key"));
+        assert!(SIDE_EFFECT_FIELDS.contains(&"lantai_auto_memory.embedding_model"));
+        assert!(SIDE_EFFECT_FIELDS.contains(&"lantai_auto_memory.embedding_dimensions"));
+        assert!(SIDE_EFFECT_FIELDS.contains(&"lantai_auto_memory.embedding_batch_size"));
         assert!(!SIDE_EFFECT_FIELDS.contains(&"server.max_tools_per_iteration"));
     }
 }

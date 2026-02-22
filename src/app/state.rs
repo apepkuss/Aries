@@ -41,6 +41,8 @@ pub struct AppState {
     pub(crate) stdio_manager: Arc<StdioProcessManager>,
     /// Lantai knowledge base instance (wrapped in Mutex because rusqlite::Connection is not Sync)
     pub(crate) lantai: Option<Arc<tokio::sync::Mutex<lantai::Lantai>>>,
+    /// MemoryWriter for file-based memory (independent of Lantai Mutex, uses file-level RwLock)
+    pub(crate) memory_writer: Option<Arc<lantai::writer::MemoryWriter>>,
 }
 
 impl AppState {
@@ -63,6 +65,7 @@ impl AppState {
             privacy_detector,
             stdio_manager: mcp_stdio::get_stdio_process_manager().clone(),
             lantai: None,
+            memory_writer: None,
         }
     }
 
@@ -135,6 +138,19 @@ impl AppState {
     /// Get the Lantai instance reference (if enabled)
     pub fn lantai(&self) -> Option<&Arc<tokio::sync::Mutex<lantai::Lantai>>> {
         self.lantai.as_ref()
+    }
+
+    pub fn with_memory_writer(mut self, writer: Arc<lantai::writer::MemoryWriter>) -> Self {
+        self.memory_writer = Some(writer);
+        self
+    }
+
+    pub fn has_memory_writer(&self) -> bool {
+        self.memory_writer.is_some()
+    }
+
+    pub fn memory_writer(&self) -> Option<&Arc<lantai::writer::MemoryWriter>> {
+        self.memory_writer.as_ref()
     }
 
     pub async fn register_downstream_server(&self, server: server::Server) -> ServerResult<()> {

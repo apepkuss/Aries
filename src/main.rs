@@ -270,94 +270,98 @@ async fn main() -> ServerResult<()> {
     let _lantai_cancel_token = if let Some(ref lantai_cfg) = lantai_config
         && lantai_cfg.enabled
     {
-        // Lantai requires embedding service for generating vectors
-        if let Some(ref emb_cfg) = embedding_config_for_lantai {
-            aries::dual_info!("Initializing Lantai knowledge base...");
+        aries::dual_info!("Initializing Lantai knowledge base...");
 
-            // Expand paths
-            let memory_dir = shellexpand::tilde(&lantai_cfg.memory_dir).to_string();
-            let database_path = shellexpand::tilde(&lantai_cfg.database_path).to_string();
+        // Expand paths
+        let memory_dir = shellexpand::tilde(&lantai_cfg.memory_dir).to_string();
+        let database_path = shellexpand::tilde(&lantai_cfg.database_path).to_string();
 
-            // Ensure directories exist
-            if let Err(e) = std::fs::create_dir_all(&memory_dir) {
-                aries::dual_error!("Failed to create Lantai memory directory: {e}");
-            }
-            if let Some(parent) = std::path::Path::new(&database_path).parent()
-                && let Err(e) = std::fs::create_dir_all(parent)
-            {
-                aries::dual_error!("Failed to create Lantai database directory: {e}");
-            }
+        // Ensure directories exist
+        if let Err(e) = std::fs::create_dir_all(&memory_dir) {
+            aries::dual_error!("Failed to create Lantai memory directory: {e}");
+        }
+        if let Some(parent) = std::path::Path::new(&database_path).parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            aries::dual_error!("Failed to create Lantai database directory: {e}");
+        }
 
-            // Build LantaiConfig from Aries config
-            let l_config = lantai_cfg.to_lantai_config(&memory_dir, &database_path);
+        // Build LantaiConfig from Aries config
+        let l_config = lantai_cfg.to_lantai_config(&memory_dir, &database_path);
 
-            // Create OpenAI embedding provider using Aries embedding URL + lantai model/dimensions
+        // Create embedding provider (optional — None = BM25-only mode)
+        let embedding: Option<Box<dyn lantai::EmbeddingProvider>> = if let Some(ref emb_cfg) =
+            embedding_config_for_lantai
+        {
             let api_key = emb_cfg.get_api_key().unwrap_or_default();
-            let embedding = lantai::embedding::OpenAIEmbedding::new(
+            Some(Box::new(lantai::embedding::OpenAIEmbedding::new(
                 &emb_cfg.url,
                 &api_key,
                 &lantai_cfg.embedding.model,
                 lantai_cfg.embedding.dimensions,
-            );
+            )))
+        } else {
+            aries::dual_info!("No [embedding] configured, Lantai will use BM25-only search mode");
+            None
+        };
 
-            match lantai::Lantai::new(l_config, Box::new(embedding)) {
-                Ok(lantai_instance) => {
-                    // Run initial index
-                    let lantai_arc = Arc::new(tokio::sync::Mutex::new(lantai_instance));
+        match lantai::Lantai::new(l_config, embedding) {
+            Ok(lantai_instance) => {
+                // Run initial index
+                let lantai_arc = Arc::new(tokio::sync::Mutex::new(lantai_instance));
 
-                    {
-                        let guard = lantai_arc.lock().await;
-                        match guard.index(&[memory_dir.as_str()]).await {
-                            Ok(report) => {
-                                aries::dual_info!(
-                                    "Lantai initial index: +{} ~{} -{} files, +{} -{} chunks",
-                                    report.files_added,
-                                    report.files_updated,
-                                    report.files_deleted,
-                                    report.chunks_added,
-                                    report.chunks_deleted,
-                                );
-                            }
-                            Err(e) => {
-                                aries::dual_warn!("Lantai initial index failed: {e}");
-                            }
+                {
+                    let guard = lantai_arc.lock().await;
+                    match guard.index(&[memory_dir.as_str()]).await {
+                        Ok(report) => {
+                            aries::dual_info!(
+                                "Lantai initial index: +{} ~{} -{} files, +{} -{} chunks",
+                                report.files_added,
+                                report.files_updated,
+                                report.files_deleted,
+                                report.chunks_added,
+                                report.chunks_deleted,
+                            );
+                        }
+                        Err(e) => {
+                            aries::dual_warn!("Lantai initial index failed: {e}");
                         }
                     }
-
-                    // Start background watcher if enabled
-                    let cancel_token = if lantai_cfg.watch.enabled {
-                        let token = CancellationToken::new();
-                        let watcher = lantai::watcher::LantaiMutexWatcher::new(
-                            Arc::clone(&lantai_arc),
-                            vec![PathBuf::from(&memory_dir)],
-                            lantai_cfg.watch.debounce_ms,
-                        );
-                        let cancel_clone = token.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = watcher.watch(cancel_clone).await {
-                                aries::dual_error!("Lantai watcher error: {e}");
-                            }
-                        });
-                        aries::dual_info!("Lantai file watcher started");
-                        Some(token)
-                    } else {
-                        None
-                    };
-
-                    state = state.with_lantai(lantai_arc);
-                    aries::dual_info!("Lantai knowledge base initialized successfully");
-                    cancel_token
                 }
-                Err(e) => {
-                    aries::dual_error!("Failed to initialize Lantai: {e}");
+
+                // Start background watcher if enabled
+                let cancel_token = if lantai_cfg.watch.enabled {
+                    let token = CancellationToken::new();
+                    let watcher = lantai::watcher::LantaiMutexWatcher::new(
+                        Arc::clone(&lantai_arc),
+                        vec![PathBuf::from(&memory_dir)],
+                        lantai_cfg.watch.debounce_ms,
+                    );
+                    let cancel_clone = token.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = watcher.watch(cancel_clone).await {
+                            aries::dual_error!("Lantai watcher error: {e}");
+                        }
+                    });
+                    aries::dual_info!("Lantai file watcher started");
+                    Some(token)
+                } else {
                     None
-                }
+                };
+
+                state = state.with_lantai(lantai_arc);
+
+                // Create independent MemoryWriter (file-level RwLock, no Lantai Mutex contention)
+                let writer = Arc::new(lantai::writer::MemoryWriter::new(&memory_dir));
+                state = state.with_memory_writer(writer);
+
+                aries::dual_info!("Lantai knowledge base initialized successfully");
+                cancel_token
             }
-        } else {
-            aries::dual_warn!(
-                "Lantai is enabled but [embedding] section is not configured. Lantai requires embedding service."
-            );
-            None
+            Err(e) => {
+                aries::dual_error!("Failed to initialize Lantai: {e}");
+                None
+            }
         }
     } else {
         if lantai_config.as_ref().is_some_and(|c| !c.enabled) {

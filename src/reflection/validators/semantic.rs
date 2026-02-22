@@ -58,8 +58,6 @@ Provide your evaluation as valid JSON only, no additional text."#;
 pub struct SemanticValidatorConfig {
     /// LLM temperature for validation (lower = more deterministic).
     pub temperature: f32,
-    /// Maximum tokens for the validation response.
-    pub max_tokens: u32,
     /// Minimum score threshold to consider result valid.
     pub validity_threshold: f64,
 }
@@ -68,7 +66,6 @@ impl Default for SemanticValidatorConfig {
     fn default() -> Self {
         Self {
             temperature: 0.2,
-            max_tokens: 1024,
             validity_threshold: 0.6,
         }
     }
@@ -114,7 +111,7 @@ impl SemanticValidator {
         let server = self.server.read().await;
 
         let request_body = serde_json::json!({
-            "model": "default",
+            "model": server.model,
             "messages": [
                 {
                     "role": "system",
@@ -125,8 +122,7 @@ impl SemanticValidator {
                     "content": prompt
                 }
             ],
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens
+            "temperature": self.config.temperature
         });
 
         let mut request = self
@@ -377,7 +373,6 @@ That's my evaluation."#;
     fn test_semantic_validator_config_default() {
         let config = SemanticValidatorConfig::default();
         assert_eq!(config.temperature, 0.2);
-        assert_eq!(config.max_tokens, 1024);
         assert_eq!(config.validity_threshold, 0.6);
     }
 
@@ -386,6 +381,7 @@ That's my evaluation."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let validator = SemanticValidator::new(server);
 
@@ -408,6 +404,7 @@ That's my evaluation."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let validator = SemanticValidator::new(server);
 
@@ -442,6 +439,7 @@ That's my evaluation."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let validator = SemanticValidator::new(server);
 
@@ -456,6 +454,7 @@ That's my evaluation."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let validator = SemanticValidator::new(server);
         let context = ValidationContext::new("Test task");
@@ -470,6 +469,7 @@ That's my evaluation."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let validator = SemanticValidator::new(server);
         let context = ValidationContext::default();

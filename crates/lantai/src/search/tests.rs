@@ -43,7 +43,7 @@ async fn test_index_then_search() {
 
     let config = test_config();
     let mock = Box::new(MockEmbedding::new(DIMS));
-    let lantai = Lantai::new_in_memory(config, mock).unwrap();
+    let lantai = Lantai::new_in_memory(config, Some(mock)).unwrap();
 
     // 索引
     let report = lantai.index(&[tmp.path().to_str().unwrap()]).await.unwrap();
@@ -113,7 +113,7 @@ fn test_rrf_merge_identical() {
 async fn test_search_empty_index() {
     let config = test_config();
     let mock = Box::new(MockEmbedding::new(DIMS));
-    let lantai = Lantai::new_in_memory(config, mock).unwrap();
+    let lantai = Lantai::new_in_memory(config, Some(mock)).unwrap();
 
     let results = lantai.search("anything").await.unwrap();
     assert!(results.is_empty());
@@ -131,7 +131,7 @@ async fn test_search_limit() {
 
     let config = test_config();
     let mock = Box::new(MockEmbedding::new(DIMS));
-    let lantai = Lantai::new_in_memory(config, mock).unwrap();
+    let lantai = Lantai::new_in_memory(config, Some(mock)).unwrap();
 
     lantai.index(&[tmp.path().to_str().unwrap()]).await.unwrap();
 
@@ -152,7 +152,7 @@ async fn test_search_weight_override() {
 
     let config = test_config();
     let mock = Box::new(MockEmbedding::new(DIMS));
-    let lantai = Lantai::new_in_memory(config, mock).unwrap();
+    let lantai = Lantai::new_in_memory(config, Some(mock)).unwrap();
 
     lantai.index(&[tmp.path().to_str().unwrap()]).await.unwrap();
 
@@ -169,4 +169,46 @@ async fn test_search_weight_override() {
 
     // 两种模式都应能返回结果（具体结果可能不同）
     assert!(!vec_only.is_empty() || !bm25_only.is_empty());
+}
+
+// ─── BM25-only 模式测试 ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_bm25_only_index_and_search() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_md(
+        tmp.path(),
+        "guide.md",
+        "# Installation Guide\n\n\
+         Install the software using the package manager.\n\n\
+         ## Configuration\n\n\
+         Edit the configuration file to set up your preferences.\n",
+    );
+
+    let config = test_config();
+    // 不传入 embedding — BM25-only 模式
+    let lantai = Lantai::new_in_memory(config, None).unwrap();
+
+    assert!(!lantai.has_embedding());
+
+    // 索引应正常工作
+    let report = lantai.index(&[tmp.path().to_str().unwrap()]).await.unwrap();
+    assert_eq!(report.files_added, 1);
+    assert!(report.chunks_added >= 1);
+
+    // BM25 搜索应返回结果
+    let results = lantai.search("configuration").await.unwrap();
+    assert!(
+        !results.is_empty(),
+        "BM25-only search should return results"
+    );
+}
+
+#[tokio::test]
+async fn test_bm25_only_empty_index() {
+    let config = test_config();
+    let lantai = Lantai::new_in_memory(config, None).unwrap();
+
+    let results = lantai.search("anything").await.unwrap();
+    assert!(results.is_empty());
 }

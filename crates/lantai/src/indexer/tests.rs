@@ -30,7 +30,7 @@ async fn test_index_empty_directory() {
     let db = test_db();
     let chunker = MarkdownChunker::new(50, 5);
     let mock = MockEmbedding::new(DIMS);
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     let report = pipeline
         .index_directories(&[tmp.path().to_str().unwrap()])
@@ -54,7 +54,7 @@ async fn test_index_single_file() {
     let db = test_db();
     let chunker = MarkdownChunker::new(50, 1);
     let mock = MockEmbedding::new(DIMS);
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     let report = pipeline
         .index_directories(&[tmp.path().to_str().unwrap()])
@@ -78,7 +78,7 @@ async fn test_incremental_index() {
     let db = test_db();
     let chunker = MarkdownChunker::new(50, 1);
     let mock = MockEmbedding::new(DIMS);
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     // 首次索引
     let r1 = pipeline
@@ -123,7 +123,7 @@ async fn test_deleted_file_cleanup() {
     let db = test_db();
     let chunker = MarkdownChunker::new(50, 1);
     let mock = MockEmbedding::new(DIMS);
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     // 索引
     let r1 = pipeline
@@ -157,7 +157,7 @@ async fn test_embedding_cache_hit() {
     let db = test_db();
     let chunker = MarkdownChunker::new(50, 1);
     let mock = MockEmbedding::new(DIMS);
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     // 首次索引 — 写入 embedding cache
     pipeline
@@ -225,7 +225,7 @@ async fn test_large_batch_split() {
     }
 
     let mock = SmallBatchMock;
-    let pipeline = IndexPipeline::new(&db, &chunker, &mock);
+    let pipeline = IndexPipeline::new(&db, &chunker, Some(&mock));
 
     let report = pipeline
         .index_directories(&[tmp.path().to_str().unwrap()])
@@ -234,4 +234,69 @@ async fn test_large_batch_split() {
 
     assert_eq!(report.files_added, 1);
     assert_eq!(report.chunks_added, 10);
+}
+
+// ─── BM25-only 模式测试 ─────────────────────────────────────────────────────
+
+/// BM25-only 模式不创建 vec 表
+fn test_db_no_vec() -> Database {
+    Database::open_in_memory().unwrap()
+}
+
+#[tokio::test]
+async fn test_bm25_only_index() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_md(
+        tmp.path(),
+        "doc.md",
+        "# Document\n\nSome content for BM25 indexing.\n",
+    );
+
+    let db = test_db_no_vec();
+    let chunker = MarkdownChunker::new(50, 1);
+    let pipeline = IndexPipeline::new(&db, &chunker, None);
+
+    let report = pipeline
+        .index_directories(&[tmp.path().to_str().unwrap()])
+        .await
+        .unwrap();
+
+    assert_eq!(report.files_added, 1);
+    assert!(report.chunks_added >= 1);
+
+    // FTS 搜索应正常工作
+    let fts_results = db.search_fts("content", 10).unwrap();
+    assert!(!fts_results.is_empty(), "BM25 search should find results");
+
+    // 无 embedding 缓存
+    let stats = db.get_stats().unwrap();
+    assert_eq!(stats.total_cached_embeddings, 0);
+}
+
+#[tokio::test]
+async fn test_bm25_only_incremental() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = write_md(tmp.path(), "doc.md", "# Doc\n\nOriginal.\n");
+
+    let db = test_db_no_vec();
+    let chunker = MarkdownChunker::new(50, 1);
+    let pipeline = IndexPipeline::new(&db, &chunker, None);
+
+    // 首次索引
+    let r1 = pipeline
+        .index_directories(&[tmp.path().to_str().unwrap()])
+        .await
+        .unwrap();
+    assert_eq!(r1.files_added, 1);
+
+    // 修改文件
+    std::fs::write(&path, "# Doc\n\nUpdated content.\n").unwrap();
+
+    // 再次索引
+    let r2 = pipeline
+        .index_directories(&[tmp.path().to_str().unwrap()])
+        .await
+        .unwrap();
+    assert_eq!(r2.files_updated, 1);
+    assert!(r2.chunks_added >= 1);
 }

@@ -11,8 +11,8 @@ use serde_json::json;
 
 use super::types::UPDATABLE_FIELDS;
 use crate::config::{
-    ChatConfig, Config, EmbeddingConfig, McpConfig, MemoryConfig, RagConfig, ServerConfig,
-    SummarizationStrategy,
+    AriesLantaiConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, MemoryConfig, RagConfig,
+    ServerConfig, SummarizationStrategy,
 };
 
 // ============================================================================
@@ -190,6 +190,15 @@ fn diff_chat_config_inner(old: &ChatConfig, new: &ChatConfig, changes: &mut Vec<
                 serde_json::Value::Null
             },
             true, // hot-updatable but requires service reload
+        ));
+    }
+
+    if old.model_context_size != new.model_context_size {
+        changes.push(ConfigChange::new(
+            "chat.model_context_size",
+            json!(old.model_context_size),
+            json!(new.model_context_size),
+            true,
         ));
     }
 }
@@ -545,8 +554,82 @@ pub fn diff_configs(old: &Config, new: &Config) -> Vec<ConfigChange> {
     diff_memory_config(old.memory.as_ref(), new.memory.as_ref(), &mut changes);
     diff_rag_config(old.rag.as_ref(), new.rag.as_ref(), &mut changes);
     diff_mcp_config(old.mcp.as_ref(), new.mcp.as_ref(), &mut changes);
+    diff_lantai_auto_memory_config(old.lantai.as_ref(), new.lantai.as_ref(), &mut changes);
 
     changes
+}
+
+// ============================================================================
+// Lantai Auto Memory Config Diff
+// ============================================================================
+
+/// Compare lantai auto memory config fields
+fn diff_lantai_auto_memory_config_inner(
+    old: &AriesLantaiConfig,
+    new: &AriesLantaiConfig,
+    changes: &mut Vec<ConfigChange>,
+) {
+    if old.auto_memory.auto_summary != new.auto_memory.auto_summary {
+        changes.push(ConfigChange::new(
+            "lantai_auto_memory.auto_summary",
+            json!(old.auto_memory.auto_summary),
+            json!(new.auto_memory.auto_summary),
+            true,
+        ));
+    }
+
+    if (old.auto_memory.checkpoint_token_ratio - new.auto_memory.checkpoint_token_ratio).abs()
+        > f32::EPSILON
+    {
+        changes.push(ConfigChange::new(
+            "lantai_auto_memory.checkpoint_token_ratio",
+            json!(old.auto_memory.checkpoint_token_ratio),
+            json!(new.auto_memory.checkpoint_token_ratio),
+            true,
+        ));
+    }
+
+    if old.embedding.model != new.embedding.model {
+        changes.push(ConfigChange::new(
+            "lantai_auto_memory.embedding_model",
+            json!(old.embedding.model),
+            json!(new.embedding.model),
+            true,
+        ));
+    }
+
+    if old.embedding.dimensions != new.embedding.dimensions {
+        changes.push(ConfigChange::new(
+            "lantai_auto_memory.embedding_dimensions",
+            json!(old.embedding.dimensions),
+            json!(new.embedding.dimensions),
+            true,
+        ));
+    }
+
+    if old.embedding.batch_size != new.embedding.batch_size {
+        changes.push(ConfigChange::new(
+            "lantai_auto_memory.embedding_batch_size",
+            json!(old.embedding.batch_size),
+            json!(new.embedding.batch_size),
+            true,
+        ));
+    }
+}
+
+/// Compare lantai config with optional handling
+pub fn diff_lantai_auto_memory_config(
+    old: Option<&AriesLantaiConfig>,
+    new: Option<&AriesLantaiConfig>,
+    changes: &mut Vec<ConfigChange>,
+) {
+    diff_optional_config(
+        old,
+        new,
+        "lantai",
+        changes,
+        diff_lantai_auto_memory_config_inner,
+    );
 }
 
 // ============================================================================

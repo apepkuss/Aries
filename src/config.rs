@@ -271,6 +271,14 @@ pub struct ChatConfig {
     /// Model to use for chat completions (runtime only, not persisted)
     #[serde(default, skip_serializing)]
     pub model: String,
+    /// Model context window size (tokens). Used for token-aware features.
+    /// Set to 0 to disable all token-aware features (default: 128000).
+    #[serde(default = "default_model_context_size")]
+    pub model_context_size: u64,
+}
+
+fn default_model_context_size() -> u64 {
+    128000
 }
 
 impl ChatConfig {
@@ -294,6 +302,14 @@ pub struct EmbeddingConfig {
 }
 
 impl EmbeddingConfig {
+    /// Create a new EmbeddingConfig with a URL and empty API key
+    pub fn new_with_url(url: String) -> Self {
+        Self {
+            url,
+            api_key: String::new(),
+        }
+    }
+
     pub fn get_api_key(&self) -> Option<String> {
         if !self.api_key.is_empty() {
             Some(self.api_key.clone())
@@ -1852,6 +1868,9 @@ pub struct AriesLantaiConfig {
     /// File watcher configuration
     #[serde(default)]
     pub watch: LantaiWatchSubConfig,
+    /// Auto-memory configuration
+    #[serde(default)]
+    pub auto_memory: LantaiAutoMemoryConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -1943,6 +1962,55 @@ impl Default for AriesLantaiConfig {
             chunking: LantaiChunkingSubConfig::default(),
             search: LantaiSearchSubConfig::default(),
             watch: LantaiWatchSubConfig::default(),
+            auto_memory: LantaiAutoMemoryConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LantaiAutoMemoryConfig {
+    /// Enable context injection at session start (default: true)
+    #[serde(default = "default_true")]
+    pub context_injection: bool,
+    /// Enable auto-summary of conversations to daily log (default: true)
+    #[serde(default = "default_true")]
+    pub auto_summary: bool,
+    /// Max characters for injected memory context (default: 2000)
+    #[serde(default = "default_max_context_chars")]
+    pub max_context_chars: usize,
+    /// Checkpoint trigger ratio: prompt_tokens >= model_context_size * ratio (default: 0.75)
+    #[serde(default = "default_checkpoint_token_ratio")]
+    pub checkpoint_token_ratio: f32,
+    /// Enable auto-compaction of MEMORY.md / EXPERIENCE.md (default: true)
+    #[serde(default = "default_true")]
+    pub compaction_enabled: bool,
+    /// File size threshold (chars) to trigger compaction (default: 4000)
+    #[serde(default = "default_compaction_threshold")]
+    pub compaction_threshold: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_max_context_chars() -> usize {
+    2000
+}
+fn default_checkpoint_token_ratio() -> f32 {
+    0.75
+}
+fn default_compaction_threshold() -> usize {
+    4000
+}
+
+impl Default for LantaiAutoMemoryConfig {
+    fn default() -> Self {
+        Self {
+            context_injection: true,
+            auto_summary: true,
+            max_context_chars: default_max_context_chars(),
+            checkpoint_token_ratio: default_checkpoint_token_ratio(),
+            compaction_enabled: true,
+            compaction_threshold: default_compaction_threshold(),
         }
     }
 }

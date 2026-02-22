@@ -118,6 +118,7 @@ impl SubAgentExecutor {
         let llm_server = Some(Arc::new(RwLock::new(LlmServerInfo {
             url: chat_server.url.clone(),
             api_key: chat_server.api_key.clone(),
+            model: model.clone(),
         })));
 
         // 从全局 HITL Manager 创建 HitlToolCaller（如果已初始化且启用）
@@ -632,11 +633,24 @@ impl SubAgentExecutor {
             }
         }?;
 
-        // 解析响应
-        response
-            .json()
+        // 解析响应 — 先读取文本以便错误时记录详细日志
+        let response_text = response
+            .text()
             .await
-            .map_err(|e| ServerError::Operation(format!("Failed to parse response: {e}")))
+            .map_err(|e| ServerError::Operation(format!("Failed to read response body: {e}")))?;
+        serde_json::from_str(&response_text).map_err(|e| {
+            let preview = if response_text.len() > 500 {
+                &response_text[..500]
+            } else {
+                &response_text
+            };
+            tracing::error!(
+                "Failed to parse LLM response: {}. Body preview: {}",
+                e,
+                preview
+            );
+            ServerError::Operation(format!("Failed to parse response: {e}"))
+        })
     }
 
     /// 执行工具调用（带 HITL 检查）
@@ -647,6 +661,9 @@ impl SubAgentExecutor {
         subagent_id: &SubAgentId,
         cancel_token: &CancellationToken,
     ) -> ServerResult<String> {
+        // Strip "functions." prefix that some models add to tool names
+        let tool_name = tool_name.strip_prefix("functions.").unwrap_or(tool_name);
+
         // 检查是否是 Sub-Agent 工具（不允许递归调用，除非配置允许）
         if is_subagent_tool(tool_name) {
             return Err(ServerError::Operation(
@@ -917,6 +934,148 @@ impl SubAgentExecutor {
                     "Knowledge Base Statistics:\n- Files: {}\n- Chunks: {}\n- Cached embeddings: {}",
                     stats.total_files, stats.total_chunks, stats.total_cached_embeddings,
                 ))
+            }
+            "lantai_write_memory" => {
+                let writer = state
+                    .memory_writer()
+                    .ok_or_else(|| "MemoryWriter is not initialized".to_string())?;
+
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_write_memory requires 'content' argument".to_string())?;
+                let category_str = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("daily");
+                let heading = args.get("heading").and_then(|v| v.as_str());
+
+                let category = match category_str {
+                    "daily" => lantai::writer::MemoryCategory::Daily,
+                    "core" => lantai::writer::MemoryCategory::Core,
+                    "experience" => lantai::writer::MemoryCategory::Experience,
+                    _ => return Err(format!("Invalid category: {category_str}")),
+                };
+
+                let request = lantai::writer::MemoryWriteRequest {
+                    content: content.to_string(),
+                    category,
+                    heading: heading.map(|s| s.to_string()),
+                };
+                let output = writer
+                    .write(&request)
+                    .await
+                    .map_err(|e| format!("Failed to write memory: {e}"))?;
+
+                // Post-write compaction trigger for Core/Experience
+                if matches!(
+                    category,
+                    lantai::writer::MemoryCategory::Core
+                        | lantai::writer::MemoryCategory::Experience
+                ) {
+                    let config_guard = state.config.read().await;
+                    let compaction_enabled = config_guard
+                        .lantai
+                        .as_ref()
+                        .map(|l| l.auto_memory.compaction_enabled)
+                        .unwrap_or(true);
+                    let threshold = config_guard
+                        .lantai
+                        .as_ref()
+                        .map(|l| l.auto_memory.compaction_threshold)
+                        .unwrap_or(4000);
+                    let chat_info = config_guard.chat.clone();
+                    drop(config_guard);
+
+                    if compaction_enabled {
+                        let file_size = writer.file_size(category).await;
+                        if file_size > threshold as u64
+                            && let Some(chat_cfg) = chat_info
+                        {
+                            let writer = writer.clone();
+                            let chat_url =
+                                format!("{}/chat/completions", chat_cfg.url.trim_end_matches('/'));
+                            let api_key = chat_cfg.get_api_key();
+                            let model = chat_cfg.model.clone();
+                            let cat_label = category_str.to_string();
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::chat::plan::trigger_memory_compaction_bg(
+                                    &writer,
+                                    category,
+                                    &chat_url,
+                                    api_key.as_deref(),
+                                    &model,
+                                )
+                                .await
+                                {
+                                    tracing::warn!(
+                                        "Memory compaction failed for {}: {}",
+                                        cat_label,
+                                        e
+                                    );
+                                }
+                            });
+                        }
+                    }
+                }
+
+                Ok(output)
+            }
+            "lantai_update_memory" => {
+                let writer = state
+                    .memory_writer()
+                    .ok_or_else(|| "MemoryWriter is not initialized".to_string())?;
+
+                let category_str = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_update_memory requires 'category'".to_string())?;
+                let heading = args
+                    .get("heading")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_update_memory requires 'heading'".to_string())?;
+                let content = args
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_update_memory requires 'content'".to_string())?;
+
+                let category = match category_str {
+                    "core" => lantai::writer::MemoryCategory::Core,
+                    "experience" => lantai::writer::MemoryCategory::Experience,
+                    _ => return Err(format!("Invalid category for update: {category_str}")),
+                };
+
+                writer
+                    .update_section(category, heading, content)
+                    .await
+                    .map_err(|e| format!("Failed to update memory: {e}"))?;
+                Ok(format!("Updated section '{heading}' in {category_str}"))
+            }
+            "lantai_delete_memory" => {
+                let writer = state
+                    .memory_writer()
+                    .ok_or_else(|| "MemoryWriter is not initialized".to_string())?;
+
+                let category_str = args
+                    .get("category")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_delete_memory requires 'category'".to_string())?;
+                let heading = args
+                    .get("heading")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| "lantai_delete_memory requires 'heading'".to_string())?;
+
+                let category = match category_str {
+                    "core" => lantai::writer::MemoryCategory::Core,
+                    "experience" => lantai::writer::MemoryCategory::Experience,
+                    _ => return Err(format!("Invalid category for delete: {category_str}")),
+                };
+
+                writer
+                    .delete_section(category, heading)
+                    .await
+                    .map_err(|e| format!("Failed to delete memory: {e}"))?;
+                Ok(format!("Deleted section '{heading}' from {category_str}"))
             }
             _ => Err(format!("Unknown internal tool: {tool_name}")),
         }

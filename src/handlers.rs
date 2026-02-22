@@ -1721,24 +1721,52 @@ pub mod admin {
             // _verify_server(State(state.clone()), &headers, &request_id, &server).await?;
         }
 
-        // update the model list
-        update_model_list(State(state.clone()), &headers, &request_id, &server).await?;
+        // Check if a server with the same URL and kind is already registered
+        let mut already_registered_id: Option<String> = None;
+        if let Ok(existing) = state.list_downstream_servers().await {
+            'outer: for (&kind, servers) in &existing {
+                if server_kind.contains(kind) {
+                    for s in servers {
+                        if s.url == server_url {
+                            already_registered_id = Some(s.id.clone());
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
 
-        // update health status of the server
-        server.health_status.is_healthy = true;
-        server.health_status.last_check = SystemTime::now();
+        let registered_id = if let Some(existing_id) = already_registered_id {
+            dual_info!(
+                "Server already registered with same URL: {} (id: {}) - request_id: {}",
+                server_url,
+                existing_id,
+                request_id
+            );
+            existing_id
+        } else {
+            // update the model list
+            update_model_list(State(state.clone()), &headers, &request_id, &server).await?;
 
-        // register the server
-        state.register_downstream_server(server).await?;
-        dual_info!(
-            "Registered successfully. Assigned Server Id: {} - request_id: {}",
-            server_id,
-            request_id
-        );
+            // update health status of the server
+            server.health_status.is_healthy = true;
+            server.health_status.last_check = SystemTime::now();
+
+            let new_id = server_id.clone();
+
+            // register the server
+            state.register_downstream_server(server).await?;
+            dual_info!(
+                "Registered successfully. Assigned Server Id: {} - request_id: {}",
+                new_id,
+                request_id
+            );
+            new_id
+        };
 
         // create a response with status code 200. Content-Type is JSON
         let json_body = serde_json::json!({
-            "id": server_id,
+            "id": registered_id,
             "url": server_url,
             "kind": server_kind
         });

@@ -5,9 +5,10 @@
 
 use super::types::{
     SanitizedArtifactsConfig, SanitizedChatConfig, SanitizedConfig, SanitizedEmbeddingConfig,
-    SanitizedHitlConfig, SanitizedMcpConfig, SanitizedMcpServerConfig,
-    SanitizedMcpToolServerConfig, SanitizedMemoryConfig, SanitizedRagConfig, SanitizedServerConfig,
-    SanitizedSessionConfig, SanitizedSkillConfig, SanitizedSubagentConfig, UPDATABLE_FIELDS,
+    SanitizedHitlConfig, SanitizedLantaiAutoMemoryConfig, SanitizedMcpConfig,
+    SanitizedMcpServerConfig, SanitizedMcpToolServerConfig, SanitizedMemoryConfig,
+    SanitizedRagConfig, SanitizedServerConfig, SanitizedSessionConfig, SanitizedSkillConfig,
+    SanitizedSubagentConfig, UPDATABLE_FIELDS,
 };
 use crate::{
     config::{
@@ -43,6 +44,16 @@ impl Sanitize for Config {
             subagent: self.subagent.as_ref().map(|s| s.sanitize()),
             hitl: self.hitl.as_ref().map(|h| h.sanitize()),
             session: self.session.as_ref().map(|s| s.sanitize()),
+            lantai_auto_memory: self
+                .lantai
+                .as_ref()
+                .map(|l| SanitizedLantaiAutoMemoryConfig {
+                    auto_summary: l.auto_memory.auto_summary,
+                    checkpoint_token_ratio: l.auto_memory.checkpoint_token_ratio,
+                    embedding_model: l.embedding.model.clone(),
+                    embedding_dimensions: l.embedding.dimensions,
+                    embedding_batch_size: l.embedding.batch_size,
+                }),
             updatable_fields: UPDATABLE_FIELDS.iter().map(|s| s.to_string()).collect(),
         }
     }
@@ -75,6 +86,7 @@ impl Sanitize for ChatConfig {
             url: self.url.clone(),
             api_key_configured: self.get_api_key().is_some(),
             model: self.model.clone(),
+            model_context_size: self.model_context_size,
         }
     }
 }

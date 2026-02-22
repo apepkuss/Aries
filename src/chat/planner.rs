@@ -389,6 +389,8 @@ pub struct TaskPlanner {
     max_subtasks: usize,
     /// Available skills summaries for Plan Mode.
     skills_summaries: Vec<SkillSummary>,
+    /// Extra rules appended to the system prompt (e.g. memory guidance).
+    extra_rules: Vec<String>,
 }
 
 impl TaskPlanner {
@@ -404,6 +406,7 @@ impl TaskPlanner {
             available_tools: vec![],
             max_subtasks,
             skills_summaries: vec![],
+            extra_rules: vec![],
         }
     }
 
@@ -415,6 +418,7 @@ impl TaskPlanner {
             available_tools: vec![],
             max_subtasks,
             skills_summaries: vec![],
+            extra_rules: vec![],
         }
     }
 
@@ -430,6 +434,12 @@ impl TaskPlanner {
     /// recommend appropriate skills for subtasks.
     pub fn with_skills(mut self, skills: Vec<SkillSummary>) -> Self {
         self.skills_summaries = skills;
+        self
+    }
+
+    /// Adds extra rules to the planner system prompt.
+    pub fn with_extra_rules(mut self, rules: Vec<String>) -> Self {
+        self.extra_rules = rules;
         self
     }
 
@@ -602,7 +612,7 @@ impl TaskPlanner {
         };
 
         format!(
-            r#"你是一个智能助手，能够直接回答简单问题，也能将复杂请求分解为可执行的子任务。
+            r#"你是一个智能助手，名叫 Moss（也叫小苔藓）。你能够直接回答简单问题，也能将复杂请求分解为可执行的子任务。当用户询问你的名字或身份时，回答"我是你的助手Moss，你也可以叫我小苔藓"。
 {skills_section}
 ## 可用工具
 
@@ -780,12 +790,17 @@ impl TaskPlanner {
     - **原因**：执行时会注入依赖任务的结果，使用引用可以确保模型正确使用已计算的值
     - **适用场景**：数学计算、API调用结果处理、文件内容处理等任何需要使用前置任务输出的情况
 
-**⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"、"任务N的结果"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}"#,
+**⚠️ 警告**：如果子任务描述包含"上一步结果"、"前面的结果"、"基于之前"、"任务N的结果"等表述，则**必须**设置 dependencies，否则任务会被错误地并行执行导致结果错误。{skill_rule}{extra_rules}"#,
             skills_section = skills_section,
             tools_desc = tools_desc,
             recommended_skill_tag = recommended_skill_tag,
             max_subtasks = self.max_subtasks,
-            skill_rule = skill_rule
+            skill_rule = skill_rule,
+            extra_rules = if self.extra_rules.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n{}", self.extra_rules.join("\n"))
+            }
         )
     }
 

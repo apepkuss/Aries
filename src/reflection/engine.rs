@@ -40,6 +40,8 @@ pub struct LlmServerInfo {
     pub url: String,
     /// API key (optional)
     pub api_key: Option<String>,
+    /// Model name to use for LLM calls
+    pub model: String,
 }
 
 /// The reflection engine for evaluating task execution results.
@@ -323,7 +325,7 @@ impl ReflectionEngine {
         let server = self.server.read().await;
 
         let request_body = serde_json::json!({
-            "model": "default",
+            "model": server.model,
             "messages": [
                 {
                     "role": "system",
@@ -334,8 +336,7 @@ impl ReflectionEngine {
                     "content": prompt
                 }
             ],
-            "temperature": 0.3,
-            "max_tokens": 2048
+            "temperature": 0.3
         });
 
         let mut request = self

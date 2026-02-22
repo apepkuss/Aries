@@ -234,18 +234,82 @@ async fn find_config_servers(state: &Arc<AppState>, kind: ServerKind, prefix: &s
     server_ids
 }
 
+/// Reload the Lantai embedding provider with updated model/dimensions/batch_size
+///
+/// Reads the current embedding service URL/API key from `[embedding]` config
+/// and model/dimensions from `[lantai.embedding]` config, then hot-replaces
+/// the embedding provider inside the running Lantai instance.
+pub async fn reload_lantai_embedding(state: &Arc<AppState>) -> ReloadResult {
+    dual_info!("Reloading Lantai embedding provider...");
+
+    let Some(lantai_arc) = state.lantai() else {
+        dual_warn!("Lantai not initialized, skipping embedding provider reload");
+        return ReloadResult::failure("lantai_embedding", "Lantai not initialized".to_string());
+    };
+
+    // Read config to get embedding service URL/API key and lantai embedding settings
+    let config = state.config.read().await;
+
+    let Some(ref embedding_cfg) = config.embedding else {
+        dual_warn!("No [embedding] config, setting Lantai to BM25-only mode");
+        drop(config);
+        let mut lantai = lantai_arc.lock().await;
+        if let Err(e) = lantai.replace_embedding(None) {
+            let msg = format!("Failed to clear Lantai embedding: {e}");
+            dual_error!("{}", msg);
+            return ReloadResult::failure("lantai_embedding", msg);
+        }
+        dual_info!("Lantai switched to BM25-only mode");
+        return ReloadResult::success("lantai_embedding");
+    };
+
+    let Some(ref lantai_cfg) = config.lantai else {
+        dual_warn!("No [lantai] config, skipping embedding provider reload");
+        return ReloadResult::failure(
+            "lantai_embedding",
+            "Lantai configuration not found".to_string(),
+        );
+    };
+
+    let url = embedding_cfg.url.clone();
+    let api_key = embedding_cfg.get_api_key().unwrap_or_default();
+    let model = lantai_cfg.embedding.model.clone();
+    let dimensions = lantai_cfg.embedding.dimensions;
+
+    drop(config);
+
+    // Create new embedding provider
+    let new_embedding: Box<dyn lantai::EmbeddingProvider> = Box::new(
+        lantai::embedding::OpenAIEmbedding::new(&url, &api_key, &model, dimensions),
+    );
+
+    dual_info!(
+        "Replacing Lantai embedding provider: model={}, dimensions={}",
+        model,
+        dimensions,
+    );
+
+    // Hot-replace the embedding provider
+    let mut lantai = lantai_arc.lock().await;
+    if let Err(e) = lantai.replace_embedding(Some(new_embedding)) {
+        let msg = format!("Failed to replace Lantai embedding provider: {e}");
+        dual_error!("{}", msg);
+        return ReloadResult::failure("lantai_embedding", msg);
+    }
+
+    dual_info!("Lantai embedding provider reloaded successfully");
+    ReloadResult::success("lantai_embedding")
+}
+
 /// Determine which services need to be reloaded based on updated fields
-///
-/// # Arguments
-///
-/// * `side_effect_fields` - List of field paths that have side effects
 ///
 /// # Returns
 ///
-/// A tuple of (reload_chat, reload_embedding) booleans
-pub fn determine_services_to_reload(side_effect_fields: &[String]) -> (bool, bool) {
+/// A tuple of (reload_chat, reload_embedding, reload_lantai_embedding) booleans
+pub fn determine_services_to_reload(side_effect_fields: &[String]) -> (bool, bool, bool) {
     let mut reload_chat = false;
     let mut reload_embedding = false;
+    let mut reload_lantai_embedding = false;
 
     for field in side_effect_fields {
         if field.starts_with("chat.") {
@@ -254,9 +318,12 @@ pub fn determine_services_to_reload(side_effect_fields: &[String]) -> (bool, boo
         if field.starts_with("embedding.") {
             reload_embedding = true;
         }
+        if field.starts_with("lantai_auto_memory.embedding_") {
+            reload_lantai_embedding = true;
+        }
     }
 
-    (reload_chat, reload_embedding)
+    (reload_chat, reload_embedding, reload_lantai_embedding)
 }
 
 // ============================================================================
@@ -286,17 +353,19 @@ mod tests {
     #[test]
     fn test_determine_services_to_reload_chat() {
         let fields = vec!["chat.url".to_string()];
-        let (reload_chat, reload_embedding) = determine_services_to_reload(&fields);
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
         assert!(reload_chat);
         assert!(!reload_embedding);
+        assert!(!reload_lantai);
     }
 
     #[test]
     fn test_determine_services_to_reload_embedding() {
         let fields = vec!["embedding.api_key".to_string()];
-        let (reload_chat, reload_embedding) = determine_services_to_reload(&fields);
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
         assert!(!reload_chat);
         assert!(reload_embedding);
+        assert!(!reload_lantai);
     }
 
     #[test]
@@ -306,16 +375,39 @@ mod tests {
             "embedding.url".to_string(),
             "chat.api_key".to_string(),
         ];
-        let (reload_chat, reload_embedding) = determine_services_to_reload(&fields);
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
         assert!(reload_chat);
         assert!(reload_embedding);
+        assert!(!reload_lantai);
     }
 
     #[test]
     fn test_determine_services_to_reload_none() {
         let fields = vec!["server.max_tools_per_iteration".to_string()];
-        let (reload_chat, reload_embedding) = determine_services_to_reload(&fields);
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
         assert!(!reload_chat);
         assert!(!reload_embedding);
+        assert!(!reload_lantai);
+    }
+
+    #[test]
+    fn test_determine_services_to_reload_lantai_embedding() {
+        let fields = vec!["lantai_auto_memory.embedding_model".to_string()];
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
+        assert!(!reload_chat);
+        assert!(!reload_embedding);
+        assert!(reload_lantai);
+    }
+
+    #[test]
+    fn test_determine_services_to_reload_lantai_dimensions() {
+        let fields = vec![
+            "lantai_auto_memory.embedding_dimensions".to_string(),
+            "lantai_auto_memory.embedding_batch_size".to_string(),
+        ];
+        let (reload_chat, reload_embedding, reload_lantai) = determine_services_to_reload(&fields);
+        assert!(!reload_chat);
+        assert!(!reload_embedding);
+        assert!(reload_lantai);
     }
 }

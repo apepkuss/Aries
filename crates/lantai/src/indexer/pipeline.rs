@@ -23,17 +23,20 @@ pub struct IndexReport {
 }
 
 /// 索引管线：扫描 → 分块 → 嵌入 → 存储
+///
+/// `embedding` 为 `None` 时以 BM25-only 模式运行：
+/// 仅写入 chunks + FTS5，跳过向量计算和 chunks_vec。
 pub struct IndexPipeline<'a> {
     db: &'a Database,
     chunker: &'a MarkdownChunker,
-    embedding: &'a dyn EmbeddingProvider,
+    embedding: Option<&'a dyn EmbeddingProvider>,
 }
 
 impl<'a> IndexPipeline<'a> {
     pub fn new(
         db: &'a Database,
         chunker: &'a MarkdownChunker,
-        embedding: &'a dyn EmbeddingProvider,
+        embedding: Option<&'a dyn EmbeddingProvider>,
     ) -> Self {
         Self {
             db,
@@ -44,8 +47,10 @@ impl<'a> IndexPipeline<'a> {
 
     /// 索引指定目录
     pub async fn index_directories(&self, dirs: &[&str]) -> LantaiResult<IndexReport> {
-        // 确保 vec 表存在
-        schema::ensure_vec_table(&self.db.conn(), self.embedding.dimensions())?;
+        // 仅当有 embedding 时才确保 vec 表存在
+        if let Some(emb) = self.embedding {
+            schema::ensure_vec_table(&self.db.conn(), emb.dimensions())?;
+        }
 
         // 1. 扫描目录，收集所有 .md 文件
         let scanned = self.scan_directories(dirs)?;
@@ -109,15 +114,19 @@ impl<'a> IndexPipeline<'a> {
             indexed_at: now,
         })?;
 
-        // 5. 计算 embedding（优先查缓存）
-        let embeddings = self.compute_embeddings(&chunks).await?;
+        // 5. 计算 embedding（仅当有 embedding provider 时）
+        let embeddings = if self.embedding.is_some() {
+            Some(self.compute_embeddings(&chunks).await?)
+        } else {
+            None
+        };
 
         // 6. 构建 ChunkRecord 并写入数据库
-        let model = self.embedding.model();
+        let model = self.embedding.map(|e| e.model()).unwrap_or("none");
         let chunk_records: Vec<ChunkRecord> = chunks
             .iter()
-            .zip(embeddings.into_iter())
-            .map(|(chunk, emb)| {
+            .enumerate()
+            .map(|(i, chunk)| {
                 let composite_id = generate_composite_id(
                     &chunk.source_path,
                     chunk.start_line,
@@ -125,6 +134,7 @@ impl<'a> IndexPipeline<'a> {
                     &chunk.content_hash,
                     model,
                 );
+                let emb = embeddings.as_ref().map(|v| v[i].clone());
                 ChunkRecord {
                     composite_id,
                     source_path: chunk.source_path.clone(),
@@ -134,7 +144,7 @@ impl<'a> IndexPipeline<'a> {
                     end_line: chunk.end_line as i64,
                     content_hash: chunk.content_hash.clone(),
                     embedding_model: model.to_string(),
-                    embedding: Some(emb),
+                    embedding: emb,
                 }
             })
             .collect();
@@ -146,11 +156,16 @@ impl<'a> IndexPipeline<'a> {
     }
 
     /// 批量计算 embedding，利用缓存避免重复计算
+    ///
+    /// 调用方应确保 `self.embedding.is_some()`，否则 panic。
     async fn compute_embeddings(
         &self,
         chunks: &[crate::chunking::Chunk],
     ) -> LantaiResult<Vec<Vec<f32>>> {
-        let model = self.embedding.model();
+        let embedding = self
+            .embedding
+            .expect("compute_embeddings called without embedding provider");
+        let model = embedding.model();
         let mut results: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
         let mut uncached_indices = Vec::new();
         let mut uncached_texts = Vec::new();
@@ -168,11 +183,11 @@ impl<'a> IndexPipeline<'a> {
 
         // 2. 批量计算未缓存的
         if !uncached_texts.is_empty() {
-            let batch_size = self.embedding.max_batch_size();
+            let batch_size = embedding.max_batch_size();
             for batch_start in (0..uncached_texts.len()).step_by(batch_size) {
                 let batch_end = (batch_start + batch_size).min(uncached_texts.len());
                 let batch = &uncached_texts[batch_start..batch_end];
-                let embeddings = self.embedding.embed_batch(batch).await?;
+                let embeddings = embedding.embed_batch(batch).await?;
 
                 for (j, emb) in embeddings.into_iter().enumerate() {
                     let idx = uncached_indices[batch_start + j];

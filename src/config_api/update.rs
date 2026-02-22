@@ -6,11 +6,11 @@ use std::collections::HashMap;
 
 use super::types::{
     ChatConfigUpdate, ConfigUpdateRequest, ConfigUpdateResponse, EmbeddingConfigUpdate,
-    MemoryConfigUpdate, RagConfigUpdate, SIDE_EFFECT_FIELDS, ServerConfigUpdate,
-    SubagentConfigUpdate,
+    LantaiAutoMemoryConfigUpdate, MemoryConfigUpdate, RagConfigUpdate, SIDE_EFFECT_FIELDS,
+    ServerConfigUpdate, SubagentConfigUpdate,
 };
 use crate::{
-    config::{ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig},
+    config::{AriesLantaiConfig, ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig},
     subagent::SubAgentSystemConfig,
 };
 
@@ -137,6 +137,16 @@ pub fn apply_config_update(
         );
     }
 
+    // Apply lantai auto memory config updates
+    if let Some(ref lantai_update) = request.lantai_auto_memory {
+        apply_lantai_auto_memory_config_update(
+            &mut config.lantai,
+            lantai_update,
+            validated_fields,
+            &mut result,
+        );
+    }
+
     result
 }
 
@@ -230,6 +240,12 @@ fn apply_chat_config_update(
         if update.model.is_some() {
             result.add_failed("chat.model", "Chat configuration not initialized");
         }
+        if update.model_context_size.is_some() {
+            result.add_failed(
+                "chat.model_context_size",
+                "Chat configuration not initialized",
+            );
+        }
         return;
     };
 
@@ -256,32 +272,52 @@ fn apply_chat_config_update(
             result.add_updated(field);
         }
     }
+
+    if let Some(val) = update.model_context_size {
+        let field = "chat.model_context_size";
+        if validated_fields.contains(&field.to_string()) {
+            chat_config.model_context_size = val;
+            result.add_updated(field);
+        }
+    }
 }
 
 /// Apply embedding configuration updates
+///
+/// If the embedding config does not exist and a URL is provided, creates a new config.
 fn apply_embedding_config_update(
     embedding: &mut Option<EmbeddingConfig>,
     update: &EmbeddingConfigUpdate,
     validated_fields: &[String],
     result: &mut UpdateResult,
 ) {
-    // Embedding config must exist to be updated
-    let Some(embedding_config) = embedding.as_mut() else {
-        if update.url.is_some() {
-            result.add_failed("embedding.url", "Embedding configuration not initialized");
+    // Auto-create embedding config if it doesn't exist and URL is provided
+    if embedding.is_none() {
+        if let Some(ref url) = update.url {
+            if validated_fields.contains(&"embedding.url".to_string()) {
+                *embedding = Some(EmbeddingConfig::new_with_url(url.clone()));
+                result.add_updated("embedding.url");
+            }
+        } else {
+            // Can't create without URL
+            if update.api_key.is_some() {
+                result.add_failed(
+                    "embedding.api_key",
+                    "Embedding configuration not initialized, provide URL first",
+                );
+            }
+            return;
         }
-        if update.api_key.is_some() {
-            result.add_failed(
-                "embedding.api_key",
-                "Embedding configuration not initialized",
-            );
-        }
-        return;
-    };
+    }
 
+    let embedding_config = embedding.as_mut().unwrap();
+
+    // Update URL (skip if already set above during creation)
     if let Some(ref url) = update.url {
         let field = "embedding.url";
-        if validated_fields.contains(&field.to_string()) {
+        if validated_fields.contains(&field.to_string())
+            && !result.updated_fields.contains(&field.to_string())
+        {
             embedding_config.url = url.clone();
             result.add_updated(field);
         }
@@ -445,6 +481,66 @@ fn apply_subagent_config_update(
                     "Invalid parallel_mode. Must be 'auto', 'sequential', or 'manual'",
                 );
             }
+        }
+    }
+}
+
+/// Apply lantai auto memory configuration updates
+fn apply_lantai_auto_memory_config_update(
+    lantai: &mut Option<AriesLantaiConfig>,
+    update: &LantaiAutoMemoryConfigUpdate,
+    validated_fields: &[String],
+    result: &mut UpdateResult,
+) {
+    let Some(lantai_config) = lantai.as_mut() else {
+        if update.auto_summary.is_some()
+            || update.checkpoint_token_ratio.is_some()
+            || update.embedding_model.is_some()
+            || update.embedding_dimensions.is_some()
+            || update.embedding_batch_size.is_some()
+        {
+            result.add_failed("lantai_auto_memory", "Lantai configuration not initialized");
+        }
+        return;
+    };
+
+    if let Some(val) = update.auto_summary {
+        let field = "lantai_auto_memory.auto_summary";
+        if validated_fields.contains(&field.to_string()) {
+            lantai_config.auto_memory.auto_summary = val;
+            result.add_updated(field);
+        }
+    }
+
+    if let Some(val) = update.checkpoint_token_ratio {
+        let field = "lantai_auto_memory.checkpoint_token_ratio";
+        if validated_fields.contains(&field.to_string()) {
+            lantai_config.auto_memory.checkpoint_token_ratio = val;
+            result.add_updated(field);
+        }
+    }
+
+    if let Some(ref model) = update.embedding_model {
+        let field = "lantai_auto_memory.embedding_model";
+        if validated_fields.contains(&field.to_string()) {
+            lantai_config.embedding.model = model.clone();
+            result.add_updated(field);
+        }
+    }
+
+    if let Some(val) = update.embedding_dimensions {
+        let field = "lantai_auto_memory.embedding_dimensions";
+        if validated_fields.contains(&field.to_string()) {
+            lantai_config.embedding.dimensions = val;
+            result.add_updated(field);
+        }
+    }
+
+    if let Some(val) = update.embedding_batch_size {
+        let field = "lantai_auto_memory.embedding_batch_size";
+        if validated_fields.contains(&field.to_string()) {
+            lantai_config.embedding.batch_size = val;
+            result.add_updated(field);
         }
     }
 }

@@ -4,8 +4,8 @@
 
 use super::types::{
     ChatConfigUpdate, ConfigUpdateRequest, EmbeddingConfigUpdate, HitlConfigUpdate,
-    MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate, SubagentConfigUpdate,
-    UPDATABLE_FIELDS,
+    LantaiAutoMemoryConfigUpdate, MemoryConfigUpdate, RagConfigUpdate, ServerConfigUpdate,
+    SubagentConfigUpdate, UPDATABLE_FIELDS,
 };
 
 /// Validation error for configuration updates
@@ -91,6 +91,11 @@ pub fn validate_config_update(request: &ConfigUpdateRequest) -> ValidationResult
     // Validate HITL config updates
     if let Some(ref hitl) = request.hitl {
         validate_hitl_config(hitl, &mut result);
+    }
+
+    // Validate lantai auto memory config updates
+    if let Some(ref lantai_auto_memory) = request.lantai_auto_memory {
+        validate_lantai_auto_memory_config(lantai_auto_memory, &mut result);
     }
 
     result
@@ -202,6 +207,11 @@ fn validate_chat_config(chat: &ChatConfigUpdate, result: &mut ValidationResult) 
         } else {
             result.add_valid(field);
         }
+    }
+
+    if chat.model_context_size.is_some() {
+        // model_context_size can be 0 (disable) or any positive value
+        result.add_valid("chat.model_context_size");
     }
 }
 
@@ -332,6 +342,52 @@ fn validate_hitl_config(hitl: &HitlConfigUpdate, result: &mut ValidationResult) 
     }
 }
 
+/// Validate lantai auto memory configuration updates
+fn validate_lantai_auto_memory_config(
+    config: &LantaiAutoMemoryConfigUpdate,
+    result: &mut ValidationResult,
+) {
+    if config.auto_summary.is_some() {
+        result.add_valid("lantai_auto_memory.auto_summary");
+    }
+
+    if let Some(val) = config.checkpoint_token_ratio {
+        let field = "lantai_auto_memory.checkpoint_token_ratio";
+        if !(0.1..=0.99).contains(&val) {
+            result.add_error(field, "must be between 0.1 and 0.99");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    if let Some(ref model) = config.embedding_model {
+        let field = "lantai_auto_memory.embedding_model";
+        if model.is_empty() {
+            result.add_error(field, "model name cannot be empty");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    if let Some(val) = config.embedding_dimensions {
+        let field = "lantai_auto_memory.embedding_dimensions";
+        if val == 0 || val > 8192 {
+            result.add_error(field, "dimensions must be between 1 and 8192");
+        } else {
+            result.add_valid(field);
+        }
+    }
+
+    if let Some(val) = config.embedding_batch_size {
+        let field = "lantai_auto_memory.embedding_batch_size";
+        if val == 0 || val > 1024 {
+            result.add_error(field, "batch_size must be between 1 and 1024");
+        } else {
+            result.add_valid(field);
+        }
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -400,6 +456,7 @@ mod tests {
             url: Some("http://localhost:8080/v1".to_string()),
             api_key: Some("sk-test-key".to_string()),
             model: None,
+            model_context_size: None,
         };
 
         let mut result = ValidationResult::default();
@@ -415,6 +472,7 @@ mod tests {
             url: Some("invalid-url".to_string()),
             api_key: None,
             model: None,
+            model_context_size: None,
         };
 
         let mut result = ValidationResult::default();
@@ -474,12 +532,14 @@ mod tests {
                 url: Some("https://api.example.com/v1".to_string()),
                 api_key: None,
                 model: None,
+                model_context_size: None,
             }),
             embedding: None,
             memory: None,
             rag: Some(RagConfigUpdate { enable: Some(true) }),
             subagent: None,
             hitl: None,
+            lantai_auto_memory: None,
         };
 
         let result = validate_config_update(&request);

@@ -756,7 +756,7 @@ impl DynamicReplanner {
         let server = self.server.read().await;
 
         let request_body = serde_json::json!({
-            "model": "default",
+            "model": server.model,
             "messages": [
                 {
                     "role": "system",
@@ -767,8 +767,7 @@ impl DynamicReplanner {
                     "content": prompt
                 }
             ],
-            "temperature": 0.3,
-            "max_tokens": 2048
+            "temperature": 0.3
         });
 
         let mut request = self
@@ -1318,6 +1317,7 @@ That's the plan."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let replanner = DynamicReplanner::with_defaults(server);
         assert!(replanner.is_enabled());
@@ -1328,6 +1328,7 @@ That's the plan."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let replanner = DynamicReplanner::with_defaults(
             tokio::runtime::Runtime::new()
@@ -1369,6 +1370,7 @@ That's the plan."#;
         let server = Arc::new(RwLock::new(LlmServerInfo {
             url: "http://localhost".to_string(),
             api_key: None,
+            model: "test".to_string(),
         }));
         let replanner = DynamicReplanner::with_defaults(
             tokio::runtime::Runtime::new()

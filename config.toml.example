@@ -386,16 +386,12 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 #
 # Requires [embedding] section to be configured (URL and API key).
 # Lantai reuses the embedding service for generating vectors.
+# Embedding model, dimensions, and batch size are configured via the Settings UI (Memory tab).
 
 # [lantai]
 # enabled = true                              # Enable Lantai knowledge base (default: false)
 # memory_dir = "~/.lantai/memory"             # Directory containing markdown files to index
 # database_path = "~/.lantai/lantai.db"       # Path to SQLite database file
-
-# [lantai.embedding]
-# model = "text-embedding-3-small"            # Embedding model name
-# dimensions = 1536                           # Vector dimensions
-# batch_size = 32                             # Batch size for embedding API calls
 
 # [lantai.chunking]
 # max_chunk_lines = 50                        # Maximum lines per chunk
@@ -410,6 +406,13 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 # [lantai.watch]
 # enabled = true                              # Enable file watcher for auto-indexing
 # debounce_ms = 1500                          # Debounce delay for file change events
+
+# [lantai.auto_memory]
+# context_injection = true                    # Inject recent memory into system prompt (default: true)
+# max_context_chars = 2000                    # Max characters for injected memory context (default: 2000)
+# checkpoint_token_ratio = 0.75               # Trigger checkpoint when prompt_tokens >= context_size * ratio (default: 0.75)
+# compaction_enabled = true                   # Auto-compact MEMORY.md / EXPERIENCE.md when too large (default: true)
+# compaction_threshold = 4000                 # File size (chars) threshold to trigger compaction (default: 4000)
 
 
 # ============================================================================
@@ -452,6 +455,9 @@ custom_keywords = ["机密", "internal only", "confidential"]
 # [chat]
 # url = "https://api.openai.com/v1"  # Base URL for the model API
 # api_key = ""                       # API key for the model service (leave empty to use environment variable: DEFAULT_CHAT_SERVICE_API_KEY)
+# model_context_size = 128000        # Model context window size in tokens (default: 128000)
+#                                    # Used for token-aware features (memory checkpoint, etc.)
+#                                    # Set to 0 to disable all token-aware features
 
 # [embedding]
 # url = "https://api.openai.com/v1"  # Base URL for the model API
