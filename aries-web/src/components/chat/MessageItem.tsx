@@ -1,4 +1,4 @@
-import { User, Bot, Copy, Check, AlertCircle, Loader2, ShieldCheck, FileText, FileImage, FileCode, File } from 'lucide-react';
+import { User, Copy, Check, AlertCircle, Loader2, ShieldCheck, FileText, FileImage, FileCode, File } from 'lucide-react';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -59,16 +59,13 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
         )}
       >
         {/* Avatar */}
-        <div
-          className={cn(
-            'shrink-0 w-8 h-8 rounded-full flex items-center justify-center border',
-            isUser
-              ? 'bg-background border-border text-foreground shadow-sm'
-              : 'bg-background border-border text-foreground shadow-sm'
-          )}
-        >
-          {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-        </div>
+        {isUser ? (
+          <div className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center border bg-background border-border text-foreground shadow-sm">
+            <User className="h-4 w-4" />
+          </div>
+        ) : (
+          <img src="/aries-icon.png" alt="Aries" className="shrink-0 w-8 h-8" />
+        )}
 
         {/* Message Content Area */}
         <div className={cn("flex flex-col gap-2", isUser ? "items-end" : "items-start flex-1")}>
