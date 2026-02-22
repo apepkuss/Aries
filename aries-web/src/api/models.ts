@@ -16,9 +16,9 @@ export interface ListModelsResponse {
 
 /**
  * Fetch available models from the /v1/models endpoint
- * @param service - Which chat service to query models from ('chat' or 'privacy_chat')
+ * @param service - Which service to query models from ('chat', 'privacy_chat', or 'embeddings')
  */
-export async function fetchModels(service?: 'chat' | 'privacy_chat'): Promise<ListModelsResponse> {
+export async function fetchModels(service?: 'chat' | 'privacy_chat' | 'embeddings'): Promise<ListModelsResponse> {
   const params = service ? `?service=${service}` : '';
   const response = await fetch(`/v1/models${params}`);
   if (!response.ok) {

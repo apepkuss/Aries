@@ -125,12 +125,21 @@ export interface SanitizedConfig {
   artifacts?: SanitizedArtifactsConfig;
   subagent?: SanitizedSubagentConfig;
   session?: SanitizedSessionConfig;
+  lantai_auto_memory?: SanitizedLantaiAutoMemoryConfig;
   updatable_fields: string[];
 }
 
 export interface SanitizedSessionConfig {
   enable: boolean;
   storage_path: string;
+}
+
+export interface SanitizedLantaiAutoMemoryConfig {
+  auto_summary: boolean;
+  checkpoint_token_ratio: number;
+  embedding_model: string;
+  embedding_dimensions: number;
+  embedding_batch_size: number;
 }
 
 export interface SanitizedServerConfig {
@@ -150,6 +159,7 @@ export interface SanitizedChatConfig {
   url: string;
   model: string;
   api_key_configured: boolean;
+  model_context_size: number;
 }
 
 export interface SanitizedEmbeddingConfig {
@@ -244,10 +254,24 @@ export interface SanitizedSubagentConfig {
 // Config Update
 export interface ConfigUpdateRequest {
   server?: ServerConfigUpdate;
+  chat?: ChatConfigUpdate;
   embedding?: EmbeddingConfigUpdate;
   memory?: MemoryConfigUpdate;
   rag?: RagConfigUpdate;
   subagent?: SubagentConfigUpdate;
+  lantai_auto_memory?: LantaiAutoMemoryConfigUpdate;
+}
+
+export interface ChatConfigUpdate {
+  model_context_size?: number;
+}
+
+export interface LantaiAutoMemoryConfigUpdate {
+  auto_summary?: boolean;
+  checkpoint_token_ratio?: number;
+  embedding_model?: string;
+  embedding_dimensions?: number;
+  embedding_batch_size?: number;
 }
 
 export interface ServerConfigUpdate {
