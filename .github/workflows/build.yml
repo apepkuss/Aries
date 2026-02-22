@@ -37,7 +37,7 @@ jobs:
       - name: Install Rust-nightly
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-01-15
           components: rustfmt, clippy
 
       - name: Generate SQLx cache if missing
@@ -54,14 +54,14 @@ jobs:
 
       - name: Run clippy
         run: |
-          cargo +nightly clippy --version
-          cargo +nightly clippy --all-features -- -D warnings
+          cargo clippy --version
+          cargo clippy --all-features -- -D warnings
         env:
           SQLX_OFFLINE: true
 
       - name: Run fmt
         run: |
-          cargo +nightly fmt --all -- --check
+          cargo fmt --all -- --check
 
   build_macos:
     runs-on: ${{ matrix.os }}
