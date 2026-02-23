@@ -10,6 +10,7 @@
 
 pub mod constants;
 pub mod detector;
+pub mod dotenv;
 pub mod error;
 pub mod handlers;
 pub mod injector;

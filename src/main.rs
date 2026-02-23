@@ -595,6 +595,11 @@ async fn main() -> ServerResult<()> {
                 axum::routing::put(skills::handlers::set_skill_enabled_handler),
             )
             .route(
+                "/api/skills/{name}/env",
+                get(skills::handlers::get_skill_env_handler)
+                    .put(skills::handlers::update_skill_env_handler),
+            )
+            .route(
                 "/api/skills/{name}/reload",
                 post(skills::handlers::reload_skill_handler),
             )

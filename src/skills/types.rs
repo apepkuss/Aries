@@ -520,12 +520,13 @@ impl LoadedSkill {
     /// - SKILL_NAME: Name of the skill
     /// - SKILL_ASSETS: Path to the assets directory
     /// - SKILL_REFERENCES: Path to the references directory
+    /// - User-configured variables from `.env` file (higher priority)
     ///
     /// Additional variables can be merged with the returned map.
     pub fn build_script_env(&self) -> HashMap<String, String> {
         let mut env = HashMap::new();
 
-        // Core environment variables
+        // Core environment variables (lowest priority)
         env.insert(
             "SKILL_DIR".to_string(),
             self.skill_dir.to_string_lossy().to_string(),
@@ -541,6 +542,9 @@ impl LoadedSkill {
             "SKILL_REFERENCES".to_string(),
             self.references_dir().to_string_lossy().to_string(),
         );
+
+        // User-configured env vars from .env file (higher priority than system vars)
+        env.extend(super::dotenv::read_dotenv(&self.skill_dir));
 
         env
     }

@@ -84,6 +84,22 @@ pub struct InstallSkillRequest {
     /// Optional custom name for the skill directory
     #[serde(default)]
     pub name: Option<String>,
+    /// Optional initial environment variables for the skill
+    #[serde(default)]
+    pub env_vars: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Response for getting skill environment variables
+#[derive(Debug, Serialize)]
+pub struct SkillEnvResponse {
+    pub skill_name: String,
+    pub env_vars: std::collections::HashMap<String, String>,
+}
+
+/// Request for updating skill environment variables
+#[derive(Debug, Deserialize)]
+pub struct UpdateSkillEnvRequest {
+    pub env_vars: std::collections::HashMap<String, String>,
 }
 
 /// Response for skill installation
@@ -503,6 +519,20 @@ pub async fn install_skill_handler(
                 request_id
             );
 
+            // Write initial env vars if provided
+            if let Some(env_vars) = &request.env_vars
+                && !env_vars.is_empty()
+            {
+                let skill_dir = install_state.install_dir.join(&skill_name);
+                if let Err(e) = super::dotenv::write_dotenv(&skill_dir, env_vars) {
+                    dual_warn!(
+                        "Skill installed but failed to write .env: {} - request_id: {}",
+                        e,
+                        request_id
+                    );
+                }
+            }
+
             // Reload skills registry to pick up the new skill
             if let Ok(registry) = get_registry()
                 && let Err(e) = registry.reload_all().await
@@ -559,6 +589,140 @@ pub async fn install_skill_handler(
                 })
         }
     }
+}
+
+/// GET /api/skills/{name}/env - Get environment variables for a skill
+///
+/// Returns the user-configured environment variables from the skill's `.env` file.
+pub async fn get_skill_env_handler(
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> ServerResult<Response<Body>> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let registry = match get_registry() {
+        Ok(r) => r,
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Skills system is not enabled",
+            );
+        }
+    };
+
+    let skill = match registry.get(&name).await {
+        Some(s) => s,
+        None => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                &format!("Skill '{}' not found", name),
+            );
+        }
+    };
+
+    let env_vars = super::dotenv::read_dotenv(&skill.skill_dir);
+
+    let response = SkillEnvResponse {
+        skill_name: name,
+        env_vars,
+    };
+
+    let json_body = serde_json::to_string(&response).map_err(|e| {
+        let err_msg = format!("Failed to serialize response: {e}");
+        dual_error!("{err_msg} - request_id: {request_id}");
+        crate::error::ServerError::Operation(err_msg)
+    })?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(json_body))
+        .map_err(|e| {
+            let err_msg = format!("Failed to create response: {e}");
+            dual_error!("{err_msg} - request_id: {request_id}");
+            crate::error::ServerError::Operation(err_msg)
+        })
+}
+
+/// PUT /api/skills/{name}/env - Update environment variables for a skill
+///
+/// Writes the provided environment variables to the skill's `.env` file.
+pub async fn update_skill_env_handler(
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateSkillEnvRequest>,
+) -> ServerResult<Response<Body>> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let registry = match get_registry() {
+        Ok(r) => r,
+        Err(_) => {
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Skills system is not enabled",
+            );
+        }
+    };
+
+    let skill = match registry.get(&name).await {
+        Some(s) => s,
+        None => {
+            return error_response(
+                StatusCode::NOT_FOUND,
+                &format!("Skill '{}' not found", name),
+            );
+        }
+    };
+
+    if let Err(e) = super::dotenv::write_dotenv(&skill.skill_dir, &request.env_vars) {
+        dual_error!(
+            "Failed to write .env for skill '{}': {} - request_id: {}",
+            name,
+            e,
+            request_id
+        );
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("Failed to save environment variables: {}", e),
+        );
+    }
+
+    dual_info!(
+        "Updated env vars for skill '{}' ({} vars) - request_id: {}",
+        name,
+        request.env_vars.len(),
+        request_id
+    );
+
+    let response = SkillOperationResponse {
+        success: true,
+        message: format!("Environment variables updated for skill '{}'", name),
+        skill_name: Some(name),
+    };
+
+    let json_body = serde_json::to_string(&response).map_err(|e| {
+        let err_msg = format!("Failed to serialize response: {e}");
+        dual_error!("{err_msg} - request_id: {request_id}");
+        crate::error::ServerError::Operation(err_msg)
+    })?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(json_body))
+        .map_err(|e| {
+            let err_msg = format!("Failed to create response: {e}");
+            dual_error!("{err_msg} - request_id: {request_id}");
+            crate::error::ServerError::Operation(err_msg)
+        })
 }
 
 #[cfg(test)]
