@@ -1,18 +1,24 @@
 import { create } from 'zustand';
-import { getSkills, reloadSkills } from '@/api/skills';
+import { getSkills, reloadSkills, installSkill as installSkillApi } from '@/api/skills';
 import type { SkillSummary } from '@/api/types';
 
 interface SkillsState {
   skills: SkillSummary[];
   isLoading: boolean;
   error: string | null;
+  isInstalling: boolean;
+  installError: string | null;
   fetchSkills: () => Promise<void>;
+  installSkill: (url: string, name?: string) => Promise<boolean>;
+  clearInstallError: () => void;
 }
 
 export const useSkillsStore = create<SkillsState>((set, get) => ({
   skills: [],
   isLoading: false,
   error: null,
+  isInstalling: false,
+  installError: null,
 
   fetchSkills: async () => {
     if (get().isLoading) return;
@@ -27,4 +33,25 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       set({ skills: [], isLoading: false, error: null });
     }
   },
+
+  installSkill: async (url: string, name?: string) => {
+    set({ isInstalling: true, installError: null });
+    try {
+      const response = await installSkillApi(url, name);
+      if (response.success) {
+        await get().fetchSkills();
+        set({ isInstalling: false });
+        return true;
+      } else {
+        set({ isInstalling: false, installError: response.message });
+        return false;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Installation failed';
+      set({ isInstalling: false, installError: message });
+      return false;
+    }
+  },
+
+  clearInstallError: () => set({ installError: null }),
 }));

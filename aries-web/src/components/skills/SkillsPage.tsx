@@ -1,17 +1,47 @@
-import { useEffect } from 'react';
-import { Blocks, Wrench, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Blocks, Wrench, RefreshCw, Download, X } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useSkillsStore } from '@/stores';
 import type { SkillSummary } from '@/api/types';
 
 export function SkillsPage() {
-  const { skills, isLoading, fetchSkills } = useSkillsStore();
+  const {
+    skills,
+    isLoading,
+    isInstalling,
+    installError,
+    fetchSkills,
+    installSkill,
+    clearInstallError,
+  } = useSkillsStore();
+
+  const [showInstallForm, setShowInstallForm] = useState(false);
+  const [installUrl, setInstallUrl] = useState('');
+  const [installName, setInstallName] = useState('');
 
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
+
+  const handleInstall = async () => {
+    if (!installUrl.trim()) return;
+    const success = await installSkill(installUrl.trim(), installName.trim() || undefined);
+    if (success) {
+      setShowInstallForm(false);
+      setInstallUrl('');
+      setInstallName('');
+    }
+  };
+
+  const handleCancelInstall = () => {
+    setShowInstallForm(false);
+    setInstallUrl('');
+    setInstallName('');
+    clearInstallError();
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -24,16 +54,89 @@ export function SkillsPage() {
               Give Aries superpowers.
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchSkills}
-            disabled={isLoading}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
-            刷新
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (showInstallForm) {
+                  handleCancelInstall();
+                } else {
+                  setShowInstallForm(true);
+                }
+              }}
+              disabled={isInstalling}
+            >
+              {showInstallForm ? (
+                <>
+                  <X className="h-3.5 w-3.5 mr-1.5" />
+                  取消
+                </>
+              ) : (
+                <>
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                  安装
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchSkills}
+              disabled={isLoading}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
+              刷新
+            </Button>
+          </div>
         </div>
+
+        {/* Install Form */}
+        {showInstallForm && (
+          <div className="mt-4 p-4 rounded-lg border border-border bg-muted/30">
+            <div className="flex flex-col gap-3">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://example.com/skill.tar.gz"
+                  value={installUrl}
+                  onChange={(e) => setInstallUrl(e.target.value)}
+                  disabled={isInstalling}
+                  className="flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleInstall();
+                  }}
+                />
+                <Input
+                  placeholder="名称（可选）"
+                  value={installName}
+                  onChange={(e) => setInstallName(e.target.value)}
+                  disabled={isInstalling}
+                  className="w-40"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleInstall();
+                  }}
+                />
+                <Button
+                  size="sm"
+                  onClick={handleInstall}
+                  disabled={isInstalling || !installUrl.trim()}
+                >
+                  {isInstalling ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      安装中...
+                    </>
+                  ) : (
+                    '安装'
+                  )}
+                </Button>
+              </div>
+              {installError && (
+                <p className="text-xs text-destructive">{installError}</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}

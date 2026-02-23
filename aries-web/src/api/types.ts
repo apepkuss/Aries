@@ -463,6 +463,12 @@ export interface SkillListResponse {
   total: number;
 }
 
+export interface InstallSkillResponse {
+  success: boolean;
+  message: string;
+  skill_name?: string;
+}
+
 // ============================================================================
 // Artifacts API Types
 // ============================================================================

@@ -1,5 +1,5 @@
 import { apiClient, ApiError } from './client';
-import type { SkillListResponse } from './types';
+import type { SkillListResponse, InstallSkillResponse } from './types';
 
 /**
  * Get all loaded skills.
@@ -32,4 +32,20 @@ export async function reloadSkills(): Promise<void> {
     }
     throw err;
   }
+}
+
+/**
+ * Install a skill from a URL.
+ */
+export async function installSkill(
+  url: string,
+  name?: string,
+): Promise<InstallSkillResponse> {
+  const body: Record<string, string> = { url };
+  if (name) {
+    body.name = name;
+  }
+  return await apiClient
+    .post('api/skills/install', { json: body, timeout: 120000 })
+    .json<InstallSkillResponse>();
 }
