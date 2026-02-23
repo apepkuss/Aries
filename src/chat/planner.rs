@@ -391,6 +391,8 @@ pub struct TaskPlanner {
     skills_summaries: Vec<SkillSummary>,
     /// Extra rules appended to the system prompt (e.g. memory guidance).
     extra_rules: Vec<String>,
+    /// Recent conversation history for multi-turn context.
+    chat_history: Vec<PlannerMessage>,
 }
 
 impl TaskPlanner {
@@ -407,6 +409,7 @@ impl TaskPlanner {
             max_subtasks,
             skills_summaries: vec![],
             extra_rules: vec![],
+            chat_history: vec![],
         }
     }
 
@@ -419,6 +422,7 @@ impl TaskPlanner {
             max_subtasks,
             skills_summaries: vec![],
             extra_rules: vec![],
+            chat_history: vec![],
         }
     }
 
@@ -443,6 +447,12 @@ impl TaskPlanner {
         self
     }
 
+    /// Sets recent conversation history for multi-turn context.
+    pub fn with_chat_history(mut self, history: Vec<PlannerMessage>) -> Self {
+        self.chat_history = history;
+        self
+    }
+
     /// Generates a task plan or direct answer for the given user request.
     ///
     /// Returns `PlannerOutput::DirectAnswer` for simple queries that can be answered directly,
@@ -455,10 +465,14 @@ impl TaskPlanner {
         let system_prompt = self.build_system_prompt();
         let user_prompt = self.build_user_prompt(user_request);
 
-        let messages = vec![
-            PlannerMessage::system(system_prompt),
-            PlannerMessage::user(user_prompt),
-        ];
+        let mut messages = vec![PlannerMessage::system(system_prompt)];
+
+        // Inject recent conversation history for multi-turn context
+        if !self.chat_history.is_empty() {
+            messages.extend(self.chat_history.clone());
+        }
+
+        messages.push(PlannerMessage::user(user_prompt));
 
         // Get LLM response
         tracing::debug!(
@@ -528,10 +542,14 @@ impl TaskPlanner {
         let system_prompt = self.build_system_prompt();
         let user_prompt = self.build_user_prompt(user_request);
 
-        let messages = vec![
-            PlannerMessage::system(system_prompt),
-            PlannerMessage::user(user_prompt),
-        ];
+        let mut messages = vec![PlannerMessage::system(system_prompt)];
+
+        // Inject recent conversation history for multi-turn context
+        if !self.chat_history.is_empty() {
+            messages.extend(self.chat_history.clone());
+        }
+
+        messages.push(PlannerMessage::user(user_prompt));
 
         // Get LLM response
         tracing::debug!(

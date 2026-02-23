@@ -46,7 +46,7 @@ use crate::{
     AppState,
     chat::{
         gen_chat_id,
-        planner::{SubTask, SubTaskStatus, TaskPlan, TaskPlanner, ToolDescription},
+        planner::{PlannerMessage, SubTask, SubTaskStatus, TaskPlan, TaskPlanner, ToolDescription},
         trace::{
             PlanTrace, ReplanEvent, SubtaskReflectionSummary, SubtaskTrace, TokenUsage, TraceStatus,
         },
@@ -393,6 +393,51 @@ pub(crate) async fn chat(
         .clone()
         .unwrap_or_else(|| "default".to_string());
 
+    // Read recent conversation history from Session JSONL for multi-turn context
+    let chat_history: Vec<PlannerMessage> = if let Some(ref sid) = session_id
+        && let Some(ref writer) = state.session_writer
+    {
+        let uid = request.user.as_deref().unwrap_or("anonymous");
+        let reader = crate::session::reader::SessionReader::new(writer.base_dir());
+        match reader.read_session(uid, sid).await {
+            Ok(records) => {
+                let all_messages: Vec<PlannerMessage> = records
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        crate::session::types::SessionRecord::Message {
+                            role,
+                            content,
+                            privacy_mode,
+                            ..
+                        } => {
+                            if privacy_mode {
+                                return None;
+                            }
+                            match role.as_str() {
+                                "user" => Some(PlannerMessage::user(content)),
+                                "assistant" => Some(PlannerMessage::assistant(content)),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                // Skip the last message (current user message already written to JSONL)
+                // and take up to 10 recent messages
+                let len = all_messages.len();
+                if len > 1 {
+                    let start = (len - 1).saturating_sub(10);
+                    all_messages[start..len - 1].to_vec()
+                } else {
+                    vec![]
+                }
+            }
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     // Create task planner
     let mut planner = TaskPlanner::with_chat_llm(
         format!("{}/chat/completions", chat_server.url.trim_end_matches('/')),
@@ -401,12 +446,13 @@ pub(crate) async fn chat(
         max_plan_subtasks,
     )
     .with_tools(available_tools.clone())
-    .with_skills(skills_summaries.clone());
+    .with_skills(skills_summaries.clone())
+    .with_chat_history(chat_history);
 
     // Add memory guidance and context when memory tools are available
     if state.has_memory_writer() {
         let mut memory_rules = vec![
-            "You have access to a knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). If the user's request involves saving, remembering, or looking up information (preferences, decisions, facts, instructions), you MUST create a task plan with subtasks — do NOT use DirectAnswer for such requests.".to_string(),
+            "You have access to a personal knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). Use TaskPlan with memory tools ONLY when the user explicitly asks to save, remember, recall, or look up PERSONAL information (their preferences, decisions, notes, past instructions). For general knowledge questions (facts, geography, science, history, common knowledge, etc.), use DirectAnswer — do NOT route them through memory tools.".to_string(),
         ];
 
         // Inject recent memory context into planner so DirectAnswer can leverage past knowledge
@@ -1602,6 +1648,51 @@ async fn execute_chat_plan_realtime(
         .clone()
         .unwrap_or_else(|| "default".to_string());
 
+    // Read recent conversation history from Session JSONL for multi-turn context
+    let chat_history: Vec<PlannerMessage> = if let Some(ref sid) = session_id
+        && let Some(ref writer) = state.session_writer
+    {
+        let uid = request.user.as_deref().unwrap_or("anonymous");
+        let reader = crate::session::reader::SessionReader::new(writer.base_dir());
+        match reader.read_session(uid, sid).await {
+            Ok(records) => {
+                let all_messages: Vec<PlannerMessage> = records
+                    .into_iter()
+                    .filter_map(|r| match r {
+                        crate::session::types::SessionRecord::Message {
+                            role,
+                            content,
+                            privacy_mode,
+                            ..
+                        } => {
+                            if privacy_mode {
+                                return None;
+                            }
+                            match role.as_str() {
+                                "user" => Some(PlannerMessage::user(content)),
+                                "assistant" => Some(PlannerMessage::assistant(content)),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                // Skip the last message (current user message already written to JSONL)
+                // and take up to 10 recent messages
+                let len = all_messages.len();
+                if len > 1 {
+                    let start = (len - 1).saturating_sub(10);
+                    all_messages[start..len - 1].to_vec()
+                } else {
+                    vec![]
+                }
+            }
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
     // Create task planner
     let mut planner = TaskPlanner::with_chat_llm(
         format!("{}/chat/completions", chat_server.url.trim_end_matches('/')),
@@ -1610,12 +1701,13 @@ async fn execute_chat_plan_realtime(
         max_plan_subtasks,
     )
     .with_tools(available_tools.clone())
-    .with_skills(skills_summaries.clone());
+    .with_skills(skills_summaries.clone())
+    .with_chat_history(chat_history);
 
     // Add memory guidance and context when memory tools are available
     if state.has_memory_writer() {
         let mut memory_rules = vec![
-            "You have access to a knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). If the user's request involves saving, remembering, or looking up information (preferences, decisions, facts, instructions), you MUST create a task plan with subtasks — do NOT use DirectAnswer for such requests.".to_string(),
+            "You have access to a personal knowledge base with memory tools (lantai_write_memory, lantai_search, etc.). Use TaskPlan with memory tools ONLY when the user explicitly asks to save, remember, recall, or look up PERSONAL information (their preferences, decisions, notes, past instructions). For general knowledge questions (facts, geography, science, history, common knowledge, etc.), use DirectAnswer — do NOT route them through memory tools.".to_string(),
         ];
 
         // Inject recent memory context into planner so DirectAnswer can leverage past knowledge
@@ -4679,7 +4771,7 @@ async fn execute_lantai_search(
         })?;
 
     let output = if results.is_empty() {
-        "No results found.".to_string()
+        "No results found. IMPORTANT: This is a definitive result — the knowledge base does not contain relevant information. Do NOT retry the same search. Instead, try a different approach or provide your answer based on your own knowledge.".to_string()
     } else {
         let mut lines = Vec::new();
         for (i, r) in results.iter().enumerate() {
