@@ -638,7 +638,7 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
               <div className="text-[10px] font-bold text-muted-foreground mb-1.5 uppercase tracking-wider">
                 输入参数
               </div>
-              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 font-mono leading-tight">
+              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 overflow-auto font-mono leading-tight">
                 {JSON.stringify(toolCall.arguments, null, 2)}
               </pre>
             </div>
@@ -648,7 +648,7 @@ function ToolCallItem({ toolCall }: ToolCallItemProps) {
           {toolCall.result && toolCall.status === 'success' && (
             <div>
               <div className="text-[10px] font-bold text-muted-foreground mb-1.5 uppercase tracking-wider">输出结果</div>
-              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 font-mono leading-tight">
+              <pre className="text-xs bg-muted/50 p-2.5 rounded-lg border border-border/30 max-h-48 overflow-auto font-mono leading-tight">
                 {toolCall.result.length > 1000
                   ? toolCall.result.slice(0, 1000) + '...'
                   : toolCall.result}
