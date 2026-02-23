@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, execFileSync, ChildProcess } from 'child_process'
 import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -6,18 +6,54 @@ import net from 'net'
 import http from 'http'
 import kill from 'tree-kill'
 
-const DEFAULT_PORT = 3389
-
 export class BackendManager {
   private process: ChildProcess | null = null
   private _port: number = 0
+  private _appHomeDir: string | null = null
 
   get port(): number {
     return this._port
   }
 
   /**
+   * Query the backend binary for a value via a subcommand.
+   * Returns trimmed stdout, or null on failure.
+   */
+  private queryBackend(subcommand: string): string | null {
+    try {
+      const output = execFileSync(this.getBinaryPath(), [subcommand], {
+        timeout: 5000,
+        encoding: 'utf-8'
+      })
+      return output.trim()
+    } catch (err) {
+      console.error(`Failed to query backend '${subcommand}': ${err}`)
+      return null
+    }
+  }
+
+  /**
+   * Get the application home directory from the backend.
+   * Caches the result after first call.
+   */
+  private getAppHomeDir(): string {
+    if (this._appHomeDir) return this._appHomeDir
+
+    const result = this.queryBackend('home-dir')
+    if (result) {
+      this._appHomeDir = result
+      return result
+    }
+
+    // Fallback: derive from home directory (should rarely happen)
+    console.warn('Failed to get home-dir from backend, using fallback')
+    this._appHomeDir = path.join(app.getPath('home'), '.moss')
+    return this._appHomeDir
+  }
+
+  /**
    * Read the port from the config file.
+   * The config file is the single source of truth for port configuration.
    */
   private readPortFromConfig(configPath: string): number {
     try {
@@ -29,7 +65,8 @@ export class BackendManager {
     } catch {
       // Ignore read errors
     }
-    return DEFAULT_PORT
+    // Fallback: must match [server] port in config.toml
+    return 3389
   }
 
   /**
@@ -74,20 +111,19 @@ export class BackendManager {
    * Get the config file path. Copies default config on first run.
    */
   private getConfigPath(): string {
-    const homeDir = app.getPath('home')
-    const ariesDir = path.join(homeDir, '.aries')
-    const userConfigPath = path.join(ariesDir, 'config.toml')
+    const appDir = this.getAppHomeDir()
+    const userConfigPath = path.join(appDir, 'config.toml')
 
-    // Ensure ~/.aries/ directory structure exists
+    // Ensure app home directory structure exists
     for (const sub of ['artifacts', 'data', 'sessions', 'skills']) {
-      fs.mkdirSync(path.join(ariesDir, sub), { recursive: true })
+      fs.mkdirSync(path.join(appDir, sub), { recursive: true })
     }
 
     if (fs.existsSync(userConfigPath)) {
       return userConfigPath
     }
 
-    // Copy default config to ~/.aries/
+    // Copy default config to app home directory
     const defaultConfigPaths = app.isPackaged
       ? [path.join(process.resourcesPath, 'config.toml.example')]
       : [
@@ -97,7 +133,7 @@ export class BackendManager {
 
     for (const src of defaultConfigPaths) {
       if (fs.existsSync(src)) {
-        fs.mkdirSync(ariesDir, { recursive: true })
+        fs.mkdirSync(appDir, { recursive: true })
         fs.copyFileSync(src, userConfigPath)
         console.log(`Copied default config from ${src} to ${userConfigPath}`)
         return userConfigPath
@@ -117,8 +153,7 @@ export class BackendManager {
    * Get the config file path for display in error messages.
    */
   getConfigFilePath(): string {
-    const homeDir = app.getPath('home')
-    return path.join(homeDir, '.aries', 'config.toml')
+    return path.join(this.getAppHomeDir(), 'config.toml')
   }
 
   /**

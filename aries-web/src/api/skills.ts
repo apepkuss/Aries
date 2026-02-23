@@ -20,7 +20,7 @@ export async function getSkills(): Promise<SkillListResponse> {
 
 /**
  * Reload all skills from the skills directory.
- * Clears the skill cache and re-scans ~/.aries/skills for new/updated skills.
+ * Clears the skill cache and re-scans ~/.moss/skills for new/updated skills.
  * Returns empty result if skills system is not enabled (503).
  */
 export async function reloadSkills(): Promise<void> {
