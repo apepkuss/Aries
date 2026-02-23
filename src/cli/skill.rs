@@ -19,9 +19,14 @@ pub enum SkillCommand {
     /// Examples:
     ///   aries skill install skillsmp:code-review
     ///   aries skill install skillsmp:code-review@2.0.0
+    ///   aries skill install https://example.com/skill.tar.gz --name my-skill
     Install {
         /// Skill source (e.g., skillsmp:code-review, github:user/repo)
         source: String,
+
+        /// Skill name to use for the installed directory (overrides auto-detection)
+        #[arg(long, short = 'n')]
+        name: Option<String>,
 
         /// Installation directory (default: ~/.aries/skills/)
         #[arg(long, short = 'd')]
@@ -119,9 +124,10 @@ impl SkillCommand {
         match self {
             SkillCommand::Install {
                 source,
+                name,
                 dir,
                 enable,
-            } => install_skill(&source, dir.as_ref(), enable, config_path).await,
+            } => install_skill(&source, name.as_deref(), dir.as_ref(), enable, config_path).await,
             SkillCommand::Search {
                 query,
                 category,
@@ -145,6 +151,7 @@ impl SkillCommand {
 /// Install a skill from a source
 async fn install_skill(
     source: &str,
+    name: Option<&str>,
     dir: Option<&PathBuf>,
     enable: bool,
     config_path: &PathBuf,
@@ -176,7 +183,7 @@ async fn install_skill(
 
     // Create installer and install
     let installer = SkillInstaller::new(install_dir, config.skill.as_ref());
-    let skill_name = installer.install(&skill_source).await?;
+    let skill_name = installer.install(&skill_source, name).await?;
 
     println!("\n✓ Skill '{}' installed successfully!", skill_name);
 
@@ -232,7 +239,7 @@ async fn list_remote_skills(
 
     for skill in skills {
         let desc = if skill.description.len() > 47 {
-            format!("{}...", &skill.description[..47])
+            format!("{}...", crate::utils::truncate_str(&skill.description, 47))
         } else {
             skill.description.clone()
         };
@@ -274,7 +281,7 @@ async fn list_local_skills(config: &crate::config::Config) -> ServerResult<()> {
 
     for (name, description) in &skills {
         let desc = if description.len() > 47 {
-            format!("{}...", &description[..47])
+            format!("{}...", crate::utils::truncate_str(description, 47))
         } else {
             description.clone()
         };
@@ -560,7 +567,7 @@ async fn update_skills(name: Option<&str>, all: bool, config_path: &PathBuf) -> 
 
             // Reinstall from source
             match crate::cli::skill::installer::SkillSource::parse(source) {
-                Ok(skill_source) => match installer.install(&skill_source).await {
+                Ok(skill_source) => match installer.install(&skill_source, None).await {
                     Ok(new_name) => {
                         println!("  Updated '{}' successfully.", new_name);
                         updated_count += 1;
@@ -619,7 +626,7 @@ async fn check_outdated_skills(config_path: &PathBuf) -> ServerResult<()> {
         let version = lock.version.as_deref().unwrap_or("unknown");
         let source = lock.source.as_deref().unwrap_or("unknown");
         let source_display = if source.len() > 37 {
-            format!("{}...", &source[..37])
+            format!("{}...", crate::utils::truncate_str(source, 37))
         } else {
             source.to_string()
         };

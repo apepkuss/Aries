@@ -1,5 +1,18 @@
 use once_cell::sync::OnceCell;
 
+/// Truncate a string at the given byte limit, ensuring the cut falls on a valid UTF-8 char boundary.
+/// Returns the original string if it is shorter than `max_bytes`.
+pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 // Global log configuration
 pub static LOG_DESTINATION: OnceCell<String> = OnceCell::new();
 

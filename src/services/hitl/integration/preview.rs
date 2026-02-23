@@ -128,7 +128,7 @@ impl PreviewBuilder {
             .and_then(|v| v.as_str())
             .map(|s| {
                 if s.len() > 200 {
-                    format!("{}... (截断)", &s[..200])
+                    format!("{}... (截断)", crate::utils::truncate_str(s, 200))
                 } else {
                     s.to_string()
                 }
@@ -331,7 +331,10 @@ impl PreviewBuilder {
                 .map(|(k, v)| {
                     let value = if let Some(s) = v.as_str() {
                         if s.len() > 200 {
-                            serde_json::json!(format!("{}... (truncated)", &s[..200]))
+                            serde_json::json!(format!(
+                                "{}... (truncated)",
+                                crate::utils::truncate_str(s, 200)
+                            ))
                         } else {
                             v.clone()
                         }

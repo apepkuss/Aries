@@ -79,7 +79,7 @@ pub struct SubAgentSummary {
 impl From<&SubAgent> for SubAgentSummary {
     fn from(agent: &SubAgent) -> Self {
         let task = if agent.task.len() > 100 {
-            format!("{}...", &agent.task[..100])
+            format!("{}...", crate::utils::truncate_str(&agent.task, 100))
         } else {
             agent.task.clone()
         };

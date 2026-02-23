@@ -30,6 +30,7 @@ config = { version = "^0.15", features = ["toml"] }
 dashmap = "6.1.0"
 dirs = "6.0.0"
 dotenv = "0.15"
+flate2 = "1.1"
 endpoints = { version = "0.38.0", features = ["whisper"] }
 futures-util = "0.3"
 hex = "0.4.3"
@@ -57,6 +58,7 @@ serde_yaml = "0.9"
 sha2 = "0.10.9"
 shellexpand = "3.1"
 sqlx = { version = "0.8.6", features = ["sqlite", "chrono", "runtime-tokio"] }
+tar = "0.4"
 tempfile = "3.10"
 thiserror = "2.0"
 tokio = { version = "1.0", features = ["full"] }

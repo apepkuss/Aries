@@ -95,7 +95,11 @@ impl SkillInstaller {
     /// Install a skill from the given source
     ///
     /// Returns the installed skill name
-    pub async fn install(&self, source: &SkillSource) -> ServerResult<String> {
+    pub async fn install(
+        &self,
+        source: &SkillSource,
+        name_override: Option<&str>,
+    ) -> ServerResult<String> {
         use super::lockfile::SkillLockFile;
 
         // Ensure installation directory exists
@@ -115,24 +119,26 @@ impl SkillInstaller {
                 (skill_name, version.clone())
             }
             SkillSource::Url(url) => {
-                let skill_name = self.install_from_url(url).await?;
+                let skill_name = self.install_from_url(url, name_override).await?;
                 (skill_name, None)
             }
         };
 
-        // Create skill.lock file for version tracking
-        let lock_file = SkillLockFile::new(skill_name.clone(), source.display_name());
-        let lock_file = if let Some(ver) = version {
-            lock_file.with_version(ver)
-        } else {
-            lock_file
-        };
+        // Create skill.lock file for version tracking (marketplace installs only)
+        if let SkillSource::Skillsmp { .. } = source {
+            let lock_file = SkillLockFile::new(skill_name.clone(), source.display_name());
+            let lock_file = if let Some(ver) = version {
+                lock_file.with_version(ver)
+            } else {
+                lock_file
+            };
 
-        let lock_path = self.install_dir.join(&skill_name).join("skill.lock");
-        if let Err(e) = lock_file.save(&lock_path).await {
-            println!("  Warning: Failed to create skill.lock: {}", e);
-        } else {
-            println!("  Created skill.lock for version tracking");
+            let lock_path = self.install_dir.join(&skill_name).join("skill.lock");
+            if let Err(e) = lock_file.save(&lock_path).await {
+                println!("  Warning: Failed to create skill.lock: {}", e);
+            } else {
+                println!("  Created skill.lock for version tracking");
+            }
         }
 
         Ok(skill_name)
@@ -167,7 +173,11 @@ impl SkillInstaller {
     }
 
     /// Install a skill from a direct URL
-    async fn install_from_url(&self, url: &str) -> ServerResult<String> {
+    async fn install_from_url(
+        &self,
+        url: &str,
+        name_override: Option<&str>,
+    ) -> ServerResult<String> {
         println!("  Downloading from URL...");
 
         let response = reqwest::get(url)
@@ -188,16 +198,20 @@ impl SkillInstaller {
 
         println!("  Downloaded {} bytes", package_data.len());
 
-        // Try to extract skill name from URL
-        let name_hint = url
-            .rsplit('/')
-            .next()
-            .and_then(|s| s.strip_suffix(".zip"))
-            .unwrap_or("downloaded-skill");
-
-        let skill_name = self.extract_package(&package_data, name_hint)?;
-
-        Ok(skill_name)
+        // Detect archive format from URL and extract accordingly
+        let filename = url.rsplit('/').next().unwrap_or("");
+        if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
+            let name_hint = filename
+                .strip_suffix(".tar.gz")
+                .or_else(|| filename.strip_suffix(".tgz"))
+                .unwrap_or("downloaded-skill");
+            let skill_name = self.extract_tar_gz(&package_data, name_hint, name_override)?;
+            Ok(skill_name)
+        } else {
+            let name_hint = filename.strip_suffix(".zip").unwrap_or("downloaded-skill");
+            let skill_name = self.extract_package(&package_data, name_hint)?;
+            Ok(skill_name)
+        }
     }
 
     /// Extract a skill package (zip format) to the installation directory
@@ -337,6 +351,166 @@ impl SkillInstaller {
         println!("  Extracted to: {}", target_dir.display());
 
         Ok(final_name)
+    }
+
+    /// Extract a skill package (tar.gz format) to the installation directory
+    fn extract_tar_gz(
+        &self,
+        data: &[u8],
+        name_hint: &str,
+        name_override: Option<&str>,
+    ) -> ServerResult<String> {
+        use std::io::Cursor;
+
+        println!("  Extracting tar.gz skill package...");
+
+        let reader = Cursor::new(data);
+        let gz = flate2::read::GzDecoder::new(reader);
+        let mut archive = tar::Archive::new(gz);
+
+        // Collect entries for two-pass processing
+        let tmp_dir = tempfile::tempdir().map_err(|e| {
+            ServerError::Operation(format!("Failed to create temp directory: {}", e))
+        })?;
+
+        // Extract to temp directory first
+        archive.unpack(tmp_dir.path()).map_err(|e| {
+            ServerError::Operation(format!("Invalid skill package (not a valid tar.gz): {}", e))
+        })?;
+
+        // Find SKILL.md and determine skill name + root prefix
+        let mut skill_name: Option<String> = None;
+        let mut root_dir: Option<PathBuf> = None;
+
+        // Check if there's a single root directory wrapping everything
+        let top_entries: Vec<_> = std::fs::read_dir(tmp_dir.path())
+            .map_err(|e| {
+                ServerError::Operation(format!("Failed to read extracted contents: {}", e))
+            })?
+            .filter_map(|e| e.ok())
+            .collect();
+
+        let content_root = if top_entries.len() == 1 && top_entries[0].path().is_dir() {
+            // Single root directory — use it as the content root
+            root_dir = Some(top_entries[0].path());
+            top_entries[0].path()
+        } else {
+            // Flat structure — content root is the temp directory itself
+            tmp_dir.path().to_path_buf()
+        };
+
+        // Look for SKILL.md to determine skill name
+        if content_root.join("SKILL.md").exists() {
+            // SKILL.md at the content root — use the root directory name if available
+            if let Some(ref rd) = root_dir
+                && let Some(name) = rd.file_name().and_then(|n| n.to_str())
+            {
+                skill_name = Some(name.to_string());
+            }
+        } else {
+            // Search one level deeper for SKILL.md
+            if let Ok(entries) = std::fs::read_dir(&content_root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir()
+                        && path.join("SKILL.md").exists()
+                        && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    {
+                        skill_name = Some(name.to_string());
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Priority: user --name > auto-detected from archive > filename hint
+        let final_name = if let Some(name) = name_override {
+            name.to_string()
+        } else {
+            skill_name.unwrap_or_else(|| name_hint.to_string())
+        };
+        let target_dir = self.install_dir.join(&final_name);
+
+        // Check if skill already exists
+        if target_dir.exists() {
+            return Err(ServerError::Operation(format!(
+                "Skill '{}' already exists at '{}'. Remove it first to reinstall.",
+                final_name,
+                target_dir.display()
+            )));
+        }
+
+        // Move content to target directory
+        Self::copy_dir_recursive(&content_root, &target_dir)?;
+
+        // Set executable permissions on files in scripts/ directory (Unix)
+        #[cfg(unix)]
+        Self::set_scripts_executable(&target_dir);
+
+        println!("  Extracted to: {}", target_dir.display());
+
+        Ok(final_name)
+    }
+
+    /// Recursively copy a directory
+    fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> ServerResult<()> {
+        std::fs::create_dir_all(dst).map_err(|e| {
+            ServerError::Operation(format!(
+                "Failed to create directory '{}': {}",
+                dst.display(),
+                e
+            ))
+        })?;
+
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| ServerError::Operation(format!("Failed to read directory: {}", e)))?
+        {
+            let entry = entry.map_err(|e| {
+                ServerError::Operation(format!("Failed to read directory entry: {}", e))
+            })?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+
+            if src_path.is_dir() {
+                Self::copy_dir_recursive(&src_path, &dst_path)?;
+            } else {
+                std::fs::copy(&src_path, &dst_path).map_err(|e| {
+                    ServerError::Operation(format!(
+                        "Failed to copy '{}' to '{}': {}",
+                        src_path.display(),
+                        dst_path.display(),
+                        e
+                    ))
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Set executable permissions on files in the scripts/ directory
+    #[cfg(unix)]
+    fn set_scripts_executable(skill_dir: &std::path::Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scripts_dir = skill_dir.join("scripts");
+        if !scripts_dir.exists() {
+            return;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(&scripts_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && let Ok(metadata) = path.metadata()
+                {
+                    let mut perms = metadata.permissions();
+                    let mode = perms.mode() | 0o111;
+                    perms.set_mode(mode);
+                    let _ = std::fs::set_permissions(&path, perms);
+                }
+            }
+        }
     }
 }
 

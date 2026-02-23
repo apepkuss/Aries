@@ -561,7 +561,7 @@ impl ArtifactCreatedEvent {
         url: impl Into<String>,
     ) -> Self {
         let preview = if content.len() > 200 {
-            format!("{}...", &content[..200])
+            format!("{}...", crate::utils::truncate_str(content, 200))
         } else {
             content.to_string()
         };
@@ -601,7 +601,7 @@ impl ArtifactUpdatedEvent {
     /// Creates a new ArtifactUpdatedEvent.
     pub fn new(artifact_id: impl Into<String>, content: &str) -> Self {
         let preview = if content.len() > 200 {
-            format!("{}...", &content[..200])
+            format!("{}...", crate::utils::truncate_str(content, 200))
         } else {
             content.to_string()
         };

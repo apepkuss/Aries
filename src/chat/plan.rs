@@ -2935,7 +2935,11 @@ async fn detect_and_confirm_privacy(
 
     // 8. Create summarized/masked query for display
     let query_summary = if message.len() > 100 {
-        format!("{}...", &message[..100])
+        let mut end = 100;
+        while !message.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &message[..end])
     } else {
         message.to_string()
     };
@@ -3457,7 +3461,11 @@ async fn execute_subtask_with_react(
         let chat_completion: ChatCompletionObject =
             serde_json::from_str(&response_text).map_err(|e| {
                 let preview = if response_text.len() > 500 {
-                    &response_text[..500]
+                    let mut end = 500;
+                    while !response_text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    &response_text[..end]
                 } else {
                     &response_text
                 };
@@ -5110,15 +5118,16 @@ async fn trigger_direct_answer_memory(
     };
 
     // Build a simple conversation snippet for the checkpoint
-    let snippet = format!(
-        "User: {}\nAssistant: {}",
-        user_message,
-        if assistant_response.len() > 2000 {
-            &assistant_response[..2000]
-        } else {
-            assistant_response
+    let truncated = if assistant_response.len() > 2000 {
+        let mut end = 2000;
+        while !assistant_response.is_char_boundary(end) {
+            end -= 1;
         }
-    );
+        &assistant_response[..end]
+    } else {
+        assistant_response
+    };
+    let snippet = format!("User: {}\nAssistant: {}", user_message, truncated);
 
     if let Err(e) = trigger_memory_checkpoint(writer, chat_url, api_key, model, &snippet).await {
         tracing::warn!("Failed to record direct answer to memory: {}", e);
@@ -5154,14 +5163,19 @@ async fn trigger_plan_memory(
     };
 
     // Build a conversation snippet from user request + final synthesized response
+    let truncated_response = if final_response.len() > 2000 {
+        // Find a valid UTF-8 char boundary at or before byte 2000
+        let mut end = 2000;
+        while !final_response.is_char_boundary(end) {
+            end -= 1;
+        }
+        &final_response[..end]
+    } else {
+        final_response
+    };
     let snippet = format!(
         "User: {}\nAssistant (task plan result): {}",
-        user_message,
-        if final_response.len() > 2000 {
-            &final_response[..2000]
-        } else {
-            final_response
-        }
+        user_message, truncated_response
     );
 
     if let Err(e) = trigger_memory_checkpoint(writer, chat_url, api_key, model, &snippet).await {

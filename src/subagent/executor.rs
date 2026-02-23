@@ -289,7 +289,7 @@ impl SubAgentExecutor {
                 tool_calls.len(),
                 content.is_some(),
                 content
-                    .map(|c| if c.len() > 100 { &c[..100] } else { c })
+                    .map(|c| crate::utils::truncate_str(c, 100))
                     .unwrap_or("(none)")
             );
 
@@ -639,11 +639,7 @@ impl SubAgentExecutor {
             .await
             .map_err(|e| ServerError::Operation(format!("Failed to read response body: {e}")))?;
         serde_json::from_str(&response_text).map_err(|e| {
-            let preview = if response_text.len() > 500 {
-                &response_text[..500]
-            } else {
-                &response_text
-            };
+            let preview = crate::utils::truncate_str(&response_text, 500);
             tracing::error!(
                 "Failed to parse LLM response: {}. Body preview: {}",
                 e,
