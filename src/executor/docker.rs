@@ -135,7 +135,7 @@ fn default_network_mode() -> String {
 }
 
 fn default_container_prefix() -> String {
-    "aries-exec".to_string()
+    "moss-exec".to_string()
 }
 
 impl Default for DockerConfig {

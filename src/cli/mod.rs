@@ -53,4 +53,7 @@ pub enum Command {
     /// Manage skills (install, list, info)
     #[command(subcommand)]
     Skill(skill::SkillCommand),
+
+    /// Print the application home directory path (e.g. /home/user/.moss)
+    HomeDir,
 }

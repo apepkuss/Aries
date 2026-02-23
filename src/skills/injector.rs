@@ -1357,7 +1357,7 @@ fn main() {
         let mut skill = create_test_skill("moss-weather", "Content");
         skill.scripts = vec![ScriptInfo {
             name: "moss-weather".to_string(),
-            path: PathBuf::from("/Users/sam/.aries/skills/moss-weather/scripts/moss-weather"),
+            path: PathBuf::from("/skills/moss-weather/scripts/moss-weather"),
             executable: true,
         }];
 
@@ -1368,7 +1368,7 @@ fn main() {
         // Native binaries should NOT use internal__skill_run_script
         assert!(!result.contains("internal__skill_run_script"));
         // Should show the absolute path for Bash tool invocation
-        assert!(result.contains("/Users/sam/.aries/skills/moss-weather/scripts/moss-weather"));
+        assert!(result.contains("/skills/moss-weather/scripts/moss-weather"));
         // Should instruct to use Bash tool
         assert!(result.contains("Bash"));
     }

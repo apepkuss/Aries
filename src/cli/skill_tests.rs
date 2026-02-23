@@ -131,10 +131,12 @@ fn test_tcl_003_skill_install_from_skillsmp() {
     match cli.command {
         Some(Command::Skill(SkillCommand::Install {
             source,
+            name,
             dir,
             enable,
         })) => {
             assert_eq!(source, "skillsmp:code-review");
+            assert!(name.is_none(), "No custom name by default");
             assert!(dir.is_none(), "No custom directory by default");
             assert!(!enable, "Not enabled by default");
         }

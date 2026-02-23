@@ -9,7 +9,21 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 
-use crate::error::ServerResult;
+use crate::{config::app_home_dir, error::ServerResult};
+
+/// Returns the default skills directory: ~/.moss/skills
+fn default_skills_dir() -> PathBuf {
+    app_home_dir().join("skills")
+}
+
+/// Resolve the skills directory from config, falling back to the default.
+fn resolve_skills_dir(config: &crate::config::Config) -> PathBuf {
+    if let Some(skill_config) = &config.skill {
+        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
+    } else {
+        default_skills_dir()
+    }
+}
 
 /// Skill management subcommands
 #[derive(Debug, Subcommand)]
@@ -28,7 +42,7 @@ pub enum SkillCommand {
         #[arg(long, short = 'n')]
         name: Option<String>,
 
-        /// Installation directory (default: ~/.aries/skills/)
+        /// Installation directory (default: ~/.moss/skills/)
         #[arg(long, short = 'd')]
         dir: Option<PathBuf>,
 
@@ -167,12 +181,8 @@ async fn install_skill(
     // Determine installation directory
     let install_dir = if let Some(d) = dir {
         d.clone()
-    } else if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
     } else {
-        // Default to ~/.aries/skills/
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
+        resolve_skills_dir(&config)
     };
 
     // Parse the source
@@ -253,12 +263,7 @@ async fn list_remote_skills(
 
 /// List locally installed skills
 async fn list_local_skills(config: &crate::config::Config) -> ServerResult<()> {
-    let skills_dir = if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
-    };
+    let skills_dir = resolve_skills_dir(config);
 
     if !skills_dir.exists() {
         println!("No skills directory found at: {}", skills_dir.display());
@@ -377,12 +382,7 @@ async fn show_local_skill_info(
 ) -> ServerResult<()> {
     use crate::skills::SkillParser;
 
-    let skills_dir = if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
-    };
+    let skills_dir = resolve_skills_dir(config);
 
     let skill_path = skills_dir.join(skill_name);
     if !skill_path.exists() {
@@ -498,12 +498,7 @@ async fn update_skills(name: Option<&str>, all: bool, config_path: &PathBuf) -> 
 
     let config = Config::load(config_path).await?;
 
-    let skills_dir = if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
-    };
+    let skills_dir = resolve_skills_dir(&config);
 
     if !skills_dir.exists() {
         println!("No skills directory found at: {}", skills_dir.display());
@@ -596,12 +591,7 @@ async fn check_outdated_skills(config_path: &PathBuf) -> ServerResult<()> {
 
     let config = Config::load(config_path).await?;
 
-    let skills_dir = if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
-    };
+    let skills_dir = resolve_skills_dir(&config);
 
     if !skills_dir.exists() {
         println!("No skills directory found at: {}", skills_dir.display());
@@ -677,12 +667,7 @@ async fn uninstall_skill(
 
     let config = Config::load(config_path).await?;
 
-    let skills_dir = if let Some(skill_config) = &config.skill {
-        PathBuf::from(shellexpand::tilde(&skill_config.directory()).to_string())
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(format!("{}/.aries/skills", home))
-    };
+    let skills_dir = resolve_skills_dir(&config);
 
     let skill_path = skills_dir.join(name);
 

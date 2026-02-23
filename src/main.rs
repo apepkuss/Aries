@@ -49,6 +49,10 @@ async fn main() -> ServerResult<()> {
     if let Some(command) = cli.command {
         return match command {
             Command::Skill(skill_cmd) => skill_cmd.execute(&cli.config).await,
+            Command::HomeDir => {
+                println!("{}", config::app_home_dir().display());
+                return Ok(());
+            }
         };
     }
 

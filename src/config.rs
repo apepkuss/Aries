@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, net::SocketAddr, sync::Arc};
+use std::{collections::HashMap, env, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use axum::{
     Router,
@@ -33,6 +33,24 @@ use crate::{
     mcp::{MCP_SERVICES, McpService},
     mcp_stdio::{self, StdioConfig, StdioProcessConfig},
 };
+
+/// Application home directory name (under user's home directory)
+pub const APP_HOME_DIR: &str = ".moss";
+
+/// Default server port
+pub const DEFAULT_PORT: u16 = 3389;
+
+/// Returns the application home directory path, e.g. ~/.moss
+pub fn app_home_dir() -> PathBuf {
+    dirs::home_dir()
+        .expect("Failed to get home directory")
+        .join(APP_HOME_DIR)
+}
+
+/// Returns a tilde-prefixed path under the app home directory, e.g. ~/.moss/skills
+pub fn app_home_path(sub: &str) -> String {
+    format!("~/{APP_HOME_DIR}/{sub}")
+}
 
 const MCP_REDIRECT_URI: &str = "http://localhost:8080/callback";
 const CALLBACK_PORT: u16 = 8080;
@@ -163,7 +181,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
-                port: 3389,
+                port: DEFAULT_PORT,
                 max_tools_per_iteration: default_max_tools_per_iteration(),
                 tool_call_max_retries: default_tool_call_max_retries(),
                 tool_call_retry_delay_ms: default_tool_call_retry_delay_ms(),
@@ -1514,12 +1532,12 @@ impl SkillConfig {
     /// Get the primary skills directory (first in the list)
     ///
     /// Returns the first directory from `directories`, expanding `~`.
-    /// Falls back to "~/.aries/skills" if empty.
+    /// Falls back to the default app home skills directory if empty.
     pub fn directory(&self) -> String {
         self.directories
             .first()
             .cloned()
-            .unwrap_or_else(|| "~/.aries/skills".to_string())
+            .unwrap_or_else(|| app_home_path("skills"))
     }
 }
 
@@ -1592,7 +1610,7 @@ fn default_skills_enabled() -> bool {
 }
 
 fn default_skills_directories() -> Vec<String> {
-    vec![".skills".to_string(), "~/.aries/skills".to_string()]
+    vec![app_home_path("skills")]
 }
 
 fn default_max_reference_size() -> usize {
@@ -1808,7 +1826,7 @@ impl Default for ConfigApiSettings {
 /// ```toml
 /// [session]
 /// enable = true
-/// storage_path = "~/.aries/history"
+/// storage_path = "~/.moss/sessions"
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SessionConfig {
@@ -1828,7 +1846,7 @@ fn default_session_enabled() -> bool {
 }
 
 fn default_session_storage_path() -> String {
-    "~/.aries/history".to_string()
+    app_home_path("sessions")
 }
 
 impl Default for SessionConfig {

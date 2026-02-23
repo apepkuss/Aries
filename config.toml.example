@@ -2,14 +2,14 @@
 # SECTION 1: CORE SERVER CONFIGURATION
 # ============================================================================
 # This section contains the fundamental server settings and memory management
-# configuration that define how Aries operates.
+# configuration that define how Moss operates.
 
 [server]
 host = "127.0.0.1"   # The host to listen on.
 port = 3389          # The port to listen on.
 
 # Plan mode configuration
-# Aries operates exclusively in Plan mode, which decomposes complex user requests
+# Moss operates exclusively in Plan mode, which decomposes complex user requests
 # into structured subtasks with dependencies, then executes them in topological
 # order using React loops for each subtask.
 #
@@ -33,7 +33,7 @@ port = 3389          # The port to listen on.
 # # Memory configuration
 # [memory]
 # enable = false                                    # Enable/disable memory functionality
-# database_path = "~/.aries/data/memory.db"                 # Path to SQLite database file or URL
+# database_path = "~/.moss/data/memory.db"                 # Path to SQLite database file or URL
 #                                                  # Examples:
 #                                                  #   - Simple path: "data/memory.db", "/tmp/app.db"
 #                                                  #   - SQLite URL: "sqlite:data/memory.db?mode=rwc"
@@ -68,7 +68,7 @@ enabled = true                              # Enable Skills system
 directories = [                             # Directories to scan for Skills
     # "/path/to/custom/skills",   # Your custom skills directory
     # ".skills",                              # Project-local skills
-    "~/.aries/skills"                 # User-level skills
+    "~/.moss/skills"                 # User-level skills
 ]
 
 # Skills API configuration for authentication and rate limiting
@@ -79,11 +79,11 @@ directories = [                             # Directories to scan for Skills
 # rate_limit_window_secs = 60     # Rate limit window in seconds (default: 60)
 
 # Skills marketplace configuration (skillsmp.com)
-# Use: aries skill install skillsmp:<name>
+# Use: moss skill install skillsmp:<name>
 [skill.market]
 # url = "https://skillsmp.com/api/v1"       # API URL (default)
 # api_key = "your-api-key"                  # API key (or set SKILLSMP_API_KEY env var)
-# cache_dir = "~/.aries/cache/skills" # Download cache directory (optional)
+# cache_dir = "~/.moss/cache/skills" # Download cache directory (optional)
 
 # Script execution configuration for Skills
 [skill.execution]
@@ -117,7 +117,7 @@ default_image = "alpine:latest"    # Default image for unknown script types
 auto_remove = true                 # Auto-remove containers after execution
 read_only = true                   # Use read-only root filesystem for security
 network_mode = "none"              # Network mode: "none" for isolation (recommended)
-container_prefix = "aries-exec"  # Container name prefix
+container_prefix = "moss-exec"  # Container name prefix
 auto_pull = true                   # Auto-pull images if not present locally
 
 # File access strategy for data files referenced in script arguments
@@ -130,12 +130,12 @@ file_access_mode = "auto"
 # Format: "/host/path" or "/host/path:/container/path"
 # Files in these directories can be accessed directly via absolute paths
 data_dirs = [
-    "~/aries/skills",  # Skills directory (for accessing example files)
+    "~/.moss/skills",  # Skills directory (for accessing example files)
     # "/path/to/data:/data",               # Custom data directory
 ]
 
 # Temporary directory for file copy mode (optional, defaults to system temp)
-# temp_dir = "/tmp/aries"
+# temp_dir = "/tmp/moss"
 
 # Whether to copy output files back to original location after execution (default: true)
 # Only applies when using file copy strategy
@@ -373,7 +373,7 @@ confirmation_threshold = "low"     # Minimum risk level that requires confirmati
 
 [session]
 enable = true                         # Enable session history recording (default: true)
-storage_path = "~/.aries/sessions"     # Directory for storing session JSONL files
+storage_path = "~/.moss/sessions"     # Directory for storing session JSONL files
                                       # Supports ~ for home directory expansion
 
 
@@ -390,8 +390,8 @@ storage_path = "~/.aries/sessions"     # Directory for storing session JSONL fil
 
 [lantai]
 enabled = true                             # Enable Lantai knowledge base (default: false)
-memory_dir = "~/.aries/memory"             # Directory containing markdown files to index
-database_path = "~/.aries/lantai.db"       # Path to SQLite database file
+memory_dir = "~/.moss/memory"             # Directory containing markdown files to index
+database_path = "~/.moss/lantai.db"       # Path to SQLite database file
 
 # [lantai.chunking]
 # max_chunk_lines = 50                        # Maximum lines per chunk
@@ -471,7 +471,7 @@ custom_keywords = ["机密", "internal only", "confidential"]
 # servers. These provide additional capabilities and integrations.
 #
 # Note: If any MCP tool servers are enabled, ensure the corresponding MCP
-# server is started before starting the Aries server.
+# server is started before starting the Moss server.
 
 # Section 3.1: Third Party MCP Servers
 #
@@ -499,7 +499,7 @@ custom_keywords = ["机密", "internal only", "confidential"]
 # Stdio transport starts the MCP server as a child process and communicates via stdin/stdout.
 # The process is started lazily on the first tool call, not at system startup.
 #
-# WARNING: stdio processes run with Aries Agent privileges. Only use trusted MCP servers.
+# WARNING: stdio processes run with Moss Agent privileges. Only use trusted MCP servers.
 # [[mcp.server.tool]]
 # name    = "actionbook"
 # transport = "stdio"
