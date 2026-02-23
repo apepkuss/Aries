@@ -9,7 +9,7 @@
 use axum::{
     Json,
     body::Body,
-    extract::Path,
+    extract::{Path, State},
     http::{HeaderMap, Response, StatusCode},
 };
 use reqwest::header::CONTENT_TYPE;
@@ -74,6 +74,32 @@ pub struct ReloadAllResponse {
     pub success: bool,
     pub message: String,
     pub skills_loaded: usize,
+}
+
+/// Request for installing a skill from URL
+#[derive(Debug, Deserialize)]
+pub struct InstallSkillRequest {
+    /// URL to download the skill from (tar.gz or zip)
+    pub url: String,
+    /// Optional custom name for the skill directory
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Response for skill installation
+#[derive(Debug, Serialize)]
+pub struct InstallSkillResponse {
+    pub success: bool,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_name: Option<String>,
+}
+
+/// State for skill installation handler
+#[derive(Clone)]
+pub struct SkillsInstallState {
+    pub install_dir: std::path::PathBuf,
+    pub skill_config: Option<crate::config::SkillConfig>,
 }
 
 /// Helper to create an error response
@@ -429,6 +455,108 @@ pub async fn reload_all_skills_handler(headers: HeaderMap) -> ServerResult<Respo
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &format!("Failed to reload skills: {}", e),
             )
+        }
+    }
+}
+
+/// POST /api/skills/install - Install a skill from URL
+///
+/// Downloads and installs a skill from a URL (tar.gz or zip).
+pub async fn install_skill_handler(
+    State(install_state): State<SkillsInstallState>,
+    headers: HeaderMap,
+    Json(request): Json<InstallSkillRequest>,
+) -> ServerResult<Response<Body>> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!(
+        "Installing skill from URL: {} - request_id: {}",
+        request.url,
+        request_id
+    );
+
+    // Validate URL
+    if !request.url.starts_with("https://") && !request.url.starts_with("http://") {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "Invalid URL: must start with https:// or http://",
+        );
+    }
+
+    // Create installer and source
+    let installer = crate::cli::skill::installer::SkillInstaller::new(
+        install_state.install_dir.clone(),
+        install_state.skill_config.as_ref(),
+    );
+    let source = crate::cli::skill::installer::SkillSource::Url(request.url.clone());
+
+    // Install the skill
+    match installer.install(&source, request.name.as_deref()).await {
+        Ok(skill_name) => {
+            dual_info!(
+                "Skill '{}' installed successfully - request_id: {}",
+                skill_name,
+                request_id
+            );
+
+            // Reload skills registry to pick up the new skill
+            if let Ok(registry) = get_registry()
+                && let Err(e) = registry.reload_all().await
+            {
+                dual_warn!(
+                    "Skill installed but failed to reload registry: {} - request_id: {}",
+                    e,
+                    request_id
+                );
+            }
+
+            let response = InstallSkillResponse {
+                success: true,
+                message: format!("Skill '{}' installed successfully", skill_name),
+                skill_name: Some(skill_name),
+            };
+
+            let json_body = serde_json::to_string(&response).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json_body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+        Err(e) => {
+            dual_error!(
+                "Failed to install skill from {}: {} - request_id: {}",
+                request.url,
+                e,
+                request_id
+            );
+
+            let response = InstallSkillResponse {
+                success: false,
+                message: format!("Failed to install skill: {}", e),
+                skill_name: None,
+            };
+
+            let json_body = serde_json::to_string(&response).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json_body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
         }
     }
 }

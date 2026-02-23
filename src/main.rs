@@ -201,6 +201,9 @@ async fn main() -> ServerResult<()> {
     // Save skill API config before moving config into AppState
     let skill_api_config = config.skill.as_ref().and_then(|s| s.api.clone());
 
+    // Save skill config for install handler (before config is moved)
+    let skill_install_config = config.skill.clone();
+
     // Save artifacts config before moving config into AppState
     let artifacts_config = config.artifacts.clone();
 
@@ -556,6 +559,22 @@ async fn main() -> ServerResult<()> {
             aries::dual_info!("Skills API rate limiting is enabled");
         }
 
+        // Create install state for skill installation handler
+        let install_state = skills::handlers::SkillsInstallState {
+            install_dir: std::path::PathBuf::from(
+                shellexpand::tilde(&skill_config.directory()).to_string(),
+            ),
+            skill_config: skill_install_config,
+        };
+
+        // Create install sub-router with its own state
+        let install_router = Router::new()
+            .route(
+                "/api/skills/install",
+                post(skills::handlers::install_skill_handler),
+            )
+            .with_state(install_state);
+
         // Create skills router with middleware
         let router = Router::new()
             .route("/api/skills", get(skills::handlers::list_skills_handler))
@@ -575,6 +594,7 @@ async fn main() -> ServerResult<()> {
                 "/api/skills/{name}/reload",
                 post(skills::handlers::reload_skill_handler),
             )
+            .merge(install_router)
             .layer(axum::middleware::from_fn_with_state(
                 skills_api_state,
                 skills::middleware::skills_api_middleware,

@@ -35,7 +35,7 @@ pub struct Cli {
     pub check_health_interval: u64,
 
     /// Root path for the Web UI files
-    #[arg(long, default_value = "chatbot-ui")]
+    #[arg(long, default_value = "aries-web/dist")]
     pub web_ui: PathBuf,
 
     /// Log destination: "stdout", "file", or "both"
