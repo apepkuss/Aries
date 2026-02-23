@@ -5437,7 +5437,7 @@ async fn execute_skill_run_script(
                 )
             } else {
                 format!(
-                    "Script '{}' failed with exit code {}.\n\nStdout:\n{}\n\nStderr:\n{}",
+                    "Script '{}' failed with exit code {}.\n\nStdout:\n{}\n\nStderr:\n{}\n\nIMPORTANT: If this failure is due to missing configuration (environment variables, API keys, credentials), missing dependencies, or permission issues, do NOT retry. Report the error to the user and suggest how to resolve it.",
                     script_name,
                     output.exit_code,
                     output.stdout.trim(),
@@ -5856,6 +5856,8 @@ pub(crate) async fn build_context_for_react(
 1. Follow the skill instructions above to complete the task
 2. Use the available tools as needed
 3. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
+4. If a script fails with a configuration or environment error (missing environment variables, API keys, dependencies, or permissions), do NOT retry the same script. Instead, report the error to the user in your final answer and explain what needs to be fixed.
+5. Only retry a script if you can meaningfully change the arguments or approach.
 
 ## Response Format
 - Use <thought></thought> tags to explain your reasoning
@@ -5932,6 +5934,36 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
             Some(summaries) => SkillInjector::phase1_injection(summaries),
             None => String::new(),
         };
+        let has_skills = !skills_section.is_empty();
+
+        let skill_important_note = if has_skills {
+            r#"
+**⚠️ IMPORTANT**: Tools listed above can be called DIRECTLY using <action> tags. Do NOT use <use_skill> tags for these tools. The <use_skill> tag is ONLY for loading skills from the "Available Skills" section.
+"#
+        } else {
+            ""
+        };
+
+        let skill_instruction = if has_skills {
+            r#"
+3. Only if a **skill** (from "Available Skills" section, NOT "Available Tools") would help, request it using <use_skill>skill-name</use_skill> tags
+   - You can request multiple skills: <use_skill>skill-a, skill-b</use_skill>
+   - **⚠️ IMPORTANT**: When you request a skill, ONLY output the <use_skill> tag. Do NOT include any <action> tags in the same response. The system will load the skill and provide the actual tool list in the next turn."#
+        } else {
+            ""
+        };
+
+        let skill_example = if has_skills {
+            r#"
+### Request a Skill (Only for items in "Available Skills")
+<thought>I need to perform a calculation. The cardea-calculator skill can help with this.</thought>
+<use_skill>cardea-calculator</use_skill>
+
+(Do NOT add <action> tags here. Wait for the skill to be loaded in the next turn.)
+"#
+        } else {
+            ""
+        };
 
         format!(
             r#"You are an AI assistant executing a specific subtask as part of a larger plan.
@@ -5941,17 +5973,13 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 {}
 ## Available Tools
 {}
-
-**⚠️ IMPORTANT**: Tools listed above can be called DIRECTLY using <action> tags. Do NOT use <use_skill> tags for these tools. The <use_skill> tag is ONLY for loading skills from the "Available Skills" section.
-
+{}
 ## Instructions
 1. Analyze the task and think about how to accomplish it
 2. To call a tool from "Available Tools", use <action> tags directly:
-   <action>{{"name": "tool_name", "arguments": {{"param": "value"}}}}</action>
-3. Only if a **skill** (from "Available Skills" section, NOT "Available Tools") would help, request it using <use_skill>skill-name</use_skill> tags
-   - You can request multiple skills: <use_skill>skill-a, skill-b</use_skill>
-   - **⚠️ IMPORTANT**: When you request a skill, ONLY output the <use_skill> tag. Do NOT include any <action> tags in the same response. The system will load the skill and provide the actual tool list in the next turn.
-4. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
+   <action>{{"name": "tool_name", "arguments": {{"param": "value"}}}}
+</action>{}
+3. When you have completed the task, provide your final answer wrapped in <final_answer></final_answer> tags
 
 ## Response Format
 - Use <thought></thought> tags to explain your reasoning
@@ -5961,21 +5989,15 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 
 ## Tool Call Examples
 
-### Example 1: Direct Tool Call
+### Direct Tool Call
 <thought>I need to convert an address to coordinates using the geo tool.</thought>
 <action>{{"name": "mcp__amap__maps_geo", "arguments": {{"address": "北京市", "city": "北京"}}}}</action>
-
-### Example 2: Request a Skill (Only for items in "Available Skills")
-<thought>I need to perform a calculation. The cardea-calculator skill can help with this.</thought>
-<use_skill>cardea-calculator</use_skill>
-
-(Do NOT add <action> tags here. Wait for the skill to be loaded in the next turn.)
-
-### Example 3: Spawn a Sub-Agent for Parallel Task Execution
+{}
+### Spawn a Sub-Agent for Parallel Task Execution
 <thought>I need to perform multiple independent searches in parallel. I'll spawn Sub-Agents for each search.</thought>
 <action>{{"name": "internal__spawn_sub_agent", "arguments": {{"name": "WebSearcher", "role": "You are a research assistant specialized in web searching.", "task": "Search for the latest news about AI developments", "wait_for_completion": false}}}}</action>
 
-### Example 4: Get Sub-Agent Result
+### Get Sub-Agent Result
 <thought>I need to check the result from the Sub-Agent I spawned earlier.</thought>
 <action>{{"name": "internal__get_sub_agent_result", "arguments": {{"subagent_id": "subagent_abc123", "wait": true}}}}</action>
 
@@ -5985,7 +6007,12 @@ Remember: Focus only on this specific subtask. Follow the skill instructions car
 - Spawn multiple Sub-Agents with `wait_for_completion: false`, then collect results with `get_sub_agent_result`
 
 Remember: Focus only on this specific subtask. Use the context from previous results if needed."#,
-            subtask.description, skills_section, tools_desc
+            subtask.description,
+            skills_section,
+            tools_desc,
+            skill_important_note,
+            skill_instruction,
+            skill_example,
         )
     };
 
