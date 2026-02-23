@@ -48,7 +48,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
   return (
     <div
       className={cn(
-        'flex w-full mb-8 animate-in-up group',
+        'flex w-full mb-2 animate-in-up group',
         isUser ? 'justify-end' : 'justify-start'
       )}
     >
@@ -126,7 +126,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
               )}
 
               {/* Thinking process (only for assistant) */}
-              {!isUser && (message.thinking || message.toolCalls?.length || message.executionEvents?.length || message.taskPlan || subAgents?.length || (message.isStreaming && executionStatus)) && (
+              {!isUser && (message.thinking || message.toolCalls?.length || message.executionEvents?.length || message.taskPlan || subAgents?.length || (message.isStreaming && executionStatus && executionStatus.phase !== 'planning')) && (
                 <div className="mb-4">
                   <ThinkingProcess
                     thinking={message.thinking}
@@ -304,17 +304,20 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
             </div>
           </div>
 
-          {/* Action buttons for assistant messages - bottom left */}
-          {!isUser && message.content && !message.isStreaming && (
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex justify-start gap-1 w-full mt-2">
+          {/* Action buttons - bottom left (assistant) / bottom right (user) */}
+          {message.content && !message.isStreaming && (
+            <div className={cn(
+              "transition-opacity flex gap-1 w-full -mt-1",
+              isUser ? "justify-end opacity-0 group-hover:opacity-100" : "justify-start"
+            )}>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 hover:bg-muted/80 rounded-lg text-muted-foreground transition-all"
+                className="h-5 w-5 hover:bg-muted/80 rounded text-muted-foreground transition-all"
                 onClick={handleCopy}
                 title="复制消息"
               >
-                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                {copied ? <Check className="h-1 w-1 text-green-500" /> : <Copy className="h-1 w-1" />}
               </Button>
             </div>
           )}

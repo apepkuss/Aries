@@ -125,6 +125,12 @@ export function ThinkingProcess({
   const config = phaseConfig[phase];
   const Icon = config.icon;
 
+  // During planning phase while streaming, hide ThinkingProcess
+  // (the existing streaming indicator already shows "正在思考中...")
+  if (phase === 'planning' && isStreaming) {
+    return null;
+  }
+
   // Calculate summary stats
   const completedTools = toolCalls?.filter(
     (tc) => tc.status === 'success'
