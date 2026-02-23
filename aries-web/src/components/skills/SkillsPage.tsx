@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react';
-import { Blocks, Wrench, RefreshCw, Download, X } from 'lucide-react';
+import {
+  Blocks,
+  Wrench,
+  RefreshCw,
+  Download,
+  X,
+  ChevronDown,
+  Key,
+  Save,
+} from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useSkillsStore } from '@/stores';
+import { getSkillEnv, updateSkillEnv } from '@/api/skills';
+import { EnvVarsForm } from './EnvVarsForm';
 import type { SkillSummary } from '@/api/types';
 
 export function SkillsPage() {
@@ -21,6 +32,8 @@ export function SkillsPage() {
   const [showInstallForm, setShowInstallForm] = useState(false);
   const [installUrl, setInstallUrl] = useState('');
   const [installName, setInstallName] = useState('');
+  const [installEnvVars, setInstallEnvVars] = useState<Record<string, string>>({});
+  const [showEnvSection, setShowEnvSection] = useState(false);
 
   useEffect(() => {
     fetchSkills();
@@ -28,11 +41,14 @@ export function SkillsPage() {
 
   const handleInstall = async () => {
     if (!installUrl.trim()) return;
-    const success = await installSkill(installUrl.trim(), installName.trim() || undefined);
+    const envVars = Object.keys(installEnvVars).length > 0 ? installEnvVars : undefined;
+    const success = await installSkill(installUrl.trim(), installName.trim() || undefined, envVars);
     if (success) {
       setShowInstallForm(false);
       setInstallUrl('');
       setInstallName('');
+      setInstallEnvVars({});
+      setShowEnvSection(false);
     }
   };
 
@@ -40,6 +56,8 @@ export function SkillsPage() {
     setShowInstallForm(false);
     setInstallUrl('');
     setInstallName('');
+    setInstallEnvVars({});
+    setShowEnvSection(false);
     clearInstallError();
   };
 
@@ -131,6 +149,31 @@ export function SkillsPage() {
                   )}
                 </Button>
               </div>
+
+              {/* Env Vars Section */}
+              <div>
+                <button
+                  type="button"
+                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  onClick={() => setShowEnvSection(!showEnvSection)}
+                >
+                  <Key className="h-3 w-3" />
+                  环境变量（可选）
+                  <ChevronDown
+                    className={`h-3 w-3 transition-transform ${showEnvSection ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {showEnvSection && (
+                  <div className="mt-2">
+                    <EnvVarsForm
+                      envVars={installEnvVars}
+                      onChange={setInstallEnvVars}
+                      disabled={isInstalling}
+                    />
+                  </div>
+                )}
+              </div>
+
               {installError && (
                 <p className="text-xs text-destructive">{installError}</p>
               )}
@@ -169,6 +212,46 @@ export function SkillsPage() {
 }
 
 function SkillCard({ skill }: { skill: SkillSummary }) {
+  const [showEnv, setShowEnv] = useState(false);
+  const [envVars, setEnvVars] = useState<Record<string, string>>({});
+  const [isLoadingEnv, setIsLoadingEnv] = useState(false);
+  const [isSavingEnv, setIsSavingEnv] = useState(false);
+  const [envDirty, setEnvDirty] = useState(false);
+  const [envError, setEnvError] = useState<string | null>(null);
+
+  const handleToggleEnv = async () => {
+    if (!showEnv) {
+      setIsLoadingEnv(true);
+      setEnvError(null);
+      try {
+        const response = await getSkillEnv(skill.name);
+        setEnvVars(response.env_vars);
+      } catch {
+        setEnvError('Failed to load environment variables');
+      }
+      setIsLoadingEnv(false);
+      setEnvDirty(false);
+    }
+    setShowEnv(!showEnv);
+  };
+
+  const handleEnvChange = (newEnvVars: Record<string, string>) => {
+    setEnvVars(newEnvVars);
+    setEnvDirty(true);
+  };
+
+  const handleSaveEnv = async () => {
+    setIsSavingEnv(true);
+    setEnvError(null);
+    try {
+      await updateSkillEnv(skill.name, envVars);
+      setEnvDirty(false);
+    } catch {
+      setEnvError('Failed to save environment variables');
+    }
+    setIsSavingEnv(false);
+  };
+
   return (
     <div className="group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:shadow-md hover:border-border">
       {/* Skill header */}
@@ -185,6 +268,15 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
             {skill.description || 'No description'}
           </p>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleToggleEnv}
+          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+          title="环境变量配置"
+        >
+          <Key className="h-3.5 w-3.5" />
+        </Button>
       </div>
 
       {/* Tools */}
@@ -207,6 +299,52 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
               </Badge>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Env Vars Panel */}
+      {showEnv && (
+        <div className="mt-3 pt-3 border-t border-border/40">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1">
+              <Key className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[11px] text-muted-foreground font-medium">
+                环境变量
+              </span>
+            </div>
+            {envDirty && (
+              <Button
+                size="sm"
+                onClick={handleSaveEnv}
+                disabled={isSavingEnv}
+                className="h-6 text-[10px] px-2"
+              >
+                {isSavingEnv ? (
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <Save className="h-3 w-3 mr-1" />
+                    保存
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
+          {isLoadingEnv ? (
+            <div className="flex items-center text-xs text-muted-foreground py-2">
+              <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+              加载中...
+            </div>
+          ) : (
+            <EnvVarsForm
+              envVars={envVars}
+              onChange={handleEnvChange}
+              disabled={isSavingEnv}
+            />
+          )}
+          {envError && (
+            <p className="text-xs text-destructive mt-2">{envError}</p>
+          )}
         </div>
       )}
     </div>

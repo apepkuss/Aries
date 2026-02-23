@@ -1,5 +1,10 @@
 import { apiClient, ApiError } from './client';
-import type { SkillListResponse, InstallSkillResponse } from './types';
+import type {
+  SkillListResponse,
+  InstallSkillResponse,
+  SkillEnvResponse,
+  UpdateSkillEnvResponse,
+} from './types';
 
 /**
  * Get all loaded skills.
@@ -35,17 +40,44 @@ export async function reloadSkills(): Promise<void> {
 }
 
 /**
- * Install a skill from a URL.
+ * Install a skill from a URL with optional initial environment variables.
  */
 export async function installSkill(
   url: string,
   name?: string,
+  envVars?: Record<string, string>,
 ): Promise<InstallSkillResponse> {
-  const body: Record<string, string> = { url };
+  const body: Record<string, unknown> = { url };
   if (name) {
     body.name = name;
+  }
+  if (envVars && Object.keys(envVars).length > 0) {
+    body.env_vars = envVars;
   }
   return await apiClient
     .post('api/skills/install', { json: body, timeout: 120000 })
     .json<InstallSkillResponse>();
+}
+
+/**
+ * Get environment variables for a skill.
+ */
+export async function getSkillEnv(name: string): Promise<SkillEnvResponse> {
+  return await apiClient
+    .get(`api/skills/${encodeURIComponent(name)}/env`, { retry: 0 })
+    .json<SkillEnvResponse>();
+}
+
+/**
+ * Update environment variables for a skill.
+ */
+export async function updateSkillEnv(
+  name: string,
+  envVars: Record<string, string>,
+): Promise<UpdateSkillEnvResponse> {
+  return await apiClient
+    .put(`api/skills/${encodeURIComponent(name)}/env`, {
+      json: { env_vars: envVars },
+    })
+    .json<UpdateSkillEnvResponse>();
 }

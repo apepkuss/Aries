@@ -9,7 +9,7 @@ interface SkillsState {
   isInstalling: boolean;
   installError: string | null;
   fetchSkills: () => Promise<void>;
-  installSkill: (url: string, name?: string) => Promise<boolean>;
+  installSkill: (url: string, name?: string, envVars?: Record<string, string>) => Promise<boolean>;
   clearInstallError: () => void;
 }
 
@@ -34,10 +34,10 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     }
   },
 
-  installSkill: async (url: string, name?: string) => {
+  installSkill: async (url: string, name?: string, envVars?: Record<string, string>) => {
     set({ isInstalling: true, installError: null });
     try {
-      const response = await installSkillApi(url, name);
+      const response = await installSkillApi(url, name, envVars);
       if (response.success) {
         await get().fetchSkills();
         set({ isInstalling: false });

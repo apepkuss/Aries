@@ -469,6 +469,17 @@ export interface InstallSkillResponse {
   skill_name?: string;
 }
 
+export interface SkillEnvResponse {
+  skill_name: string;
+  env_vars: Record<string, string>;
+}
+
+export interface UpdateSkillEnvResponse {
+  success: boolean;
+  message: string;
+  skill_name: string;
+}
+
 // ============================================================================
 // Artifacts API Types
 // ============================================================================
