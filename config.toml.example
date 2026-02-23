@@ -511,12 +511,12 @@ custom_keywords = ["机密", "internal only", "confidential"]
 # stdio.max_restart_attempts = 5
 
 # The following config is for the markitdown mcp server.
-# The details about the server are available at https://github.com/microsoft/markitdown/tree/main/packages/markitdown-mcp
-[[mcp.server.tool]]
-name      = "markitdown"
-transport = "stream-http"
-url       = "http://127.0.0.1:8011/mcp"
-enable    = false
+# # The details about the server are available at https://github.com/microsoft/markitdown/tree/main/packages/markitdown-mcp
+# [[mcp.server.tool]]
+# name      = "markitdown"
+# transport = "stream-http"
+# url       = "http://127.0.0.1:8011/mcp"
+# enable    = false
 
 # The following config is for the zapier-mcp server (Connect URL mode).
 # The details about the server are available at https://mcp.zapier.com/mcp/servers
@@ -580,21 +580,21 @@ enable        = false
 # url       = "http://127.0.0.1:8010/mcp"
 # enable    = false
 
-# The following config is for the cardea-calculator mcp server.
-# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-calculator
-[[mcp.server.tool]]
-name      = "cardea-calculator"
-transport = "stream-http"
-url       = "http://127.0.0.1:8001/mcp"
-enable    = false
+# # The following config is for the cardea-calculator mcp server.
+# # The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-calculator
+# [[mcp.server.tool]]
+# name      = "cardea-calculator"
+# transport = "stream-http"
+# url       = "http://127.0.0.1:8001/mcp"
+# enable    = false
 
-# The following config is for the cardea-weather mcp server.
-# The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-weather
-[[mcp.server.tool]]
-name      = "cardea-weather"
-transport = "stream-http"
-url       = "http://127.0.0.1:8002/mcp"
-enable    = false
+# # The following config is for the cardea-weather mcp server.
+# # The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-weather
+# [[mcp.server.tool]]
+# name      = "cardea-weather"
+# transport = "stream-http"
+# url       = "http://127.0.0.1:8002/mcp"
+# enable    = false
 
 # # The following config is for the cardea-qdrant mcp server.
 # # The details about the server are available at https://github.com/cardea-mcp/gaia-mcp-servers/tree/main/cardea-qdrant
