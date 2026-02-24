@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { MessageSquare, Trash2, Edit2, MoreHorizontal, CheckSquare, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,16 +68,22 @@ export function Sidebar() {
 
   // --- Session history handlers ---
   const handleSelectSession = async (id: string) => {
-    // Clear memory conversation selection
-    useConversationsStore.getState().clearCurrent();
+    try {
+      // Clear memory conversation selection
+      useConversationsStore.getState().clearCurrent();
 
-    // Abort any active stream and clear HITL state before loading new session
-    clearMessages();
+      // Abort any active stream and clear HITL state before loading new session
+      clearMessages();
 
-    const messages = await selectSession(id);
-    loadMessages(messages);
-    setConversationId(null);
-    setSessionId(id); // Continue appending to this session
+      const messages = await selectSession(id);
+      loadMessages(messages);
+      setConversationId(null);
+      setSessionId(id); // Continue appending to this session
+    } catch (err) {
+      console.error('[Sidebar] Failed to load session:', err);
+    } finally {
+      useSessionsStore.getState().setLoadingDetail(false);
+    }
   };
 
   const handleDeleteSession = async (id: string) => {
@@ -124,7 +130,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-60 border-r bg-muted/10 backdrop-blur-sm flex flex-col transition-all duration-300">
+    <aside className="w-60 border-r bg-muted/10 backdrop-blur-sm flex flex-col min-h-0 overflow-hidden transition-all duration-300">
       {/* Panel title */}
       <div className="px-3 py-2.5 border-b border-border/50">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -193,7 +199,7 @@ export function Sidebar() {
           )}
 
           {/* History list */}
-          <ScrollArea className="flex-1 px-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-2">
             <div className="space-y-1 py-2">
               {historyDisabled ? (
                 <div className="text-sm text-muted-foreground text-center py-8 px-2">
@@ -231,7 +237,7 @@ export function Sidebar() {
                 ))
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Batch delete dialog */}
           <SessionBatchDeleteDialog

@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react';
+import { Loader2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageItem } from './MessageItem';
-import { useChatStore } from '@/stores';
+import { useChatStore, useSessionsStore } from '@/stores';
 
 export function MessageList() {
   const { messages, executionStatus, isStreaming, getSubAgent, getRootSubAgents } = useChatStore();
+  const isLoadingDetail = useSessionsStore((s) => s.isLoadingDetail);
   const bottomRef = useRef<HTMLDivElement>(null);
   const rootSubAgents = getRootSubAgents();
 
@@ -12,6 +14,17 @@ export function MessageList() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  if (isLoadingDetail) {
+    return (
+      <div className="flex-1 min-h-0 flex items-center justify-center">
+        <div className="text-center text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+          <p className="text-sm">加载对话记录...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (messages.length === 0) {
     return (

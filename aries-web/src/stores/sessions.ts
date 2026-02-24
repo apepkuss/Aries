@@ -29,6 +29,7 @@ interface SessionsState {
   selectSession: (id: string) => Promise<UIMessage[]>;
   deleteSession: (id: string) => Promise<void>;
   setCurrentId: (id: string | null) => void;
+  setLoadingDetail: (loading: boolean) => void;
   clearCurrent: () => void;
 
   // Multi-select actions
@@ -71,7 +72,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     }
   },
 
-  // Select a session and load its records
+  // Select a session and load its records.
+  // NOTE: The caller is responsible for setting isLoadingDetail to false
+  // (after calling loadMessages) to avoid a flash of empty state.
   selectSession: async (id: string) => {
     set({ isLoadingDetail: true, currentId: id, error: null });
     try {
@@ -89,7 +92,6 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
           privacyMode: r.privacy_mode === true ? true : undefined,
         }));
 
-      set({ isLoadingDetail: false });
       return messages;
     } catch (err) {
       set({
@@ -119,6 +121,11 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   // Set current session ID without loading
   setCurrentId: (id) => {
     set({ currentId: id });
+  },
+
+  // Set loading detail state
+  setLoadingDetail: (loading) => {
+    set({ isLoadingDetail: loading });
   },
 
   // Clear current selection
