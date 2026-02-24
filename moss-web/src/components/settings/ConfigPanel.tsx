@@ -122,7 +122,7 @@ export function ConfigPanel() {
         <DialogHeader className="shrink-0">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription>
-            Configure Aries server settings. Changes are applied immediately after saving.
+            Configure Moss server settings. Changes are applied immediately after saving.
           </DialogDescription>
         </DialogHeader>
 

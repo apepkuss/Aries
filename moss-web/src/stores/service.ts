@@ -309,7 +309,7 @@ export const useServiceStore = create<ServiceState>()(
       },
     }),
     {
-      name: 'aries-service-storage',
+      name: 'moss-service-storage',
       partialize: (state) => ({
         // Only persist saved configs, not runtime state
         chat: state.chat,

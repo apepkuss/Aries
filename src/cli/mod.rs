@@ -1,4 +1,4 @@
-//! CLI subcommands for aries
+//! CLI subcommands for moss
 //!
 //! Provides command-line interface for:
 //! - Server mode (default): Start the API server
@@ -13,9 +13,9 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-/// Aries - A gateway service for LLM backends
+/// Moss - A gateway service for LLM backends
 #[derive(Debug, Parser)]
-#[command(version = env!("CARGO_PKG_VERSION"), about = "Aries - A gateway service for LLM backends")]
+#[command(version = env!("CARGO_PKG_VERSION"), about = "Moss - A gateway service for LLM backends")]
 pub struct Cli {
     /// Path to the config file
     #[arg(long, default_value = "config.toml", value_parser = clap::value_parser!(PathBuf), global = true)]
@@ -35,7 +35,7 @@ pub struct Cli {
     pub check_health_interval: u64,
 
     /// Root path for the Web UI files
-    #[arg(long, default_value = "aries-web/dist")]
+    #[arg(long, default_value = "moss-web/dist")]
     pub web_ui: PathBuf,
 
     /// Log destination: "stdout", "file", or "both"

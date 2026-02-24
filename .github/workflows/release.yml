@@ -24,9 +24,9 @@ jobs:
           VERSION=${{ steps.version.outputs.VERSION }}
           echo "Syncing version to ${VERSION}"
           sed -i '' "s/^version *=.*$/version = \"${VERSION}\"/" Cargo.toml
-          sed -i '' "s/\"version\": *\"[^\"]*\"/\"version\": \"${VERSION}\"/" aries-electron/package.json
+          sed -i '' "s/\"version\": *\"[^\"]*\"/\"version\": \"${VERSION}\"/" moss-electron/package.json
           grep '^version' Cargo.toml
-          grep '"version"' aries-electron/package.json
+          grep '"version"' moss-electron/package.json
 
       - name: Install Rust-stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -42,13 +42,13 @@ jobs:
           SQLX_OFFLINE: true
 
       - name: Build Web UI
-        working-directory: aries-web
+        working-directory: moss-web
         run: |
           npm ci
           npm run build
 
       - name: Build Electron app and publish
-        working-directory: aries-electron
+        working-directory: moss-electron
         run: |
           npm ci
           npm run build

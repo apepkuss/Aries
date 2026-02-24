@@ -79,7 +79,7 @@ export const useUIStore = create<UIState>()(
       setSettingsOpen: (open) => set({ settingsOpen: open }),
     }),
     {
-      name: 'aries-ui-storage',
+      name: 'moss-ui-storage',
       partialize: (state) => ({
         // sidebarOpen is intentionally not persisted - always starts collapsed
         artifactsPanelOpen: state.artifactsPanelOpen,

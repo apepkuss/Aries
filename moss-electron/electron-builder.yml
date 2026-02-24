@@ -1,5 +1,5 @@
-appId: com.aries.desktop
-productName: Aries
+appId: com.moss.desktop
+productName: Moss
 directories:
   buildResources: resources
   output: release
@@ -11,9 +11,9 @@ files:
   - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
 extraResources:
-  - from: "../target/release/aries"
-    to: "backend/aries"
-  - from: "../aries-web/dist"
+  - from: "../target/release/moss"
+    to: "backend/moss"
+  - from: "../moss-web/dist"
     to: "web-ui"
   - from: "../config.toml.example"
     to: "config.toml.example"

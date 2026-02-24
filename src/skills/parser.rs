@@ -149,7 +149,7 @@ license: MIT
 compatibility: Requires git installed
 allowed-tools: git-diff git-show
 metadata:
-  author: aries
+  author: moss
   version: "1.0"
 model: claude-3-opus
 ---
@@ -176,7 +176,7 @@ model: claude-3-opus
         assert_eq!(skill.metadata.model, Some("claude-3-opus".to_string()));
 
         let meta = skill.metadata.metadata.unwrap();
-        assert_eq!(meta.get("author"), Some(&"aries".to_string()));
+        assert_eq!(meta.get("author"), Some(&"moss".to_string()));
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@ use serde_json::json;
 
 use super::types::UPDATABLE_FIELDS;
 use crate::config::{
-    AriesLantaiConfig, ChatConfig, Config, EmbeddingConfig, McpConfig, MemoryConfig, RagConfig,
+    ChatConfig, Config, EmbeddingConfig, McpConfig, MemoryConfig, MossLantaiConfig, RagConfig,
     ServerConfig, SummarizationStrategy,
 };
 
@@ -565,8 +565,8 @@ pub fn diff_configs(old: &Config, new: &Config) -> Vec<ConfigChange> {
 
 /// Compare lantai auto memory config fields
 fn diff_lantai_auto_memory_config_inner(
-    old: &AriesLantaiConfig,
-    new: &AriesLantaiConfig,
+    old: &MossLantaiConfig,
+    new: &MossLantaiConfig,
     changes: &mut Vec<ConfigChange>,
 ) {
     if old.auto_memory.auto_summary != new.auto_memory.auto_summary {
@@ -619,8 +619,8 @@ fn diff_lantai_auto_memory_config_inner(
 
 /// Compare lantai config with optional handling
 pub fn diff_lantai_auto_memory_config(
-    old: Option<&AriesLantaiConfig>,
-    new: Option<&AriesLantaiConfig>,
+    old: Option<&MossLantaiConfig>,
+    new: Option<&MossLantaiConfig>,
     changes: &mut Vec<ConfigChange>,
 ) {
     diff_optional_config(

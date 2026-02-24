@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use aries::subagent::{RateLimiter, SubAgentRateLimitConfig};
+//! use moss::subagent::{RateLimiter, SubAgentRateLimitConfig};
 //!
 //! let config = SubAgentRateLimitConfig::default();
 //! let limiter = RateLimiter::new(&config);

@@ -7,6 +7,6 @@ data/memory.db
 /.claude
 
 # Electron
-aries-electron/node_modules/
-aries-electron/out/
-aries-electron/release/
+moss-electron/node_modules/
+moss-electron/out/
+moss-electron/release/

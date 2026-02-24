@@ -778,7 +778,7 @@ pub struct ScriptInfo {
 /// - `REQUEST_ID`: Current request ID (if provided)
 ///
 /// ## Runtime info:
-/// - `ARIES_VERSION`: Server version
+/// - `MOSS_VERSION`: Server version
 ///
 /// ## User-defined:
 /// - Any additional variables from `user_env`
@@ -847,7 +847,7 @@ impl ScriptContext {
 
         // Add runtime info
         env.insert(
-            "ARIES_VERSION".to_string(),
+            "MOSS_VERSION".to_string(),
             env!("CARGO_PKG_VERSION").to_string(),
         );
 
@@ -1739,7 +1739,7 @@ metadata:
         assert_eq!(env.get("REQUEST_ID"), Some(&"req_456".to_string()));
 
         // Runtime info
-        assert!(env.get("ARIES_VERSION").is_some());
+        assert!(env.get("MOSS_VERSION").is_some());
 
         // User-defined
         assert_eq!(env.get("USER_VAR"), Some(&"custom_value".to_string()));

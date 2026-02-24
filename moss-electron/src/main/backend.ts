@@ -89,11 +89,11 @@ export class BackendManager {
    */
   private getBinaryPath(): string {
     if (app.isPackaged) {
-      const binaryName = process.platform === 'win32' ? 'aries.exe' : 'aries'
+      const binaryName = process.platform === 'win32' ? 'moss.exe' : 'moss'
       return path.join(process.resourcesPath, 'backend', binaryName)
     }
     // Development: use cargo build output
-    const binaryName = process.platform === 'win32' ? 'aries.exe' : 'aries'
+    const binaryName = process.platform === 'win32' ? 'moss.exe' : 'moss'
     return path.join(__dirname, '..', '..', '..', 'target', 'release', binaryName)
   }
 
@@ -104,7 +104,7 @@ export class BackendManager {
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'web-ui')
     }
-    return path.join(__dirname, '..', '..', '..', 'aries-web', 'dist')
+    return path.join(__dirname, '..', '..', '..', 'moss-web', 'dist')
   }
 
   /**
@@ -180,7 +180,7 @@ export class BackendManager {
 
     const logDir = app.getPath('logs')
     fs.mkdirSync(logDir, { recursive: true })
-    const logFile = path.join(logDir, 'aries-backend.log')
+    const logFile = path.join(logDir, 'moss-backend.log')
 
     const args = [
       '--config', configPath,

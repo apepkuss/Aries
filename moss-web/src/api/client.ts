@@ -12,7 +12,7 @@ function generateRequestId(): string {
 
 // Get user ID from localStorage or generate a new one
 function getUserId(): string {
-  const key = 'aries_user_id';
+  const key = 'moss_user_id';
   let userId = localStorage.getItem(key);
   if (!userId) {
     userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;

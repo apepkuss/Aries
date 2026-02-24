@@ -64,7 +64,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
             <User className="h-4 w-4" />
           </div>
         ) : (
-          <img src="/aries-icon.png" alt="Aries" className="shrink-0 w-8 h-8" />
+          <img src="/moss-icon.png" alt="Moss" className="shrink-0 w-8 h-8" />
         )}
 
         {/* Message Content Area */}

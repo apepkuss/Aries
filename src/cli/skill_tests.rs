@@ -26,7 +26,7 @@ use super::{Cli, Command, skill::SkillCommand};
 #[test]
 fn test_tcl_001_skill_list_command_parsing() {
     // Test basic list command
-    let cli = Cli::parse_from(["aries", "skill", "list"]);
+    let cli = Cli::parse_from(["moss", "skill", "list"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::List {
             remote,
@@ -44,7 +44,7 @@ fn test_tcl_001_skill_list_command_parsing() {
 #[test]
 fn test_tcl_001_skill_list_remote() {
     // Test list with --remote flag
-    let cli = Cli::parse_from(["aries", "skill", "list", "--remote"]);
+    let cli = Cli::parse_from(["moss", "skill", "list", "--remote"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::List { remote, .. })) => {
             assert!(remote, "Should be remote listing");
@@ -75,7 +75,7 @@ fn test_tcl_001_skill_list_with_category() {
 #[test]
 fn test_tcl_001_skill_list_with_limit() {
     // Test list with custom limit
-    let cli = Cli::parse_from(["aries", "skill", "list", "-n", "20"]);
+    let cli = Cli::parse_from(["moss", "skill", "list", "-n", "20"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::List { limit, .. })) => {
             assert_eq!(limit, 20);
@@ -91,7 +91,7 @@ fn test_tcl_001_skill_list_with_limit() {
 #[test]
 fn test_tcl_002_skill_info_command_parsing() {
     // Test basic info command
-    let cli = Cli::parse_from(["aries", "skill", "info", "code-review"]);
+    let cli = Cli::parse_from(["moss", "skill", "info", "code-review"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Info { name })) => {
             assert_eq!(name, "code-review");
@@ -103,7 +103,7 @@ fn test_tcl_002_skill_info_command_parsing() {
 #[test]
 fn test_tcl_002_skill_info_with_remote_prefix() {
     // Test info with skillsmp: prefix
-    let cli = Cli::parse_from(["aries", "skill", "info", "skillsmp:weather-query"]);
+    let cli = Cli::parse_from(["moss", "skill", "info", "skillsmp:weather-query"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Info { name })) => {
             assert_eq!(name, "skillsmp:weather-query");
@@ -116,7 +116,7 @@ fn test_tcl_002_skill_info_with_remote_prefix() {
 #[test]
 fn test_tcl_002_skill_info_requires_name() {
     // Test that info command requires a name argument
-    let result = Cli::try_parse_from(["aries", "skill", "info"]);
+    let result = Cli::try_parse_from(["moss", "skill", "info"]);
     assert!(result.is_err(), "Should fail without skill name");
 }
 
@@ -127,7 +127,7 @@ fn test_tcl_002_skill_info_requires_name() {
 #[test]
 fn test_tcl_003_skill_install_from_skillsmp() {
     // Test install from skillsmp.com
-    let cli = Cli::parse_from(["aries", "skill", "install", "skillsmp:code-review"]);
+    let cli = Cli::parse_from(["moss", "skill", "install", "skillsmp:code-review"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Install {
             source,
@@ -147,7 +147,7 @@ fn test_tcl_003_skill_install_from_skillsmp() {
 #[test]
 fn test_tcl_003_skill_install_with_version() {
     // Test install with version specifier
-    let cli = Cli::parse_from(["aries", "skill", "install", "skillsmp:code-review@2.0.0"]);
+    let cli = Cli::parse_from(["moss", "skill", "install", "skillsmp:code-review@2.0.0"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Install { source, .. })) => {
             assert_eq!(source, "skillsmp:code-review@2.0.0");
@@ -179,7 +179,7 @@ fn test_tcl_003_skill_install_with_custom_dir() {
 #[test]
 fn test_tcl_003_skill_install_with_enable() {
     // Test install with --enable flag
-    let cli = Cli::parse_from(["aries", "skill", "install", "skillsmp:test", "--enable"]);
+    let cli = Cli::parse_from(["moss", "skill", "install", "skillsmp:test", "--enable"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Install { enable, .. })) => {
             assert!(enable, "Should be enabled");
@@ -191,7 +191,7 @@ fn test_tcl_003_skill_install_with_enable() {
 #[test]
 fn test_tcl_003_skill_install_from_github() {
     // Test install from GitHub
-    let cli = Cli::parse_from(["aries", "skill", "install", "github:user/repo"]);
+    let cli = Cli::parse_from(["moss", "skill", "install", "github:user/repo"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Install { source, .. })) => {
             assert_eq!(source, "github:user/repo");
@@ -208,7 +208,7 @@ fn test_tcl_003_skill_install_from_github() {
 #[test]
 fn test_tcl_004_skill_uninstall_command_parsing() {
     // Test basic uninstall command
-    let cli = Cli::parse_from(["aries", "skill", "uninstall", "old-skill"]);
+    let cli = Cli::parse_from(["moss", "skill", "uninstall", "old-skill"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Uninstall { name, yes })) => {
             assert_eq!(name, "old-skill");
@@ -221,7 +221,7 @@ fn test_tcl_004_skill_uninstall_command_parsing() {
 #[test]
 fn test_tcl_004_skill_uninstall_with_yes() {
     // Test uninstall with --yes flag to skip confirmation
-    let cli = Cli::parse_from(["aries", "skill", "uninstall", "old-skill", "--yes"]);
+    let cli = Cli::parse_from(["moss", "skill", "uninstall", "old-skill", "--yes"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Uninstall { yes, .. })) => {
             assert!(yes, "Should skip confirmation");
@@ -233,7 +233,7 @@ fn test_tcl_004_skill_uninstall_with_yes() {
 #[test]
 fn test_tcl_004_skill_uninstall_short_flag() {
     // Test uninstall with -y short flag
-    let cli = Cli::parse_from(["aries", "skill", "uninstall", "old-skill", "-y"]);
+    let cli = Cli::parse_from(["moss", "skill", "uninstall", "old-skill", "-y"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Uninstall { yes, .. })) => {
             assert!(yes, "Should skip confirmation with -y");
@@ -245,7 +245,7 @@ fn test_tcl_004_skill_uninstall_short_flag() {
 #[test]
 fn test_tcl_004_skill_uninstall_requires_name() {
     // Test that uninstall requires a skill name
-    let result = Cli::try_parse_from(["aries", "skill", "uninstall"]);
+    let result = Cli::try_parse_from(["moss", "skill", "uninstall"]);
     assert!(result.is_err(), "Should fail without skill name");
 }
 
@@ -255,7 +255,7 @@ fn test_tcl_004_skill_uninstall_requires_name() {
 
 #[test]
 fn test_skill_search_command() {
-    let cli = Cli::parse_from(["aries", "skill", "search", "code review"]);
+    let cli = Cli::parse_from(["moss", "skill", "search", "code review"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Search {
             query,
@@ -272,7 +272,7 @@ fn test_skill_search_command() {
 
 #[test]
 fn test_skill_search_with_category() {
-    let cli = Cli::parse_from(["aries", "skill", "search", "test", "--category", "security"]);
+    let cli = Cli::parse_from(["moss", "skill", "search", "test", "--category", "security"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Search { category, .. })) => {
             assert_eq!(category, Some("security".to_string()));
@@ -287,7 +287,7 @@ fn test_skill_search_with_category() {
 
 #[test]
 fn test_skill_update_single() {
-    let cli = Cli::parse_from(["aries", "skill", "update", "my-skill"]);
+    let cli = Cli::parse_from(["moss", "skill", "update", "my-skill"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Update { name, all })) => {
             assert_eq!(name, Some("my-skill".to_string()));
@@ -299,7 +299,7 @@ fn test_skill_update_single() {
 
 #[test]
 fn test_skill_update_all() {
-    let cli = Cli::parse_from(["aries", "skill", "update", "--all"]);
+    let cli = Cli::parse_from(["moss", "skill", "update", "--all"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Update { name, all })) => {
             assert!(name.is_none());
@@ -315,7 +315,7 @@ fn test_skill_update_all() {
 
 #[test]
 fn test_skill_outdated_command() {
-    let cli = Cli::parse_from(["aries", "skill", "outdated"]);
+    let cli = Cli::parse_from(["moss", "skill", "outdated"]);
     match cli.command {
         Some(Command::Skill(SkillCommand::Outdated)) => {
             // No arguments for outdated command
@@ -330,13 +330,13 @@ fn test_skill_outdated_command() {
 
 #[test]
 fn test_global_config_option() {
-    let cli = Cli::parse_from(["aries", "--config", "/path/to/config.toml", "skill", "list"]);
+    let cli = Cli::parse_from(["moss", "--config", "/path/to/config.toml", "skill", "list"]);
     assert_eq!(cli.config, PathBuf::from("/path/to/config.toml"));
 }
 
 #[test]
 fn test_default_config_path() {
-    let cli = Cli::parse_from(["aries", "skill", "list"]);
+    let cli = Cli::parse_from(["moss", "skill", "list"]);
     assert_eq!(cli.config, PathBuf::from("config.toml"));
 }
 
@@ -347,7 +347,7 @@ fn test_default_config_path() {
 #[test]
 fn test_server_mode_default() {
     // When no subcommand is provided, server mode options are available
-    let cli = Cli::parse_from(["aries"]);
+    let cli = Cli::parse_from(["moss"]);
     assert!(cli.command.is_none());
     assert!(!cli.check_health);
     assert_eq!(cli.check_health_interval, 60);
@@ -356,7 +356,7 @@ fn test_server_mode_default() {
 
 #[test]
 fn test_server_mode_with_health_check() {
-    let cli = Cli::parse_from(["aries", "--check-health", "--check-health-interval", "30"]);
+    let cli = Cli::parse_from(["moss", "--check-health", "--check-health-interval", "30"]);
     assert!(cli.command.is_none());
     assert!(cli.check_health);
     assert_eq!(cli.check_health_interval, 30);
@@ -368,20 +368,20 @@ fn test_server_mode_with_health_check() {
 
 #[test]
 fn test_invalid_subcommand() {
-    let result = Cli::try_parse_from(["aries", "invalid"]);
+    let result = Cli::try_parse_from(["moss", "invalid"]);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_missing_required_arg() {
     // skill install requires a source
-    let result = Cli::try_parse_from(["aries", "skill", "install"]);
+    let result = Cli::try_parse_from(["moss", "skill", "install"]);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_invalid_limit_value() {
     // Limit should be a number
-    let result = Cli::try_parse_from(["aries", "skill", "list", "-n", "abc"]);
+    let result = Cli::try_parse_from(["moss", "skill", "list", "-n", "abc"]);
     assert!(result.is_err());
 }

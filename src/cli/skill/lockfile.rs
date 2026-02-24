@@ -68,7 +68,7 @@ impl SkillLockFile {
     /// Save the lock file to disk
     pub async fn save(&self, path: &Path) -> ServerResult<()> {
         let content = format!(
-            "# skill.lock - Auto-generated, do not edit manually\n# https://github.com/ApeCloud/aries\n\n{}",
+            "# skill.lock - Auto-generated, do not edit manually\n# https://github.com/ApeCloud/moss\n\n{}",
             serde_yaml::to_string(self).map_err(|e| {
                 ServerError::Operation(format!("Failed to serialize skill.lock: {}", e))
             })?

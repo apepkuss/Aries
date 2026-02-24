@@ -421,7 +421,7 @@ export const useHitlStore = create<HitlState>((set, get) => ({
 
     // Native notification for approval requests
     showNativeNotification(
-      'Aries - Approval Required',
+      'Moss - Approval Required',
       event.summary || `${requestType} request needs your attention`
     );
 

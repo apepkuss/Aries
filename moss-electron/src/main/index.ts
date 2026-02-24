@@ -111,7 +111,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Aries',
+    title: 'Moss',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -149,7 +149,7 @@ app.whenReady().then(async () => {
 
   // 2. Start backend in the background
   try {
-    console.log('Starting Aries backend...')
+    console.log('Starting Moss backend...')
     const port = await backend.start()
     console.log(`Backend started on port ${port}`)
 
@@ -162,13 +162,13 @@ app.whenReady().then(async () => {
     console.error('Failed to start backend:', err)
     const msg = err instanceof Error ? err.message : String(err)
 
-    let title = 'Failed to start Aries'
+    let title = 'Failed to start Moss'
     let detail = msg
 
     if (msg.includes('binary not found')) {
       title = 'Backend binary not found'
       detail =
-        'The Aries backend binary could not be located.\n\n' +
+        'The Moss backend binary could not be located.\n\n' +
         'If you are running in development mode, please run:\n' +
         '  cargo build --release\n\n' +
         msg
@@ -181,7 +181,7 @@ app.whenReady().then(async () => {
     } else if (msg.includes('No config.toml found')) {
       title = 'Configuration file missing'
       detail =
-        'Aries could not find a config.toml file.\n\n' +
+        'Moss could not find a config.toml file.\n\n' +
         `Expected location: ${backend.getConfigFilePath()}\n\n` +
         'Please ensure the configuration file exists.'
     } else if (msg.includes('did not become ready')) {
@@ -189,13 +189,13 @@ app.whenReady().then(async () => {
       detail =
         'The backend process started but did not respond in time.\n\n' +
         'Check the log file for details:\n' +
-        `${app.getPath('logs')}/aries-backend.log`
+        `${app.getPath('logs')}/moss-backend.log`
     } else if (msg.includes('exited unexpectedly')) {
       title = 'Backend crashed'
       detail =
         'The backend process exited unexpectedly.\n\n' +
         'Check the log file for details:\n' +
-        `${app.getPath('logs')}/aries-backend.log`
+        `${app.getPath('logs')}/moss-backend.log`
     }
 
     dialog.showErrorBox(title, detail)

@@ -13,7 +13,7 @@ use crate::error::{ServerError, ServerResult};
 const SKILLSMP_API_BASE: &str = "https://skillsmp.com/api/v1";
 
 /// Default User-Agent for marketplace requests
-const USER_AGENT: &str = "aries/0.8.2";
+const USER_AGENT: &str = "moss/0.8.2";
 
 /// Skills marketplace client
 pub struct SkillsMarketplace {

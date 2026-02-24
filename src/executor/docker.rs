@@ -321,7 +321,7 @@ impl DockerExecutor {
 
     /// Container mount point for file copy mode
     /// Using a unique path to avoid conflicts with user-configured data_dirs
-    const FILE_COPY_MOUNT_POINT: &'static str = "/aries_file_copy";
+    const FILE_COPY_MOUNT_POINT: &'static str = "/moss_file_copy";
 
     /// Determine the file access strategy for a given file
     fn determine_file_strategy(
@@ -508,7 +508,7 @@ impl DockerExecutor {
 
             Some(
                 tempfile::Builder::new()
-                    .prefix("aries-data-")
+                    .prefix("moss-data-")
                     .tempdir_in(&base_dir)
                     .map_err(|e| {
                         ExecutionError::runtime(
@@ -1223,7 +1223,7 @@ mod tests {
 
         let file_copy = FileAccessStrategy::FileCopy {
             source_path: PathBuf::from("/remote/file.csv"),
-            temp_path: PathBuf::from("/tmp/aries-data-xxx/file.csv"),
+            temp_path: PathBuf::from("/tmp/moss-data-xxx/file.csv"),
             container_path: PathBuf::from("/data/file.csv"),
             is_output: false,
         };

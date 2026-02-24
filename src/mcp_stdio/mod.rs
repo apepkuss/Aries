@@ -24,7 +24,7 @@
 //! - **Unified Architecture**: Uses rmcp `TokioChildProcess` to produce `RunningService`,
 //!   registered into `MCP_SERVICES` (same as SSE/StreamHTTP)
 //! - **Startup at Config Load**: Processes start during config load (not lazy loading)
-//! - **No Sandbox**: Processes run with Aries Agent's permissions (user's responsibility)
+//! - **No Sandbox**: Processes run with Moss Agent's permissions (user's responsibility)
 
 mod health;
 mod manager;

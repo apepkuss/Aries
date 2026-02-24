@@ -914,7 +914,7 @@ impl MockDirectAnswerProvider {
 
     /// Create a mock for greeting
     fn for_greeting() -> Self {
-        Self::new("你好！我是 Aries，一个智能助手。有什么可以帮助你的吗？")
+        Self::new("你好！我是 Moss，一个智能助手。有什么可以帮助你的吗？")
     }
 
     /// Create a mock for concept explanation

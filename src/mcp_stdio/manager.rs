@@ -177,7 +177,7 @@ impl StdioProcessManager {
         }
 
         dual_warn!(
-            "[mcp-stdio:{}] Starting child process '{}' with Aries Agent privileges. \
+            "[mcp-stdio:{}] Starting child process '{}' with Moss Agent privileges. \
              Ensure you trust this MCP server.",
             name,
             config.command

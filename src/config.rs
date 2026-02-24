@@ -102,7 +102,7 @@ pub struct Config {
     pub privacy_detection: Option<crate::services::privacy::PrivacyDetectorConfig>,
     /// Lantai knowledge base configuration
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lantai: Option<AriesLantaiConfig>,
+    pub lantai: Option<MossLantaiConfig>,
 }
 impl Config {
     pub async fn load(path: impl AsRef<std::path::Path>) -> ServerResult<Self> {
@@ -1209,7 +1209,7 @@ impl McpToolServerConfig {
         })?;
 
         dual_warn!(
-            "[mcp-stdio:{}] Starting child process '{}' with Aries Agent privileges. \
+            "[mcp-stdio:{}] Starting child process '{}' with Moss Agent privileges. \
              Ensure you trust this MCP server.",
             self.name,
             command
@@ -1860,11 +1860,11 @@ impl Default for SessionConfig {
 
 // ─── Lantai knowledge base configuration ─────────────────────────────────────
 
-/// Lantai knowledge base configuration for Aries integration.
+/// Lantai knowledge base configuration for Moss integration.
 ///
 /// Requires `[embedding]` section to be configured for generating embeddings.
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct AriesLantaiConfig {
+pub struct MossLantaiConfig {
     /// Enable or disable Lantai knowledge base
     #[serde(default)]
     pub enabled: bool,
@@ -1970,7 +1970,7 @@ fn default_lantai_watch_debounce_ms() -> u64 {
     1500
 }
 
-impl Default for AriesLantaiConfig {
+impl Default for MossLantaiConfig {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -2072,7 +2072,7 @@ impl Default for LantaiWatchSubConfig {
     }
 }
 
-impl AriesLantaiConfig {
+impl MossLantaiConfig {
     /// Convert to lantai crate's LantaiConfig, with expanded paths.
     pub fn to_lantai_config(&self, memory_dir: &str, database_path: &str) -> lantai::LantaiConfig {
         lantai::LantaiConfig {

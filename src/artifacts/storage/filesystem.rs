@@ -51,7 +51,7 @@ impl FileSystemStorage {
     fn default_path() -> PathBuf {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("aries")
+            .join("moss")
             .join("artifacts")
     }
 

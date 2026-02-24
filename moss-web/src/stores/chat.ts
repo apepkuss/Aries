@@ -750,7 +750,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Native notification when task completes
       if (!isUserInterrupted) {
         const preview = finalContent.slice(0, 80) || 'Task completed';
-        showNativeNotification('Aries', preview);
+        showNativeNotification('Moss', preview);
       }
 
       // Refresh session list so the sidebar shows the new/updated session

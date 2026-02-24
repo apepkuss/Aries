@@ -16,7 +16,7 @@
 //! # 使用示例
 //!
 //! ```rust,ignore
-//! use aries::subagent::{SubAgentManager, SubAgentSystemConfig};
+//! use moss::subagent::{SubAgentManager, SubAgentSystemConfig};
 //!
 //! // 创建 Manager
 //! let config = SubAgentSystemConfig::default_enabled();

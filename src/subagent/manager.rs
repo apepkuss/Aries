@@ -40,7 +40,7 @@ use crate::{
 /// # Example
 ///
 /// ```rust,ignore
-/// use aries::subagent::{SubAgentManager, SubAgentSystemConfig};
+/// use moss::subagent::{SubAgentManager, SubAgentSystemConfig};
 ///
 /// let config = SubAgentSystemConfig::default_enabled();
 /// let manager = SubAgentManager::new(config);

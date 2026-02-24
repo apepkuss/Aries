@@ -1,14 +1,14 @@
 {
-  "name": "aries-electron",
+  "name": "moss-electron",
   "version": "0.0.1",
-  "description": "Aries AI Agent Desktop Application",
+  "description": "Moss AI Agent Desktop Application",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "unset ELECTRON_RUN_AS_NODE && electron-vite dev",
     "build": "electron-vite build",
     "preview": "unset ELECTRON_RUN_AS_NODE && electron-vite preview",
     "prebuild:backend": "cd .. && cargo build --release",
-    "prebuild:web": "cd ../aries-web && npm run build",
+    "prebuild:web": "cd ../moss-web && npm run build",
     "build:all": "npm run prebuild:backend && npm run prebuild:web && npm run build",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder",

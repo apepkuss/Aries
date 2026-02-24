@@ -99,7 +99,7 @@ export function SetupWizard() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Rocket className="h-5 w-5" />
-            Welcome to Aries
+            Welcome to Moss
           </DialogTitle>
           <DialogDescription>
             Connect your services to get started. You can update these settings

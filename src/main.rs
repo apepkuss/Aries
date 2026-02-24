@@ -4,10 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use aries::{
-    AppState, HEALTH_CHECK_INTERVAL, artifacts, capabilities, cli, config, config_api, error,
-    executor, handlers, hitl, info, mcp_handlers, memory, responses, skills, subagent, utils,
-};
 use axum::{
     body::Body,
     http::{self, HeaderValue, Request},
@@ -19,6 +15,10 @@ use config::Config;
 use error::{ServerError, ServerResult};
 use executor::ScriptExecutorManager;
 use info::ServerInfo;
+use moss::{
+    AppState, HEALTH_CHECK_INTERVAL, artifacts, capabilities, cli, config, config_api, error,
+    executor, handlers, hitl, info, mcp_handlers, memory, responses, skills, subagent, utils,
+};
 use skills::SkillRegistry;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
@@ -66,7 +66,7 @@ async fn main() -> ServerResult<()> {
     init_logging(&cli.log_destination, cli.log_file.as_deref())?;
 
     // log the version of the server
-    aries::dual_info!("Version: {}", env!("CARGO_PKG_VERSION"));
+    moss::dual_info!("Version: {}", env!("CARGO_PKG_VERSION"));
 
     // Load the config based on the command
     let config = Config::load(&cli.config).await?;
@@ -76,7 +76,7 @@ async fn main() -> ServerResult<()> {
         .set(cli.check_health_interval)
         .map_err(|e| {
             let err_msg = format!("Failed to set health check interval: {e}");
-            aries::dual_error!("{err_msg}");
+            moss::dual_error!("{err_msg}");
             ServerError::Operation(err_msg)
         })?;
 
@@ -89,7 +89,7 @@ async fn main() -> ServerResult<()> {
     // Initialize memory system if enabled
     let memory = if let Some(memory_config) = &config.memory {
         if memory_config.enable {
-            aries::dual_info!("Memory system is enabled");
+            moss::dual_info!("Memory system is enabled");
 
             // Expand tilde in database path
             let mut memory_config = memory_config.clone();
@@ -100,29 +100,29 @@ async fn main() -> ServerResult<()> {
             if let Some(parent) = std::path::Path::new(&memory_config.database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     let err_msg = format!("Failed to create memory data directory: {e}");
-                    aries::dual_error!("{err_msg}");
+                    moss::dual_error!("{err_msg}");
                     ServerError::Operation(err_msg)
                 })?;
             }
 
             match memory::CompleteChatMemory::new(memory_config).await {
                 Ok(memory_system) => {
-                    aries::dual_info!("Memory system initialized successfully");
+                    moss::dual_info!("Memory system initialized successfully");
                     Some(Arc::new(memory_system))
                 }
                 Err(e) => {
-                    aries::dual_error!("Failed to initialize memory system: {}", e);
+                    moss::dual_error!("Failed to initialize memory system: {}", e);
                     return Err(ServerError::Operation(format!(
                         "Memory initialization failed: {e}"
                     )));
                 }
             }
         } else {
-            aries::dual_info!("Memory system is disabled");
+            moss::dual_info!("Memory system is disabled");
             None
         }
     } else {
-        aries::dual_info!("Memory system is not configured");
+        moss::dual_info!("Memory system is not configured");
         None
     };
 
@@ -131,7 +131,7 @@ async fn main() -> ServerResult<()> {
     let skill_config = config.skill.clone().unwrap_or_default();
 
     if skill_config.enabled {
-        aries::dual_info!("Skills system is enabled");
+        moss::dual_info!("Skills system is enabled");
 
         // Find the first valid skills directory
         let mut skills_dir = None;
@@ -150,14 +150,14 @@ async fn main() -> ServerResult<()> {
                     // Load all skills from the directory
                     match registry.load_all().await {
                         Ok(count) => {
-                            aries::dual_info!(
+                            moss::dual_info!(
                                 "Skills system initialized: loaded {} skills from {}",
                                 count,
                                 dir
                             );
                         }
                         Err(e) => {
-                            aries::dual_warn!(
+                            moss::dual_warn!(
                                 "Failed to load skills: {}. Continuing without skills.",
                                 e
                             );
@@ -165,14 +165,14 @@ async fn main() -> ServerResult<()> {
                     }
                 }
                 Err(e) => {
-                    aries::dual_warn!(
+                    moss::dual_warn!(
                         "Failed to initialize skills registry: {}. Continuing without skills.",
                         e
                     );
                 }
             }
         } else {
-            aries::dual_info!(
+            moss::dual_info!(
                 "No skills directories found. Searched: {:?}",
                 skill_config.directories
             );
@@ -182,24 +182,24 @@ async fn main() -> ServerResult<()> {
             if execution_config.enabled {
                 match ScriptExecutorManager::init_global(execution_config).await {
                     Ok(manager) => {
-                        aries::dual_info!(
+                        moss::dual_info!(
                             "Script executor manager initialized: {} executors registered",
                             manager.executor_count()
                         );
                     }
                     Err(e) => {
-                        aries::dual_warn!(
+                        moss::dual_warn!(
                             "Failed to initialize script executor manager: {}. Scripts will not be executable.",
                             e
                         );
                     }
                 }
             } else {
-                aries::dual_info!("Script execution is disabled in config");
+                moss::dual_info!("Script execution is disabled in config");
             }
         }
     } else {
-        aries::dual_info!("Skills system is disabled in config");
+        moss::dual_info!("Skills system is disabled in config");
     }
 
     // Save skill API config before moving config into AppState
@@ -231,15 +231,15 @@ async fn main() -> ServerResult<()> {
     if let Some(ref hitl_cfg) = hitl_config {
         if hitl_cfg.enabled {
             hitl::init_global(hitl_cfg.clone(), 100);
-            aries::dual_info!(
+            moss::dual_info!(
                 "HITL system enabled (confirmation_threshold: {:?})",
                 hitl_cfg.confirmation_threshold
             );
         } else {
-            aries::dual_info!("HITL system is disabled in config");
+            moss::dual_info!("HITL system is disabled in config");
         }
     } else {
-        aries::dual_info!("HITL system is not configured");
+        moss::dual_info!("HITL system is not configured");
     }
 
     // Initialize application state
@@ -259,25 +259,25 @@ async fn main() -> ServerResult<()> {
                 .await
                 .map_err(|e| {
                     let err_msg = format!("Failed to create session storage directory: {e}");
-                    aries::dual_error!("{err_msg}");
+                    moss::dual_error!("{err_msg}");
                     ServerError::Operation(err_msg)
                 })?;
 
-            let writer = aries::session::writer::SessionWriter::new(&storage_path);
+            let writer = moss::session::writer::SessionWriter::new(&storage_path);
             state = state.with_session_writer(writer);
-            aries::dual_info!("Session history enabled, storage: {}", storage_path);
+            moss::dual_info!("Session history enabled, storage: {}", storage_path);
         } else {
-            aries::dual_info!("Session history is disabled in config");
+            moss::dual_info!("Session history is disabled in config");
         }
     } else {
-        aries::dual_info!("Session history is not configured");
+        moss::dual_info!("Session history is not configured");
     }
 
     // Initialize Lantai knowledge base if enabled
     let _lantai_cancel_token = if let Some(ref lantai_cfg) = lantai_config
         && lantai_cfg.enabled
     {
-        aries::dual_info!("Initializing Lantai knowledge base...");
+        moss::dual_info!("Initializing Lantai knowledge base...");
 
         // Expand paths
         let memory_dir = shellexpand::tilde(&lantai_cfg.memory_dir).to_string();
@@ -285,15 +285,15 @@ async fn main() -> ServerResult<()> {
 
         // Ensure directories exist
         if let Err(e) = std::fs::create_dir_all(&memory_dir) {
-            aries::dual_error!("Failed to create Lantai memory directory: {e}");
+            moss::dual_error!("Failed to create Lantai memory directory: {e}");
         }
         if let Some(parent) = std::path::Path::new(&database_path).parent()
             && let Err(e) = std::fs::create_dir_all(parent)
         {
-            aries::dual_error!("Failed to create Lantai database directory: {e}");
+            moss::dual_error!("Failed to create Lantai database directory: {e}");
         }
 
-        // Build LantaiConfig from Aries config
+        // Build LantaiConfig from Moss config
         let l_config = lantai_cfg.to_lantai_config(&memory_dir, &database_path);
 
         // Create embedding provider (optional — None = BM25-only mode)
@@ -308,7 +308,7 @@ async fn main() -> ServerResult<()> {
                 lantai_cfg.embedding.dimensions,
             )))
         } else {
-            aries::dual_info!("No [embedding] configured, Lantai will use BM25-only search mode");
+            moss::dual_info!("No [embedding] configured, Lantai will use BM25-only search mode");
             None
         };
 
@@ -321,7 +321,7 @@ async fn main() -> ServerResult<()> {
                     let guard = lantai_arc.lock().await;
                     match guard.index(&[memory_dir.as_str()]).await {
                         Ok(report) => {
-                            aries::dual_info!(
+                            moss::dual_info!(
                                 "Lantai initial index: +{} ~{} -{} files, +{} -{} chunks",
                                 report.files_added,
                                 report.files_updated,
@@ -331,7 +331,7 @@ async fn main() -> ServerResult<()> {
                             );
                         }
                         Err(e) => {
-                            aries::dual_warn!("Lantai initial index failed: {e}");
+                            moss::dual_warn!("Lantai initial index failed: {e}");
                         }
                     }
                 }
@@ -347,10 +347,10 @@ async fn main() -> ServerResult<()> {
                     let cancel_clone = token.clone();
                     tokio::spawn(async move {
                         if let Err(e) = watcher.watch(cancel_clone).await {
-                            aries::dual_error!("Lantai watcher error: {e}");
+                            moss::dual_error!("Lantai watcher error: {e}");
                         }
                     });
-                    aries::dual_info!("Lantai file watcher started");
+                    moss::dual_info!("Lantai file watcher started");
                     Some(token)
                 } else {
                     None
@@ -362,17 +362,17 @@ async fn main() -> ServerResult<()> {
                 let writer = Arc::new(lantai::writer::MemoryWriter::new(&memory_dir));
                 state = state.with_memory_writer(writer);
 
-                aries::dual_info!("Lantai knowledge base initialized successfully");
+                moss::dual_info!("Lantai knowledge base initialized successfully");
                 cancel_token
             }
             Err(e) => {
-                aries::dual_error!("Failed to initialize Lantai: {e}");
+                moss::dual_error!("Failed to initialize Lantai: {e}");
                 None
             }
         }
     } else {
         if lantai_config.as_ref().is_some_and(|c| !c.enabled) {
-            aries::dual_info!("Lantai knowledge base is disabled in config");
+            moss::dual_info!("Lantai knowledge base is disabled in config");
         }
         None
     };
@@ -390,14 +390,14 @@ async fn main() -> ServerResult<()> {
             config_api.hot_reload_debounce_ms,
         ) {
             Ok(watcher) => {
-                aries::dual_info!(
+                moss::dual_info!(
                     "Configuration hot-reload enabled (debounce: {}ms)",
                     config_api.hot_reload_debounce_ms
                 );
                 Some(watcher)
             }
             Err(e) => {
-                aries::dual_warn!(
+                moss::dual_warn!(
                     "Failed to start configuration hot-reload watcher: {}. Hot-reload will be disabled.",
                     e
                 );
@@ -409,7 +409,7 @@ async fn main() -> ServerResult<()> {
             .as_ref()
             .is_some_and(|s| !s.hot_reload_enabled)
         {
-            aries::dual_info!("Configuration hot-reload is disabled in config");
+            moss::dual_info!("Configuration hot-reload is disabled in config");
         }
         None
     };
@@ -424,7 +424,7 @@ async fn main() -> ServerResult<()> {
 
     // Start the health check task if enabled
     if cli.check_health {
-        aries::dual_info!("Health check is enabled");
+        moss::dual_info!("Health check is enabled");
         Arc::clone(&state).start_health_check_task().await;
     }
 
@@ -499,7 +499,7 @@ async fn main() -> ServerResult<()> {
 
     // Add memory endpoints only if memory is enabled
     if state.has_memory() {
-        aries::dual_info!("Memory endpoints are enabled");
+        moss::dual_info!("Memory endpoints are enabled");
         main_router = main_router
             .route(
                 "/v1/memory/conversations/{conv_id}/history",
@@ -519,33 +519,33 @@ async fn main() -> ServerResult<()> {
                 get(handlers::list_user_conversations_handler),
             );
     } else {
-        aries::dual_info!("Memory endpoints are disabled");
+        moss::dual_info!("Memory endpoints are disabled");
     }
 
     // Add session history endpoints if session writer is enabled
     if state.has_session_writer() {
-        aries::dual_info!("Session history endpoints are enabled");
+        moss::dual_info!("Session history endpoints are enabled");
         main_router = main_router
             .route(
                 "/v1/sessions",
-                get(aries::session::handlers::list_sessions_handler),
+                get(moss::session::handlers::list_sessions_handler),
             )
             .route(
                 "/v1/sessions/batch-delete",
-                post(aries::session::handlers::batch_delete_sessions_handler),
+                post(moss::session::handlers::batch_delete_sessions_handler),
             )
             .route(
                 "/v1/sessions/{id}",
-                get(aries::session::handlers::get_session_handler)
-                    .delete(aries::session::handlers::delete_session_handler),
+                get(moss::session::handlers::get_session_handler)
+                    .delete(moss::session::handlers::delete_session_handler),
             );
     } else {
-        aries::dual_info!("Session history endpoints are disabled");
+        moss::dual_info!("Session history endpoints are disabled");
     }
 
     // Add skills API endpoints if skills system is initialized
     let skills_router: Option<Router> = if SkillRegistry::global().is_ok() {
-        aries::dual_info!("Skills API endpoints are enabled");
+        moss::dual_info!("Skills API endpoints are enabled");
 
         // Initialize rate limiter if configured
         if let Some(ref cfg) = skill_api_config {
@@ -557,10 +557,10 @@ async fn main() -> ServerResult<()> {
             skills::middleware::SkillsApiState::from_config(skill_api_config.as_ref());
 
         if skills_api_state.api_key.is_some() {
-            aries::dual_info!("Skills API authentication is enabled");
+            moss::dual_info!("Skills API authentication is enabled");
         }
         if skills_api_state.rate_limiting_enabled {
-            aries::dual_info!("Skills API rate limiting is enabled");
+            moss::dual_info!("Skills API rate limiting is enabled");
         }
 
         // Create install state for skill installation handler
@@ -611,7 +611,7 @@ async fn main() -> ServerResult<()> {
 
         Some(router)
     } else {
-        aries::dual_info!("Skills API endpoints are disabled (skills system not initialized)");
+        moss::dual_info!("Skills API endpoints are disabled (skills system not initialized)");
         None
     };
 
@@ -627,7 +627,7 @@ async fn main() -> ServerResult<()> {
     // Create artifacts router if enabled
     let artifacts_router: Option<Router> = if let Some(ref art_config) = artifacts_config {
         if art_config.enabled {
-            aries::dual_info!("Artifacts system is enabled");
+            moss::dual_info!("Artifacts system is enabled");
 
             // Expand tilde in paths
             let database_path = shellexpand::tilde(&art_config.database_path).to_string();
@@ -640,7 +640,7 @@ async fn main() -> ServerResult<()> {
             if let Some(parent) = std::path::Path::new(&database_path).parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     let err_msg = format!("Failed to create artifacts data directory: {e}");
-                    aries::dual_error!("{err_msg}");
+                    moss::dual_error!("{err_msg}");
                     ServerError::Operation(err_msg)
                 })?;
             }
@@ -673,10 +673,10 @@ async fn main() -> ServerResult<()> {
                             );
                             // Start returns a JoinHandle for the background task
                             let _handle = cleaner.start();
-                            aries::dual_info!("Artifact cleaner started");
+                            moss::dual_info!("Artifact cleaner started");
                         }
                         Err(e) => {
-                            aries::dual_error!("Failed to initialize artifact cleaner: {}", e);
+                            moss::dual_error!("Failed to initialize artifact cleaner: {}", e);
                         }
                     }
                 });
@@ -709,11 +709,11 @@ async fn main() -> ServerResult<()> {
 
             Some(router)
         } else {
-            aries::dual_info!("Artifacts system is disabled");
+            moss::dual_info!("Artifacts system is disabled");
             None
         }
     } else {
-        aries::dual_info!("Artifacts system is not configured");
+        moss::dual_info!("Artifacts system is not configured");
         None
     };
 
@@ -734,7 +734,7 @@ async fn main() -> ServerResult<()> {
     let subagent_manager = if let Some(ref config) = subagent_config
         && config.enabled
     {
-        aries::dual_info!(
+        moss::dual_info!(
             "Sub-Agent system enabled (execution_mode: {})",
             config.execution_mode
         );
@@ -747,7 +747,7 @@ async fn main() -> ServerResult<()> {
         let subagent_router = subagent::subagent_router(Arc::clone(&manager));
         app = app.merge(subagent_router);
 
-        aries::dual_info!(
+        moss::dual_info!(
             "Sub-Agent API endpoints enabled (max concurrent: {}, max depth: {})",
             config.max_concurrent,
             config.max_nesting_depth
@@ -755,7 +755,7 @@ async fn main() -> ServerResult<()> {
 
         Some(manager)
     } else {
-        aries::dual_info!("Sub-Agent system is disabled or not configured");
+        moss::dual_info!("Sub-Agent system is disabled or not configured");
         None
     };
 
@@ -766,7 +766,7 @@ async fn main() -> ServerResult<()> {
     if let Some(hitl_manager) = hitl::global() {
         let hitl_router = hitl::handlers::hitl_router(Arc::clone(hitl_manager));
         app = app.merge(hitl_router);
-        aries::dual_info!("HITL API endpoints enabled");
+        moss::dual_info!("HITL API endpoints enabled");
     }
 
     let app =
@@ -791,18 +791,18 @@ async fn main() -> ServerResult<()> {
 
                     // Log request start
                     if is_polling {
-                        aries::dual_debug!("Request started - ID: {}", request_id);
+                        moss::dual_debug!("Request started - ID: {}", request_id);
                     } else {
-                        aries::dual_info!("Request started - ID: {}", request_id);
+                        moss::dual_info!("Request started - ID: {}", request_id);
                     }
 
                     let response = next.run(req).await;
 
                     // Log request completion
                     if is_polling {
-                        aries::dual_debug!("Request completed - ID: {}", request_id);
+                        moss::dual_debug!("Request completed - ID: {}", request_id);
                     } else {
-                        aries::dual_info!("Request completed - ID: {}", request_id);
+                        moss::dual_info!("Request completed - ID: {}", request_id);
                     }
 
                     response
@@ -816,11 +816,11 @@ async fn main() -> ServerResult<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
         let err_msg = format!("Failed to bind to address: {e}");
 
-        aries::dual_error!("{err_msg}");
+        moss::dual_error!("{err_msg}");
 
         ServerError::Operation(err_msg)
     })?;
-    aries::dual_info!("Listening on {}", addr);
+    moss::dual_info!("Listening on {}", addr);
 
     // Set up graceful shutdown
     let server =
@@ -832,22 +832,22 @@ async fn main() -> ServerResult<()> {
     // Shutdown Lantai watcher
     if let Some(ref token) = _lantai_cancel_token {
         token.cancel();
-        aries::dual_info!("Lantai file watcher stopped");
+        moss::dual_info!("Lantai file watcher stopped");
     }
 
     // Shutdown stdio MCP child processes with timeout to prevent hanging
-    aries::dual_info!("Shutting down stdio MCP child processes...");
+    moss::dual_info!("Shutting down stdio MCP child processes...");
     match tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        aries::mcp_stdio::get_stdio_process_manager().shutdown_all(),
+        moss::mcp_stdio::get_stdio_process_manager().shutdown_all(),
     )
     .await
     {
         Ok(()) => {
-            aries::dual_info!("stdio MCP processes shut down successfully");
+            moss::dual_info!("stdio MCP processes shut down successfully");
         }
         Err(_) => {
-            aries::dual_warn!(
+            moss::dual_warn!(
                 "stdio MCP process shutdown timed out after 10s, processes may be orphaned"
             );
         }
@@ -855,12 +855,12 @@ async fn main() -> ServerResult<()> {
 
     match server_result {
         Ok(()) => {
-            aries::dual_info!("Server shutdown completed");
+            moss::dual_info!("Server shutdown completed");
             Ok(())
         }
         Err(e) => {
             let err_msg = format!("Server failed: {e}");
-            aries::dual_error!("{err_msg}");
+            moss::dual_error!("{err_msg}");
             Err(ServerError::Operation(err_msg))
         }
     }
@@ -886,10 +886,10 @@ async fn shutdown_signal() {
 
     tokio::select! {
         _ = ctrl_c => {
-            aries::dual_info!("Received Ctrl+C, starting graceful shutdown");
+            moss::dual_info!("Received Ctrl+C, starting graceful shutdown");
         },
         _ = terminate => {
-            aries::dual_info!("Received SIGTERM, starting graceful shutdown");
+            moss::dual_info!("Received SIGTERM, starting graceful shutdown");
         },
     }
 }

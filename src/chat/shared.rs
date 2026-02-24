@@ -20,7 +20,7 @@ use std::{
 /// # Example
 ///
 /// ```rust
-/// use aries::chat::shared::TimeBudget;
+/// use moss::chat::shared::TimeBudget;
 ///
 /// let budget = TimeBudget::new(600); // 10 minutes total budget
 ///

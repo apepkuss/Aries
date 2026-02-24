@@ -1,4 +1,4 @@
-// Aries - AI Agent Framework
+// Moss - AI Agent Framework
 //
 // This library provides core functionality for building AI agent applications.
 

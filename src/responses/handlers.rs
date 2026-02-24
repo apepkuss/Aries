@@ -322,7 +322,7 @@ fn apply_warnings(response: &mut ResponseReply, warnings: &mut Vec<String>) {
     }
 
     let merged = std::mem::take(warnings).join(" | ");
-    let key = "aries_warnings".to_string();
+    let key = "moss_warnings".to_string();
 
     if let Some(existing) = response.metadata.get_mut(&key) {
         if !existing.is_empty() {
@@ -430,7 +430,7 @@ fn validate_request(req: &ResponseRequest) -> Result<Vec<String>, ResponseError>
     }
 
     if inner.conversation.is_some() {
-        warnings.push("`conversation` object ignored: aries manages sessions locally".to_string());
+        warnings.push("`conversation` object ignored: moss manages sessions locally".to_string());
     }
 
     if req

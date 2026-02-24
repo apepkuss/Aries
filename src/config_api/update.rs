@@ -10,7 +10,7 @@ use super::types::{
     ServerConfigUpdate, SubagentConfigUpdate,
 };
 use crate::{
-    config::{AriesLantaiConfig, ChatConfig, Config, EmbeddingConfig, MemoryConfig, RagConfig},
+    config::{ChatConfig, Config, EmbeddingConfig, MemoryConfig, MossLantaiConfig, RagConfig},
     subagent::SubAgentSystemConfig,
 };
 
@@ -487,7 +487,7 @@ fn apply_subagent_config_update(
 
 /// Apply lantai auto memory configuration updates
 fn apply_lantai_auto_memory_config_update(
-    lantai: &mut Option<AriesLantaiConfig>,
+    lantai: &mut Option<MossLantaiConfig>,
     update: &LantaiAutoMemoryConfigUpdate,
     validated_fields: &[String],
     result: &mut UpdateResult,

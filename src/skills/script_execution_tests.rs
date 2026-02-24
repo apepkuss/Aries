@@ -602,7 +602,7 @@ async fn test_tsc_009_context_to_env() {
     assert_eq!(env.get("SUBTASK_ID").unwrap(), "1");
 
     // Verify runtime info
-    assert!(env.contains_key("ARIES_VERSION"));
+    assert!(env.contains_key("MOSS_VERSION"));
 }
 
 // ============================================================================

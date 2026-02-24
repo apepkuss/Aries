@@ -31,9 +31,9 @@ pub enum SkillCommand {
     /// Install a skill from skillsmp.com or other sources
     ///
     /// Examples:
-    ///   aries skill install skillsmp:code-review
-    ///   aries skill install skillsmp:code-review@2.0.0
-    ///   aries skill install https://example.com/skill.tar.gz --name my-skill
+    ///   moss skill install skillsmp:code-review
+    ///   moss skill install skillsmp:code-review@2.0.0
+    ///   moss skill install https://example.com/skill.tar.gz --name my-skill
     Install {
         /// Skill source (e.g., skillsmp:code-review, github:user/repo)
         source: String,
@@ -54,8 +54,8 @@ pub enum SkillCommand {
     /// Search for skills on skillsmp.com
     ///
     /// Examples:
-    ///   aries skill search "code review"
-    ///   aries skill search --category development
+    ///   moss skill search "code review"
+    ///   moss skill search --category development
     Search {
         /// Search query
         query: String,
@@ -72,8 +72,8 @@ pub enum SkillCommand {
     /// List installed skills
     ///
     /// Examples:
-    ///   aries skill list
-    ///   aries skill list --remote
+    ///   moss skill list
+    ///   moss skill list --remote
     List {
         /// Show skills from remote marketplace instead of local
         #[arg(long, short = 'r')]
@@ -91,8 +91,8 @@ pub enum SkillCommand {
     /// Show detailed information about a skill
     ///
     /// Examples:
-    ///   aries skill info code-review
-    ///   aries skill info skillsmp:code-review
+    ///   moss skill info code-review
+    ///   moss skill info skillsmp:code-review
     Info {
         /// Skill name or source (e.g., code-review, skillsmp:code-review)
         name: String,
@@ -101,8 +101,8 @@ pub enum SkillCommand {
     /// Update installed skills
     ///
     /// Examples:
-    ///   aries skill update code-review
-    ///   aries skill update --all
+    ///   moss skill update code-review
+    ///   moss skill update --all
     Update {
         /// Skill name to update (omit for --all)
         name: Option<String>,
@@ -115,13 +115,13 @@ pub enum SkillCommand {
     /// Check for outdated skills
     ///
     /// Examples:
-    ///   aries skill outdated
+    ///   moss skill outdated
     Outdated,
 
     /// Uninstall a skill
     ///
     /// Examples:
-    ///   aries skill uninstall code-review
+    ///   moss skill uninstall code-review
     Uninstall {
         /// Skill name to uninstall
         name: String,
@@ -200,7 +200,7 @@ async fn install_skill(
     if enable {
         println!("  Skill enabled for use.");
     } else {
-        println!("  Use 'aries skill list' to see installed skills.");
+        println!("  Use 'moss skill list' to see installed skills.");
     }
 
     Ok(())
@@ -256,7 +256,7 @@ async fn list_remote_skills(
         println!("{:<30} {:<50}", skill.name, desc);
     }
 
-    println!("\nInstall a skill with: aries skill install skillsmp:<name>");
+    println!("\nInstall a skill with: moss skill install skillsmp:<name>");
 
     Ok(())
 }
@@ -267,7 +267,7 @@ async fn list_local_skills(config: &crate::config::Config) -> ServerResult<()> {
 
     if !skills_dir.exists() {
         println!("No skills directory found at: {}", skills_dir.display());
-        println!("\nInstall skills with: aries skill install skillsmp:<name>");
+        println!("\nInstall skills with: moss skill install skillsmp:<name>");
         return Ok(());
     }
 
@@ -276,7 +276,7 @@ async fn list_local_skills(config: &crate::config::Config) -> ServerResult<()> {
 
     if skills.is_empty() {
         println!("No skills installed in: {}", skills_dir.display());
-        println!("\nInstall skills with: aries skill install skillsmp:<name>");
+        println!("\nInstall skills with: moss skill install skillsmp:<name>");
         return Ok(());
     }
 
@@ -367,10 +367,7 @@ async fn show_remote_skill_info(
     if !skill.allowed_tools.is_empty() {
         println!("Tools:       {}", skill.allowed_tools.join(", "));
     }
-    println!(
-        "\nInstall with: aries skill install skillsmp:{}",
-        skill_name
-    );
+    println!("\nInstall with: moss skill install skillsmp:{}", skill_name);
 
     Ok(())
 }
@@ -391,7 +388,7 @@ async fn show_local_skill_info(
             skill_name,
             skills_dir.display()
         );
-        println!("\nTry: aries skill info skillsmp:{}", skill_name);
+        println!("\nTry: moss skill info skillsmp:{}", skill_name);
         return Ok(());
     }
 
@@ -484,7 +481,7 @@ async fn search_skills(
     }
 
     println!("\nFound {} skill(s).", skills.len());
-    println!("Install a skill with: aries skill install skillsmp:<name>");
+    println!("Install a skill with: moss skill install skillsmp:<name>");
 
     Ok(())
 }
@@ -531,7 +528,7 @@ async fn update_skills(name: Option<&str>, all: bool, config_path: &PathBuf) -> 
                 skill_name
             );
             println!(
-                "To reinstall from marketplace: aries skill install skillsmp:{}",
+                "To reinstall from marketplace: moss skill install skillsmp:{}",
                 skill_name
             );
             return Ok(());
@@ -625,7 +622,7 @@ async fn check_outdated_skills(config_path: &PathBuf) -> ServerResult<()> {
 
     println!("\nTotal: {} skill(s) with version tracking.", skills.len());
     println!("\nNote: Version comparison with remote is not yet implemented.");
-    println!("Use 'aries skill update <name>' to reinstall from the latest source.");
+    println!("Use 'moss skill update <name>' to reinstall from the latest source.");
 
     Ok(())
 }

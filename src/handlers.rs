@@ -216,7 +216,7 @@ pub async fn chat_handler(
         None
     };
 
-    // Aries operates exclusively in Plan mode
+    // Moss operates exclusively in Plan mode
     dual_debug!("Using Plan mode - request_id: {}", request_id);
 
     // Call Plan mode chat handler

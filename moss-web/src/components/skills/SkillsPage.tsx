@@ -77,7 +77,7 @@ export function SkillsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Skills</h1>
             <p className="text-base text-muted-foreground mt-1">
-              Give Aries superpowers.
+              Give Moss superpowers.
             </p>
           </div>
           <div className="flex items-center gap-2">
