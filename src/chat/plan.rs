@@ -54,7 +54,7 @@ use crate::{
     },
     dual_debug, dual_error, dual_info, dual_warn,
     error::{ServerError, ServerResult},
-    hitl::{self, HitlToolCaller, HitlToolContext, HitlToolResult},
+    hitl::{self, HitlToolCaller, HitlToolContext, HitlToolResult, SkillHitlAdapter},
     mcp::{
         DEFAULT_SEARCH_FALLBACK_MESSAGE, MCP_SERVICES, SEARCH_MCP_SERVER_NAMES, extract_tool_name,
         format_mcp_tool_name, parse_mcp_tool_name,
@@ -4236,6 +4236,9 @@ async fn execute_tool_call(
             active_skills,
             conv_id,
             request_id,
+            user_id,
+            cancel_token,
+            subtask_id,
             iter_trace,
             tool_call_start,
         )
@@ -4662,6 +4665,9 @@ async fn execute_internal_tool(
     active_skills: &[LoadedSkill],
     conv_id: Option<&str>,
     request_id: &str,
+    user_id: &str,
+    cancel_token: &CancellationToken,
+    subtask_id: Option<usize>,
     iter_trace: &mut IterationTrace,
     start_time: Instant,
 ) -> ServerResult<String> {
@@ -4683,6 +4689,9 @@ async fn execute_internal_tool(
                 active_skills,
                 conv_id,
                 request_id,
+                user_id,
+                cancel_token,
+                subtask_id,
                 &mut tool_trace,
                 iter_trace,
                 start_time,
@@ -5462,11 +5471,15 @@ async fn trigger_memory_compaction(
 ///
 /// # Returns
 /// The script output as a formatted string including stdout, stderr, and exit code.
+#[allow(clippy::too_many_arguments)]
 async fn execute_skill_run_script(
     tool_args: serde_json::Value,
     active_skills: &[LoadedSkill],
     conv_id: Option<&str>,
     request_id: &str,
+    user_id: &str,
+    cancel_token: &CancellationToken,
+    subtask_id: Option<usize>,
     tool_trace: &mut ToolCallTrace,
     iter_trace: &mut IterationTrace,
     start_time: Instant,
@@ -5510,17 +5523,137 @@ async fn execute_skill_run_script(
         request_id
     );
 
-    // Build execution context
+    // HITL check before script execution
+    if let Some(hitl_manager) = hitl::global()
+        && hitl_manager.is_enabled()
+    {
+        let adapter = SkillHitlAdapter::new(Arc::clone(hitl_manager));
+        adapter.register_skill(&skill.metadata);
+
+        let mut hitl_ctx = HitlToolContext::new(conv_id.unwrap_or(""), user_id)
+            .with_cancel_token(cancel_token.clone());
+        if let Some(id) = subtask_id {
+            hitl_ctx = hitl_ctx.with_subtask_id(id);
+        }
+
+        // Clone data needed by the execution closure
+        let skill_clone = skill.clone();
+        let script_name_owned = script_name.to_string();
+        let args_clone = args.clone();
+        let conv_id_owned = conv_id.map(|s| s.to_string());
+        let request_id_owned = request_id.to_string();
+
+        let result = adapter
+            .execute_with_hitl(
+                &skill.metadata.name,
+                "run_script",
+                &tool_args,
+                &hitl_ctx,
+                move |_modified_args| {
+                    let sn = script_name_owned;
+                    let a = args_clone;
+                    let cid = conv_id_owned;
+                    let rid = request_id_owned;
+                    let sk = skill_clone;
+                    async move {
+                        let context = ScriptContext::with_ids(cid, Some(rid));
+                        let output = sk
+                            .execute_script_with_context(&sn, a, context, None)
+                            .await
+                            .map_err(|e| format!("Script execution failed: {}", e))?;
+
+                        if output.exit_code == 0 {
+                            Ok(format!(
+                                "Script '{}' executed successfully.\n\nOutput:\n{}",
+                                sn,
+                                output.stdout.trim()
+                            ))
+                        } else {
+                            Ok(format!(
+                                "Script '{}' failed with exit code {}.\n\nStdout:\n{}\n\nStderr:\n{}\n\nIMPORTANT: If this failure is due to missing configuration (environment variables, API keys, credentials), missing dependencies, or permission issues, do NOT retry. Report the error to the user and suggest how to resolve it.",
+                                sn,
+                                output.exit_code,
+                                output.stdout.trim(),
+                                output.stderr.trim()
+                            ))
+                        }
+                    }
+                },
+            )
+            .await;
+
+        match result {
+            Ok(hitl_result) => {
+                return match hitl_result {
+                    HitlToolResult::Executed(r)
+                    | HitlToolResult::ExecutedWithoutConfirmation(r)
+                    | HitlToolResult::Approved(r)
+                    | HitlToolResult::HitlDisabled(r) => {
+                        tool_trace.set_result(r.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Ok(r)
+                    }
+                    HitlToolResult::Modified { result, .. } => {
+                        tool_trace.set_result(result.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Ok(result)
+                    }
+                    HitlToolResult::Rejected { reason } => {
+                        let err = reason
+                            .unwrap_or_else(|| "Script execution rejected by user".to_string());
+                        tool_trace.set_error(err.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Err(ServerError::UserInterrupted(err))
+                    }
+                    HitlToolResult::Skipped { reason } => {
+                        let err = format!("Script execution skipped: {}", reason);
+                        tool_trace.set_error(err.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Err(ServerError::Operation(err))
+                    }
+                    HitlToolResult::Aborted { reason } => {
+                        let err = format!(
+                            "Script execution aborted: {}",
+                            reason.unwrap_or_else(|| "No reason provided".to_string())
+                        );
+                        tool_trace.set_error(err.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Err(ServerError::Operation(err))
+                    }
+                    HitlToolResult::TimedOut { behavior } => {
+                        let err = format!("HITL confirmation timed out (behavior: {})", behavior);
+                        tool_trace.set_error(err.clone(), start_time.elapsed());
+                        iter_trace.add_tool_call(tool_trace.clone());
+                        Err(ServerError::Operation(err))
+                    }
+                };
+            }
+            Err(e) => {
+                if matches!(e, hitl::HitlError::Cancelled(_)) {
+                    let err = "HITL request cancelled due to another subtask rejection".to_string();
+                    tool_trace.set_error(err.clone(), start_time.elapsed());
+                    iter_trace.add_tool_call(tool_trace.clone());
+                    return Err(ServerError::UserInterrupted(err));
+                }
+                // HITL internal error - fall through to non-HITL execution
+                dual_warn!(
+                    "⚠️ HITL error for skill script, falling back to direct execution: {} - request_id: {}",
+                    e,
+                    request_id
+                );
+            }
+        }
+    }
+
+    // Direct execution (no HITL or HITL fallback)
     let context =
         ScriptContext::with_ids(conv_id.map(|s| s.to_string()), Some(request_id.to_string()));
 
-    // Execute the script
     match skill
         .execute_script_with_context(script_name, args.clone(), context, None)
         .await
     {
         Ok(output) => {
-            // Format result for LLM
             let result = if output.exit_code == 0 {
                 format!(
                     "Script '{}' executed successfully.\n\nOutput:\n{}",
