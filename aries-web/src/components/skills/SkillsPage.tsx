@@ -7,12 +7,20 @@ import {
   X,
   ChevronDown,
   Key,
-  Save,
+  Loader2,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { useSkillsStore } from '@/stores';
 import { getSkillEnv, updateSkillEnv } from '@/api/skills';
 import { EnvVarsForm } from './EnvVarsForm';
@@ -212,27 +220,29 @@ export function SkillsPage() {
 }
 
 function SkillCard({ skill }: { skill: SkillSummary }) {
-  const [showEnv, setShowEnv] = useState(false);
+  const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [isLoadingEnv, setIsLoadingEnv] = useState(false);
   const [isSavingEnv, setIsSavingEnv] = useState(false);
   const [envDirty, setEnvDirty] = useState(false);
   const [envError, setEnvError] = useState<string | null>(null);
+  const [envConfigured, setEnvConfigured] = useState(false);
 
-  const handleToggleEnv = async () => {
-    if (!showEnv) {
+  const handleOpenEnvDialog = async (open: boolean) => {
+    if (open) {
       setIsLoadingEnv(true);
       setEnvError(null);
       try {
         const response = await getSkillEnv(skill.name);
         setEnvVars(response.env_vars);
+        setEnvConfigured(Object.keys(response.env_vars).length > 0);
       } catch {
         setEnvError('Failed to load environment variables');
       }
       setIsLoadingEnv(false);
       setEnvDirty(false);
     }
-    setShowEnv(!showEnv);
+    setEnvDialogOpen(open);
   };
 
   const handleEnvChange = (newEnvVars: Record<string, string>) => {
@@ -246,6 +256,8 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
     try {
       await updateSkillEnv(skill.name, envVars);
       setEnvDirty(false);
+      setEnvConfigured(Object.keys(envVars).some((k) => k.trim()));
+      setEnvDialogOpen(false);
     } catch {
       setEnvError('Failed to save environment variables');
     }
@@ -268,85 +280,64 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
             {skill.description || 'No description'}
           </p>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleToggleEnv}
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-          title="环境变量配置"
-        >
-          <Key className="h-3.5 w-3.5" />
-        </Button>
       </div>
 
-      {/* Tools */}
-      {skill.allowed_tools.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-border/40">
-          <div className="flex items-center gap-1 mb-2">
-            <Wrench className="h-3 w-3 text-muted-foreground" />
-            <span className="text-[11px] text-muted-foreground font-medium">
-              Tools ({skill.allowed_tools.length})
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {skill.allowed_tools.map((tool) => (
-              <Badge
-                key={tool}
-                variant="secondary"
-                className="text-[10px] px-1.5 py-0 h-5 font-mono"
-              >
-                {tool}
-              </Badge>
-            ))}
-          </div>
+      {/* Footer info */}
+      <div className="mt-3 pt-3 border-t border-border/40 flex items-center gap-3">
+        {/* Tools count */}
+        <div className="flex items-center gap-1">
+          <Wrench className="h-3 w-3 text-muted-foreground" />
+          <span className="text-[11px] text-muted-foreground font-medium">
+            {skill.allowed_tools.length} tools
+          </span>
         </div>
-      )}
 
-      {/* Env Vars Panel */}
-      {showEnv && (
-        <div className="mt-3 pt-3 border-t border-border/40">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1">
-              <Key className="h-3 w-3 text-muted-foreground" />
-              <span className="text-[11px] text-muted-foreground font-medium">
-                环境变量
+        {/* Env vars status + dialog */}
+        <Dialog open={envDialogOpen} onOpenChange={handleOpenEnvDialog}>
+          <DialogTrigger asChild>
+            <button className="flex items-center gap-1 text-[11px] font-medium hover:text-foreground transition-colors cursor-pointer">
+              <Key className="h-3 w-3" />
+              <span className={envConfigured ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                {envConfigured ? '环境变量已配置' : '配置环境变量'}
               </span>
+            </button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>环境变量 - {skill.name}</DialogTitle>
+              <DialogDescription>
+                为此 Skill 配置环境变量，这些变量将在 Skill 脚本执行时注入。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              {isLoadingEnv ? (
+                <div className="flex items-center text-xs text-muted-foreground py-4">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                  加载中...
+                </div>
+              ) : (
+                <EnvVarsForm
+                  envVars={envVars}
+                  onChange={handleEnvChange}
+                  disabled={isSavingEnv}
+                />
+              )}
+              {envError && (
+                <p className="text-xs text-destructive mt-2">{envError}</p>
+              )}
             </div>
-            {envDirty && (
-              <Button
-                size="sm"
-                onClick={handleSaveEnv}
-                disabled={isSavingEnv}
-                className="h-6 text-[10px] px-2"
-              >
-                {isSavingEnv ? (
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                ) : (
-                  <>
-                    <Save className="h-3 w-3 mr-1" />
-                    保存
-                  </>
-                )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEnvDialogOpen(false)}>
+                取消
               </Button>
-            )}
-          </div>
-          {isLoadingEnv ? (
-            <div className="flex items-center text-xs text-muted-foreground py-2">
-              <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-              加载中...
-            </div>
-          ) : (
-            <EnvVarsForm
-              envVars={envVars}
-              onChange={handleEnvChange}
-              disabled={isSavingEnv}
-            />
-          )}
-          {envError && (
-            <p className="text-xs text-destructive mt-2">{envError}</p>
-          )}
-        </div>
-      )}
+              <Button onClick={handleSaveEnv} disabled={isSavingEnv || !envDirty}>
+                {isSavingEnv && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                保存
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 }

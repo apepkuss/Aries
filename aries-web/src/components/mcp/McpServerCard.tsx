@@ -89,7 +89,7 @@ export function McpServerCard({ server, isToggling, toggleError, onToggle, onUpd
               <button className="flex items-center gap-1 text-[11px] font-medium hover:text-foreground transition-colors cursor-pointer">
                 <Key className="h-3 w-3" />
                 <span className={server.api_key_configured ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-                  {server.api_key_configured ? 'API Key Set' : 'Set API Key'}
+                  {server.api_key_configured ? 'API Key 已配置' : '配置 API Key'}
                 </span>
               </button>
             </DialogTrigger>
