@@ -154,6 +154,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const currentSessionId = sessionId ?? generateSessionId();
     if (!sessionId) {
       set({ sessionId: currentSessionId });
+      // Sync to sessions store so it persists for window restore
+      useSessionsStore.getState().setCurrentId(currentSessionId);
     }
 
     // Create user message

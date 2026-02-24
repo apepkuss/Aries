@@ -8,6 +8,20 @@ import {
 } from '@/api/session';
 import type { SessionMeta, UIMessage } from '@/api/types';
 
+const LAST_SESSION_KEY = 'moss_last_session_id';
+
+function saveLastSessionId(id: string | null) {
+  if (id) {
+    localStorage.setItem(LAST_SESSION_KEY, id);
+  } else {
+    localStorage.removeItem(LAST_SESSION_KEY);
+  }
+}
+
+export function getLastSessionId(): string | null {
+  return localStorage.getItem(LAST_SESSION_KEY);
+}
+
 interface SessionsState {
   // Data
   sessions: SessionMeta[];
@@ -77,6 +91,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   // (after calling loadMessages) to avoid a flash of empty state.
   selectSession: async (id: string) => {
     set({ isLoadingDetail: true, currentId: id, error: null });
+    saveLastSessionId(id);
     try {
       const response = await getSessionDetail(id);
 
@@ -107,10 +122,12 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     const { sessions, currentId } = get();
     try {
       await deleteSession(id);
+      const newCurrentId = currentId === id ? null : currentId;
       set({
         sessions: sessions.filter((s) => s.session_id !== id),
-        currentId: currentId === id ? null : currentId,
+        currentId: newCurrentId,
       });
+      if (currentId === id) saveLastSessionId(null);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : 'Failed to delete session',
@@ -121,6 +138,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   // Set current session ID without loading
   setCurrentId: (id) => {
     set({ currentId: id });
+    saveLastSessionId(id);
   },
 
   // Set loading detail state
@@ -131,6 +149,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   // Clear current selection
   clearCurrent: () => {
     set({ currentId: null });
+    saveLastSessionId(null);
   },
 
   // Toggle multi-select mode
@@ -174,12 +193,14 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     try {
       await batchDeleteSessions(ids);
       const remaining = sessions.filter((s) => !selectedIds.has(s.session_id));
+      const newCurrentId = selectedIds.has(currentId ?? '') ? null : currentId;
       set({
         sessions: remaining,
         selectedIds: new Set(),
         isSelectMode: false,
-        currentId: selectedIds.has(currentId ?? '') ? null : currentId,
+        currentId: newCurrentId,
       });
+      if (selectedIds.has(currentId ?? '')) saveLastSessionId(null);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : 'Failed to batch delete sessions',
@@ -197,6 +218,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         isSelectMode: false,
         currentId: null,
       });
+      saveLastSessionId(null);
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : 'Failed to delete all sessions',

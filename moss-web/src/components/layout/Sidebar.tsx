@@ -16,6 +16,7 @@ import {
   useConfigStore,
   useSessionsStore,
 } from '@/stores';
+import { getLastSessionId } from '@/stores/sessions';
 import { useEffect } from 'react';
 import { SessionList } from '@/components/session/SessionList';
 import { SessionBatchDeleteDialog } from '@/components/session/SessionBatchDeleteDialog';
@@ -57,14 +58,29 @@ export function Sidebar() {
   // Use session history as primary source; fall back to memory conversations
   const useSessionHistory = sessionEnabled;
 
-  // Fetch data on mount based on which feature is enabled
+  // Fetch data on mount and restore last active session
   useEffect(() => {
-    if (useSessionHistory) {
-      fetchSessions();
-    } else if (memoryEnabled) {
-      fetchConversations();
-    }
-  }, [fetchSessions, fetchConversations, useSessionHistory, memoryEnabled]);
+    const init = async () => {
+      if (useSessionHistory) {
+        await fetchSessions();
+        // Restore last active session after fetching
+        const savedId = getLastSessionId();
+        const { sessions: loaded, currentId } = useSessionsStore.getState();
+        if (savedId && !currentId && loaded.some((s) => s.session_id === savedId)) {
+          useConversationsStore.getState().clearCurrent();
+          clearMessages();
+          const messages = await selectSession(savedId);
+          loadMessages(messages);
+          setConversationId(null);
+          setSessionId(savedId);
+          useSessionsStore.getState().setLoadingDetail(false);
+        }
+      } else if (memoryEnabled) {
+        fetchConversations();
+      }
+    };
+    init();
+  }, [fetchSessions, fetchConversations, useSessionHistory, memoryEnabled, clearMessages, selectSession, loadMessages, setConversationId, setSessionId]);
 
   // --- Session history handlers ---
   const handleSelectSession = async (id: string) => {
