@@ -176,7 +176,10 @@ model: claude-3-opus
         assert_eq!(skill.metadata.model, Some("claude-3-opus".to_string()));
 
         let meta = skill.metadata.metadata.unwrap();
-        assert_eq!(meta.get("author"), Some(&"moss".to_string()));
+        assert_eq!(
+            meta.get("author"),
+            Some(&serde_json::Value::String("moss".to_string()))
+        );
     }
 
     #[tokio::test]

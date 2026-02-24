@@ -570,19 +570,25 @@ mod tests {
         priority: Option<i32>,
         conflicts: Option<Vec<String>>,
     ) -> LoadedSkill {
-        use std::{collections::HashMap, path::PathBuf};
+        use std::path::PathBuf;
 
         use chrono::Utc;
 
         use crate::skills::SkillMetadata;
 
         // Build metadata map with priority and conflicts
-        let mut metadata_map = HashMap::new();
+        let mut metadata_obj = serde_json::Map::new();
         if let Some(p) = priority {
-            metadata_map.insert("priority".to_string(), p.to_string());
+            metadata_obj.insert(
+                "priority".to_string(),
+                serde_json::Value::String(p.to_string()),
+            );
         }
         if let Some(ref c) = conflicts {
-            metadata_map.insert("conflicts".to_string(), c.join(", "));
+            metadata_obj.insert(
+                "conflicts".to_string(),
+                serde_json::Value::String(c.join(", ")),
+            );
         }
 
         LoadedSkill {
@@ -591,10 +597,10 @@ mod tests {
                 description: format!("Test skill {}", name),
                 license: None,
                 compatibility: None,
-                metadata: if metadata_map.is_empty() {
+                metadata: if metadata_obj.is_empty() {
                     None
                 } else {
-                    Some(metadata_map)
+                    Some(serde_json::Value::Object(metadata_obj))
                 },
                 allowed_tools: None,
                 model: None,

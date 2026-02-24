@@ -78,31 +78,37 @@ impl SkillHitlConfig {
         let mut config = Self::default();
 
         // 从 metadata 中解析 hitl 配置
-        if let Some(ref meta_map) = metadata.metadata {
+        if let Some(ref meta_val) = metadata.metadata
+            && let Some(meta_map) = meta_val.as_object()
+        {
             // 解析风险级别
-            if let Some(level_str) = meta_map.get("hitl.risk_level") {
+            if let Some(level_str) = meta_map.get("hitl.risk_level").and_then(|v| v.as_str()) {
                 config.risk_level = Self::parse_risk_level(level_str);
             }
 
             // 解析需要确认的工具
-            if let Some(tools_str) = meta_map.get("hitl.require_confirmation") {
+            if let Some(tools_str) = meta_map
+                .get("hitl.require_confirmation")
+                .and_then(|v| v.as_str())
+            {
                 config.require_confirmation = Self::parse_tool_list(tools_str);
             }
 
             // 解析信任的工具
-            if let Some(tools_str) = meta_map.get("hitl.trusted_tools") {
+            if let Some(tools_str) = meta_map.get("hitl.trusted_tools").and_then(|v| v.as_str()) {
                 config.trusted_tools = Self::parse_tool_list(tools_str);
             }
 
             // 解析超时秒数
-            if let Some(timeout_str) = meta_map.get("hitl.timeout_secs") {
+            if let Some(timeout_str) = meta_map.get("hitl.timeout_secs").and_then(|v| v.as_str()) {
                 config.timeout_secs = timeout_str.parse().ok();
             }
 
             // 解析工具级别的风险覆盖
             for (key, value) in meta_map {
                 if let Some(tool_name) = key.strip_prefix("hitl.tool_risk.")
-                    && let Some(level) = Self::parse_risk_level(value)
+                    && let Some(val_str) = value.as_str()
+                    && let Some(level) = Self::parse_risk_level(val_str)
                 {
                     config.tool_risk_levels.insert(tool_name.to_string(), level);
                 }
@@ -391,28 +397,18 @@ mod tests {
     }
 
     fn create_test_metadata() -> SkillMetadata {
-        let mut metadata_map = HashMap::new();
-        metadata_map.insert("hitl.risk_level".to_string(), "high".to_string());
-        metadata_map.insert(
-            "hitl.require_confirmation".to_string(),
-            "shell_execute, file_write".to_string(),
-        );
-        metadata_map.insert(
-            "hitl.trusted_tools".to_string(),
-            "read_file, list_dir".to_string(),
-        );
-        metadata_map.insert("hitl.timeout_secs".to_string(), "300".to_string());
-        metadata_map.insert(
-            "hitl.tool_risk.delete_file".to_string(),
-            "critical".to_string(),
-        );
-
         SkillMetadata {
             name: "test-skill".to_string(),
             description: "A test skill".to_string(),
             license: None,
             compatibility: None,
-            metadata: Some(metadata_map),
+            metadata: Some(serde_json::json!({
+                "hitl.risk_level": "high",
+                "hitl.require_confirmation": "shell_execute, file_write",
+                "hitl.trusted_tools": "read_file, list_dir",
+                "hitl.timeout_secs": "300",
+                "hitl.tool_risk.delete_file": "critical"
+            })),
             allowed_tools: None,
             model: None,
             parameters: None,

@@ -103,6 +103,11 @@ Example: <use_skill>skill-name</use_skill>
         // Auto-generate script calling instructions if skill has scripts
         let scripts_section = Self::generate_scripts_section(skill);
 
+        // Replace {baseDir} placeholder with actual skill directory path
+        let content = skill
+            .content
+            .replace("{baseDir}", &skill.skill_dir.to_string_lossy());
+
         format!(
             r#"## Active Skill: {}
 
@@ -111,7 +116,7 @@ The following skill instructions guide how to complete this task:
 ---
 {}
 ---{}{}"#,
-            skill.metadata.name, skill.content, scripts_section, refs_section
+            skill.metadata.name, content, scripts_section, refs_section
         )
     }
 
@@ -320,7 +325,11 @@ Example:
                 output.push_str("\n---\n\n");
             }
             output.push_str(&format!("### Skill: {}\n\n", skill.metadata.name));
-            output.push_str(&skill.content);
+            // Replace {baseDir} placeholder with actual skill directory path
+            let content = skill
+                .content
+                .replace("{baseDir}", &skill.skill_dir.to_string_lossy());
+            output.push_str(&content);
 
             // Auto-append script instructions for skills with scripts
             let scripts_section = Self::generate_scripts_section(skill);
@@ -1026,14 +1035,10 @@ fn main() {
     }
 
     fn create_test_skill_with_scripts(name: &str, scripts: Option<Vec<&str>>) -> LoadedSkill {
-        use std::collections::HashMap;
         let mut skill = create_test_skill(name, "Content");
         if let Some(s) = scripts {
             let scripts_str = s.join(", ");
-            skill.metadata.metadata = Some(HashMap::from([(
-                "allowed-scripts".to_string(),
-                scripts_str,
-            )]));
+            skill.metadata.metadata = Some(serde_json::json!({"allowed-scripts": scripts_str}));
         }
         skill
     }
@@ -1217,17 +1222,11 @@ fn main() {
     fn test_multi_skill_injection_with_merged_permissions() {
         let skill_a = create_test_skill_with_tools("skill-a", Some("Bash Read"));
         let mut skill_a = skill_a;
-        skill_a.metadata.metadata = Some(std::collections::HashMap::from([(
-            "allowed-scripts".to_string(),
-            "*.js".to_string(),
-        )]));
+        skill_a.metadata.metadata = Some(serde_json::json!({"allowed-scripts": "*.js"}));
 
         let skill_b = create_test_skill_with_tools("skill-b", Some("Read Write"));
         let mut skill_b = skill_b;
-        skill_b.metadata.metadata = Some(std::collections::HashMap::from([(
-            "allowed-scripts".to_string(),
-            "*.py".to_string(),
-        )]));
+        skill_b.metadata.metadata = Some(serde_json::json!({"allowed-scripts": "*.py"}));
 
         let skills = vec![skill_a, skill_b];
         let result = SkillInjector::multi_skill_injection(&skills);
@@ -1480,5 +1479,44 @@ fn main() {
 
         // Only one scripts section (skill-a has no scripts)
         assert_eq!(result.matches("## Available Scripts").count(), 1);
+    }
+
+    #[test]
+    fn test_phase2_injection_replaces_basedir_placeholder() {
+        let mut skill = create_test_skill(
+            "test-skill",
+            "Run: {baseDir}/scripts/run.sh\nAlso: {baseDir}/data/config.json",
+        );
+        skill.skill_dir = PathBuf::from("/home/user/skills/test-skill");
+
+        let result = SkillInjector::phase2_injection(&skill);
+
+        assert!(result.contains("/home/user/skills/test-skill/scripts/run.sh"));
+        assert!(result.contains("/home/user/skills/test-skill/data/config.json"));
+        assert!(!result.contains("{baseDir}"));
+    }
+
+    #[test]
+    fn test_phase2_injection_no_basedir_placeholder() {
+        let skill = create_test_skill("test-skill", "No placeholders here");
+        let result = SkillInjector::phase2_injection(&skill);
+
+        assert!(result.contains("No placeholders here"));
+    }
+
+    #[test]
+    fn test_multi_skill_injection_replaces_basedir_placeholder() {
+        let mut skill_a = create_test_skill("skill-a", "Execute {baseDir}/bin/tool");
+        skill_a.skill_dir = PathBuf::from("/skills/skill-a");
+
+        let mut skill_b = create_test_skill("skill-b", "Run {baseDir}/scripts/run.py");
+        skill_b.skill_dir = PathBuf::from("/skills/skill-b");
+
+        let skills = vec![skill_a, skill_b];
+        let result = SkillInjector::multi_skill_injection(&skills);
+
+        assert!(result.contains("/skills/skill-a/bin/tool"));
+        assert!(result.contains("/skills/skill-b/scripts/run.py"));
+        assert!(!result.contains("{baseDir}"));
     }
 }

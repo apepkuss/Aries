@@ -45,8 +45,22 @@ pub struct SkillMetadata {
     ///
     /// This field is the official extension mechanism per Agent Skills Standard.
     /// All custom/extension fields should be stored here.
+    ///
+    /// Supports both flat key-value format (Moss native) and nested JSON format (OpenClaw):
+    ///
+    /// **Moss flat format:**
+    /// ```yaml
+    /// metadata:
+    ///   priority: "10"
+    ///   conflicts: "skill-a, skill-b"
+    /// ```
+    ///
+    /// **OpenClaw nested format:**
+    /// ```yaml
+    /// metadata: {"openclaw":{"requires":{"env":["API_KEY"]},"primaryEnv":"API_KEY"}}
+    /// ```
     #[serde(default)]
-    pub metadata: Option<HashMap<String, String>>,
+    pub metadata: Option<serde_json::Value>,
 
     /// Pre-approved tools (optional, space-separated list)
     /// Experimental field per Agent Skills Standard
@@ -84,6 +98,30 @@ pub struct SkillMetadata {
 }
 
 impl SkillMetadata {
+    /// Get a top-level metadata value as a String
+    ///
+    /// Handles multiple JSON value types for backward compatibility:
+    /// - `Value::String(s)` → returns s directly
+    /// - `Value::Number(n)` → returns n.to_string()
+    /// - `Value::Bool(b)` → returns b.to_string()
+    /// - Other types (Object, Array, Null) → returns None
+    ///
+    /// This ensures that both quoted (`priority: "10"`) and unquoted
+    /// (`priority: 10`) YAML values work correctly after the migration
+    /// from `HashMap<String, String>` to `serde_json::Value`.
+    fn get_metadata_str(&self, key: &str) -> Option<String> {
+        self.metadata
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get(key))
+            .and_then(|val| match val {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                serde_json::Value::Bool(b) => Some(b.to_string()),
+                _ => None,
+            })
+    }
+
     /// Get skill priority from metadata (extension field)
     ///
     /// Priority is stored in the `metadata` field as a string value
@@ -102,9 +140,7 @@ impl SkillMetadata {
     /// - `Some(i32)` if priority is defined and valid
     /// - `None` if not defined or invalid (defaults to 0 in resolution)
     pub fn get_priority(&self) -> Option<i32> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.get("priority"))
+        self.get_metadata_str("priority")
             .and_then(|v| v.parse::<i32>().ok())
     }
 
@@ -126,9 +162,7 @@ impl SkillMetadata {
     /// - `Some(Vec<String>)` if conflicts are defined
     /// - `None` if not defined (no conflicts)
     pub fn get_conflicts(&self) -> Option<Vec<String>> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.get("conflicts"))
+        self.get_metadata_str("conflicts")
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_string())
@@ -160,10 +194,9 @@ impl SkillMetadata {
     /// - `Some(SkillResourceLimits)` if execution-limits is defined and valid
     /// - `None` if not defined or empty
     pub fn get_execution_limits(&self) -> Option<SkillResourceLimits> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.get("execution-limits"))
-            .and_then(|v| SkillResourceLimits::parse(v))
+        self.get_metadata_str("execution-limits")
+            .as_deref()
+            .and_then(SkillResourceLimits::parse)
     }
 
     /// Get allowed scripts from metadata (extension field)
@@ -187,9 +220,7 @@ impl SkillMetadata {
     /// - `Some(Vec<String>)` if allowed-scripts is defined
     /// - `None` if not defined (all scripts allowed)
     pub fn get_allowed_scripts(&self) -> Option<Vec<String>> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.get("allowed-scripts"))
+        self.get_metadata_str("allowed-scripts")
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_string())
@@ -220,9 +251,7 @@ impl SkillMetadata {
     /// - `Some(Vec<String>)` if references is defined
     /// - `None` if not defined (default loading behavior)
     pub fn get_references(&self) -> Option<Vec<String>> {
-        self.metadata
-            .as_ref()
-            .and_then(|m| m.get("references"))
+        self.get_metadata_str("references")
             .map(|v| {
                 v.split(',')
                     .map(|s| s.trim().to_string())
@@ -230,6 +259,114 @@ impl SkillMetadata {
                     .collect()
             })
             .filter(|v: &Vec<String>| !v.is_empty())
+    }
+
+    // ── Gating metadata accessors (dual-format: moss / openclaw) ──
+
+    /// Get gating metadata object, checking `metadata.moss` first, then `metadata.openclaw`.
+    ///
+    /// This enables dual-format support: skills can declare gating under
+    /// either `"moss"` or `"openclaw"` key with identical nested structure.
+    /// The `"moss"` key takes priority when both are present.
+    fn get_gating_metadata(&self) -> Option<&serde_json::Value> {
+        self.metadata
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .and_then(|obj| obj.get("moss").or_else(|| obj.get("openclaw")))
+    }
+
+    /// Navigate a dotted path inside a JSON value (e.g. `"gating.requires.env"`).
+    fn resolve_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+        let mut current = value;
+        for key in path.split('.') {
+            current = current.as_object()?.get(key)?;
+        }
+        Some(current)
+    }
+
+    /// Parse a JSON value as a `Vec<String>`.
+    ///
+    /// Accepts:
+    /// - A JSON array of strings → collected
+    /// - A single string → split by comma, trimmed
+    fn value_to_string_vec(val: &serde_json::Value) -> Option<Vec<String>> {
+        match val {
+            serde_json::Value::Array(arr) => {
+                let v: Vec<String> = arr
+                    .iter()
+                    .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                    .collect();
+                if v.is_empty() { None } else { Some(v) }
+            }
+            serde_json::Value::String(s) => {
+                let v: Vec<String> = s
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if v.is_empty() { None } else { Some(v) }
+            }
+            _ => None,
+        }
+    }
+
+    /// Get required environment variables from gating metadata.
+    ///
+    /// Reads `gating.requires.env` from the `moss` or `openclaw` metadata block.
+    ///
+    /// Also falls back to the flat `required-env` key for backward compatibility
+    /// with existing Moss skills (e.g. moss-weather).
+    pub fn get_required_env(&self) -> Option<Vec<String>> {
+        // Try nested gating first
+        if let Some(gating_root) = self.get_gating_metadata()
+            && let Some(val) = Self::resolve_path(gating_root, "gating.requires.env")
+        {
+            return Self::value_to_string_vec(val);
+        }
+        // Fallback: flat `required-env` key (backward compat)
+        self.get_metadata_str("required-env").map(|s| {
+            s.split(',')
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect()
+        })
+    }
+
+    /// Get required binaries from gating metadata.
+    ///
+    /// Reads `gating.requires.bins` from the `moss` or `openclaw` metadata block.
+    pub fn get_required_bins(&self) -> Option<Vec<String>> {
+        self.get_gating_metadata()
+            .and_then(|root| Self::resolve_path(root, "gating.requires.bins"))
+            .and_then(Self::value_to_string_vec)
+    }
+
+    /// Get "any of" required binaries from gating metadata.
+    ///
+    /// Reads `gating.requires.anyBins` — skill loads if at least one is found.
+    pub fn get_required_any_bins(&self) -> Option<Vec<String>> {
+        self.get_gating_metadata()
+            .and_then(|root| Self::resolve_path(root, "gating.requires.anyBins"))
+            .and_then(Self::value_to_string_vec)
+    }
+
+    /// Get the primary environment variable name from gating metadata.
+    ///
+    /// Reads `gating.primaryEnv` from the `moss` or `openclaw` metadata block.
+    pub fn get_primary_env(&self) -> Option<String> {
+        self.get_gating_metadata()
+            .and_then(|root| Self::resolve_path(root, "gating.primaryEnv"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
+
+    /// Get supported operating systems from gating metadata.
+    ///
+    /// Reads `gating.os` from the `moss` or `openclaw` metadata block.
+    pub fn get_supported_os(&self) -> Option<Vec<String>> {
+        self.get_gating_metadata()
+            .and_then(|root| Self::resolve_path(root, "gating.os"))
+            .and_then(Self::value_to_string_vec)
     }
 }
 
@@ -880,14 +1017,16 @@ mod tests {
     fn test_metadata_with_extensions(
         name: &str,
         description: &str,
-        extensions: HashMap<String, String>,
+        extensions: serde_json::Value,
     ) -> SkillMetadata {
         SkillMetadata {
             name: name.to_string(),
             description: description.to_string(),
             license: None,
             compatibility: None,
-            metadata: if extensions.is_empty() {
+            metadata: if extensions.is_null()
+                || extensions.as_object().map_or(true, |m| m.is_empty())
+            {
                 None
             } else {
                 Some(extensions)
@@ -905,12 +1044,18 @@ mod tests {
         priority: Option<i32>,
         conflicts: Option<Vec<&str>>,
     ) -> SkillMetadata {
-        let mut metadata_map = HashMap::new();
+        let mut map = serde_json::Map::new();
         if let Some(p) = priority {
-            metadata_map.insert("priority".to_string(), p.to_string());
+            map.insert(
+                "priority".to_string(),
+                serde_json::Value::String(p.to_string()),
+            );
         }
         if let Some(c) = conflicts {
-            metadata_map.insert("conflicts".to_string(), c.join(", "));
+            map.insert(
+                "conflicts".to_string(),
+                serde_json::Value::String(c.join(", ")),
+            );
         }
 
         SkillMetadata {
@@ -918,10 +1063,10 @@ mod tests {
             description: description.to_string(),
             license: None,
             compatibility: None,
-            metadata: if metadata_map.is_empty() {
+            metadata: if map.is_empty() {
                 None
             } else {
-                Some(metadata_map)
+                Some(serde_json::Value::Object(map))
             },
             allowed_tools: None,
             model: None,
@@ -988,10 +1133,10 @@ mod tests {
         let mut metadata = test_metadata("test-skill", "A test skill");
         metadata.license = Some("Apache-2.0".to_string());
         metadata.compatibility = Some("Requires network access".to_string());
-        metadata.metadata = Some(HashMap::from([
-            ("author".to_string(), "test".to_string()),
-            ("version".to_string(), "1.0".to_string()),
-        ]));
+        metadata.metadata = Some(serde_json::json!({
+            "author": "test",
+            "version": "1.0"
+        }));
         metadata.allowed_tools = Some("Bash Read Write".to_string());
         metadata.model = Some("claude-sonnet".to_string());
 
@@ -1007,7 +1152,7 @@ mod tests {
         );
         assert_eq!(
             deserialized.metadata.as_ref().unwrap().get("author"),
-            Some(&"test".to_string())
+            Some(&serde_json::Value::String("test".to_string()))
         );
         assert_eq!(
             deserialized.allowed_tools,
@@ -1315,7 +1460,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "".to_string())]),
+            serde_json::json!({"allowed-scripts": ""}),
         );
 
         // Empty metadata value - all scripts allowed
@@ -1327,10 +1472,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([(
-                "allowed-scripts".to_string(),
-                "process.js, export.py".to_string(),
-            )]),
+            serde_json::json!({"allowed-scripts": "process.js, export.py"}),
         );
 
         // Exact matches
@@ -1347,7 +1489,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "*.js".to_string())]),
+            serde_json::json!({"allowed-scripts": "*.js"}),
         );
 
         // Matches *.js
@@ -1365,7 +1507,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "*.js, *.ts".to_string())]),
+            serde_json::json!({"allowed-scripts": "*.js, *.ts"}),
         );
 
         // Matches either pattern
@@ -1381,7 +1523,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "process-*.js".to_string())]),
+            serde_json::json!({"allowed-scripts": "process-*.js"}),
         );
 
         // Matches prefix pattern
@@ -1399,7 +1541,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "script?.js".to_string())]),
+            serde_json::json!({"allowed-scripts": "script?.js"}),
         );
 
         // Matches exactly one character
@@ -1422,7 +1564,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("allowed-scripts".to_string(), "".to_string())]),
+            serde_json::json!({"allowed-scripts": ""}),
         );
         assert!(metadata.get_allowed_scripts().is_none());
     }
@@ -1432,10 +1574,7 @@ mod tests {
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([(
-                "allowed-scripts".to_string(),
-                "*.js, process.py".to_string(),
-            )]),
+            serde_json::json!({"allowed-scripts": "*.js, process.py"}),
         );
 
         let scripts = metadata.get_allowed_scripts();
@@ -1640,7 +1779,7 @@ metadata:
         let metadata = test_metadata_with_extensions(
             "test",
             "test",
-            HashMap::from([("references".to_string(), "api-docs.md, *.txt".to_string())]),
+            serde_json::json!({"references": "api-docs.md, *.txt"}),
         );
 
         let refs = metadata.get_references();
@@ -1798,17 +1937,14 @@ metadata:
     #[test]
     fn test_get_priority_none_when_metadata_empty() {
         let mut metadata = test_metadata("test", "test");
-        metadata.metadata = Some(HashMap::new());
+        metadata.metadata = Some(serde_json::json!({}));
         assert_eq!(metadata.get_priority(), None);
     }
 
     #[test]
     fn test_get_priority_none_when_invalid_string() {
         let mut metadata = test_metadata("test", "test");
-        metadata.metadata = Some(HashMap::from([(
-            "priority".to_string(),
-            "not_a_number".to_string(),
-        )]));
+        metadata.metadata = Some(serde_json::json!({"priority": "not_a_number"}));
         assert_eq!(metadata.get_priority(), None);
     }
 
@@ -1846,17 +1982,14 @@ metadata:
     #[test]
     fn test_get_conflicts_none_when_empty_string() {
         let mut metadata = test_metadata("test", "test");
-        metadata.metadata = Some(HashMap::from([("conflicts".to_string(), "".to_string())]));
+        metadata.metadata = Some(serde_json::json!({"conflicts": ""}));
         assert!(metadata.get_conflicts().is_none());
     }
 
     #[test]
     fn test_get_conflicts_trims_whitespace() {
         let mut metadata = test_metadata("test", "test");
-        metadata.metadata = Some(HashMap::from([(
-            "conflicts".to_string(),
-            "  skill-a  ,  skill-b  ".to_string(),
-        )]));
+        metadata.metadata = Some(serde_json::json!({"conflicts": "  skill-a  ,  skill-b  "}));
         let conflicts = metadata.get_conflicts().unwrap();
         assert_eq!(conflicts, vec!["skill-a", "skill-b"]);
     }
@@ -1892,7 +2025,146 @@ metadata:
         // Other metadata fields should still work
         assert_eq!(
             metadata.metadata.as_ref().unwrap().get("author"),
-            Some(&"test".to_string())
+            Some(&serde_json::Value::String("test".to_string()))
         );
+    }
+
+    // ── Gating dual-format accessor tests ──
+
+    #[test]
+    fn test_gating_openclaw_format() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "openclaw": {
+                "gating": {
+                    "requires": {
+                        "env": ["TAVILY_API_KEY"],
+                        "bins": ["curl"]
+                    },
+                    "primaryEnv": "TAVILY_API_KEY",
+                    "os": ["linux", "macos"]
+                }
+            }
+        }));
+
+        assert_eq!(
+            m.get_required_env(),
+            Some(vec!["TAVILY_API_KEY".to_string()])
+        );
+        assert_eq!(m.get_required_bins(), Some(vec!["curl".to_string()]));
+        assert_eq!(m.get_primary_env(), Some("TAVILY_API_KEY".to_string()));
+        assert_eq!(
+            m.get_supported_os(),
+            Some(vec!["linux".to_string(), "macos".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_gating_moss_format() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "moss": {
+                "gating": {
+                    "requires": {
+                        "env": ["MY_API_KEY"]
+                    },
+                    "primaryEnv": "MY_API_KEY"
+                }
+            }
+        }));
+
+        assert_eq!(m.get_required_env(), Some(vec!["MY_API_KEY".to_string()]));
+        assert_eq!(m.get_primary_env(), Some("MY_API_KEY".to_string()));
+        assert_eq!(m.get_required_bins(), None);
+        assert_eq!(m.get_supported_os(), None);
+    }
+
+    #[test]
+    fn test_gating_moss_takes_priority_over_openclaw() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "moss": {
+                "gating": {
+                    "requires": {
+                        "env": ["MOSS_KEY"]
+                    }
+                }
+            },
+            "openclaw": {
+                "gating": {
+                    "requires": {
+                        "env": ["OPENCLAW_KEY"]
+                    }
+                }
+            }
+        }));
+
+        assert_eq!(m.get_required_env(), Some(vec!["MOSS_KEY".to_string()]));
+    }
+
+    #[test]
+    fn test_gating_none_when_no_gating() {
+        let m = test_metadata("test", "test");
+        assert_eq!(m.get_required_env(), None);
+        assert_eq!(m.get_required_bins(), None);
+        assert_eq!(m.get_required_any_bins(), None);
+        assert_eq!(m.get_primary_env(), None);
+        assert_eq!(m.get_supported_os(), None);
+    }
+
+    #[test]
+    fn test_gating_flat_metadata_fallback_for_required_env() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "required-env": "OPENWEATHERMAP_API_KEY"
+        }));
+
+        assert_eq!(
+            m.get_required_env(),
+            Some(vec!["OPENWEATHERMAP_API_KEY".to_string()])
+        );
+        // Other gating fields should be None
+        assert_eq!(m.get_required_bins(), None);
+        assert_eq!(m.get_primary_env(), None);
+    }
+
+    #[test]
+    fn test_gating_any_bins() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "openclaw": {
+                "gating": {
+                    "requires": {
+                        "anyBins": ["python3", "python"]
+                    }
+                }
+            }
+        }));
+
+        assert_eq!(
+            m.get_required_any_bins(),
+            Some(vec!["python3".to_string(), "python".to_string()])
+        );
+        assert_eq!(m.get_required_bins(), None);
+    }
+
+    #[test]
+    fn test_gating_mixed_flat_and_nested() {
+        let mut m = test_metadata("test", "test");
+        m.metadata = Some(serde_json::json!({
+            "priority": "5",
+            "openclaw": {
+                "gating": {
+                    "requires": {
+                        "env": ["API_KEY"]
+                    }
+                }
+            }
+        }));
+
+        // Flat metadata still works
+        assert_eq!(m.get_priority(), Some(5));
+        // Nested gating also works
+        assert_eq!(m.get_required_env(), Some(vec!["API_KEY".to_string()]));
     }
 }
