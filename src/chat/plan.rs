@@ -3229,7 +3229,7 @@ async fn get_available_tools(state: &Arc<AppState>) -> Vec<ToolDescription> {
     if state.has_lantai() {
         tools.push(ToolDescription {
             name: internal_tool_name(LANTAI_SEARCH_TOOL),
-            description: "Search the knowledge base for relevant information. Returns semantically matched document chunks from indexed markdown files.".to_string(),
+            description: "Search the LOCAL knowledge base (user-indexed local markdown files only, NOT the internet). Use this tool ONLY when looking up previously saved personal notes, memory, or local documents. Do NOT use this tool to search for external/online information.".to_string(),
             parameters: Some(serde_json::json!({
                 "type": "object",
                 "properties": {
