@@ -444,6 +444,7 @@ export interface SkillSummary {
   description: string;
   allowed_tools: string[];
   parameters?: Record<string, unknown>;
+  enabled: boolean;
 }
 
 export interface SkillDetail {

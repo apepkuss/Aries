@@ -7,6 +7,19 @@ import type {
 } from './types';
 
 /**
+ * Enable or disable a skill.
+ */
+export async function setSkillEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  await apiClient
+    .put(`api/skills/${encodeURIComponent(name)}/enabled`, {
+      json: { enabled },
+    });
+}
+
+/**
  * Get all loaded skills.
  * Returns empty list if skills system is not enabled (503).
  */

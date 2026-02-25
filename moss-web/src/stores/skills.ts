@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getSkills, reloadSkills, installSkill as installSkillApi } from '@/api/skills';
+import { getSkills, reloadSkills, installSkill as installSkillApi, setSkillEnabled } from '@/api/skills';
 import type { SkillSummary } from '@/api/types';
 
 interface SkillsState {
@@ -10,6 +10,7 @@ interface SkillsState {
   installError: string | null;
   fetchSkills: () => Promise<void>;
   installSkill: (url: string, name?: string, envVars?: Record<string, string>) => Promise<boolean>;
+  toggleSkill: (name: string, enabled: boolean) => Promise<void>;
   clearInstallError: () => void;
 }
 
@@ -50,6 +51,26 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       const message = err instanceof Error ? err.message : 'Installation failed';
       set({ isInstalling: false, installError: message });
       return false;
+    }
+  },
+
+  toggleSkill: async (name: string, enabled: boolean) => {
+    // Optimistic update
+    set((state) => ({
+      skills: state.skills.map((s) =>
+        s.name === name ? { ...s, enabled } : s
+      ),
+    }));
+
+    try {
+      await setSkillEnabled(name, enabled);
+    } catch {
+      // Revert on failure
+      set((state) => ({
+        skills: state.skills.map((s) =>
+          s.name === name ? { ...s, enabled: !enabled } : s
+        ),
+      }));
     }
   },
 

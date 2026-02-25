@@ -9,6 +9,8 @@ import {
   Key,
   Loader2,
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -220,6 +222,7 @@ export function SkillsPage() {
 }
 
 function SkillCard({ skill }: { skill: SkillSummary }) {
+  const toggleSkill = useSkillsStore((s) => s.toggleSkill);
   const [envDialogOpen, setEnvDialogOpen] = useState(false);
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [isLoadingEnv, setIsLoadingEnv] = useState(false);
@@ -265,7 +268,10 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
   };
 
   return (
-    <div className="group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:shadow-md hover:border-border">
+    <div className={cn(
+      "group rounded-xl border border-border/60 bg-card p-4 transition-all duration-200 hover:shadow-md hover:border-border",
+      !skill.enabled && "opacity-50"
+    )}>
       {/* Skill header */}
       <div className="flex items-start gap-3">
         <div className="shrink-0 h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -280,6 +286,10 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
             {skill.description || 'No description'}
           </p>
         </div>
+        <Switch
+          checked={skill.enabled}
+          onCheckedChange={(checked) => toggleSkill(skill.name, checked)}
+        />
       </div>
 
       {/* Footer info */}
