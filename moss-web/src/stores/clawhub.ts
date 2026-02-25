@@ -26,6 +26,8 @@ interface ClawHubState {
   clearInstallError: () => void;
 }
 
+let lastBrowseTime = 0;
+
 export const useClawHubStore = create<ClawHubState>((set, get) => ({
   skills: [],
   isLoading: false,
@@ -41,6 +43,14 @@ export const useClawHubStore = create<ClawHubState>((set, get) => ({
   browse: async (reset = false) => {
     const state = get();
     if (state.isLoading) return;
+
+    // Throttle: minimum 1s between browse requests to avoid 429
+    const now = Date.now();
+    const elapsed = now - lastBrowseTime;
+    if (!reset && elapsed < 1000) {
+      await new Promise((r) => setTimeout(r, 1000 - elapsed));
+    }
+    lastBrowseTime = Date.now();
     if (!reset && !state.hasMore) return;
 
     set({

@@ -621,7 +621,14 @@ impl TaskPlanner {
             "\n      <recommended_skill>推荐的 Skill 名称（可选）</recommended_skill>".to_string()
         };
 
-        // Build skill recommendation rule if skills are available
+        // Build skill-related judgment rule (conditional on skills availability)
+        // When skills are available: rule 4 = skill usage, rule 5 = tool mismatch
+        // When no skills: rule 4 = tool mismatch
+        let skill_judgment_rule = if self.skills_summaries.is_empty() {
+            "\n4. **工具能力不匹配时直接回答**：如果任务需要的能力（如互联网搜索、访问外部网站等）不在上述可用工具列表中，必须使用 `<direct_answer>` 直接告知用户当前没有相应的工具来完成该任务，而不是调用不相关的工具。例如：当需要搜索互联网但没有互联网搜索工具时，不要使用本地知识库搜索工具替代，应明确告诉用户无法进行互联网搜索".to_string()
+        } else {
+            "\n4. **用户指定 Skill 时必须使用**：如果用户消息中明确提到要\"使用 XXX skill\"或\"用 XXX 处理\"（且该 skill 在可用 Skills 列表中），**必须**使用 `<task_plan>` 并在子任务中通过 `<recommended_skill>` 指定该 Skill，即使任务看似简单。Prompt-only skill（无工具的纯指令 skill）同样需要通过 task_plan 激活，因为其完整指令只在 Phase 2 注入。\n\n5. **工具能力不匹配时直接回答**：如果任务需要的能力（如互联网搜索、访问外部网站等）不在上述可用工具列表中，必须使用 `<direct_answer>` 直接告知用户当前没有相应的工具来完成该任务，而不是调用不相关的工具。例如：当需要搜索互联网但没有互联网搜索工具时，不要使用本地知识库搜索工具替代，应明确告诉用户无法进行互联网搜索".to_string()
+        };
         let skill_rule = if self.skills_summaries.is_empty() {
             String::new()
         } else {
@@ -651,6 +658,7 @@ impl TaskPlanner {
 - **通用建议**：编程最佳实践、设计模式建议等
 
 **关键判断**：答案基于通用知识，不需要访问文件系统、网络或其他外部资源。
+**⚠️ 注意**：即使任务看似简单，只要用户指定了使用某个 Skill，就**不能**使用直接回答格式，必须使用任务计划格式。
 
 使用以下 XML 格式：
 
@@ -770,6 +778,7 @@ impl TaskPlanner {
 1. **优先直接回答**：如果问题可以基于通用知识直接回答且不需要工具，使用 `<direct_answer>`
    - 适用于：常识问答、概念解释、定义查询、简单计算、问候闲聊
    - 关键判断：答案已在你的知识范围内，无需外部数据
+   - **⚠️ 例外**：如果用户明确要求使用某个 Skill（如"使用 XXX skill"），则**不得**使用 `<direct_answer>`，必须使用 `<task_plan>`
 
 2. **需要工具时规划**：如果需要访问外部资源或执行特定操作，使用 `<task_plan>`
    - 适用于：文件操作、代码执行、网络搜索、API调用
@@ -777,8 +786,7 @@ impl TaskPlanner {
 
 3. **不确定时倾向规划**：如果不确定是否需要工具，使用 `<task_plan>` 更安全
    - 原因：规划后仍可完成任务，而错误的直接回答可能提供过时或不准确的信息
-
-4. **工具能力不匹配时直接回答**：如果任务需要的能力（如互联网搜索、访问外部网站等）不在上述可用工具列表中，必须使用 `<direct_answer>` 直接告知用户当前没有相应的工具来完成该任务，而不是调用不相关的工具。例如：当需要搜索互联网但没有互联网搜索工具时，不要使用本地知识库搜索工具替代，应明确告诉用户无法进行互联网搜索
+{skill_judgment_rule}
 
 ## 规划原则（仅适用于 task_plan）
 
@@ -815,6 +823,7 @@ impl TaskPlanner {
             tools_desc = tools_desc,
             recommended_skill_tag = recommended_skill_tag,
             max_subtasks = self.max_subtasks,
+            skill_judgment_rule = skill_judgment_rule,
             skill_rule = skill_rule,
             extra_rules = if self.extra_rules.is_empty() {
                 String::new()

@@ -5,9 +5,45 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::executor::{EXECUTOR_MANAGER, ExecutionError, ResourceLimits, ScriptOutput};
+
+/// Deserialize `allowed-tools` from either a string or a YAML array of strings.
+///
+/// - String input: `"Read Write Edit"` → `Some("Read Write Edit")`
+/// - Array input: `["Read", "Write", "Edit"]` → `Some("Read Write Edit")`
+/// - Null/missing: → `None`
+fn deserialize_allowed_tools<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        Str(String),
+        Vec(Vec<String>),
+    }
+
+    match Option::<StringOrVec>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(StringOrVec::Str(s)) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s))
+            }
+        }
+        Some(StringOrVec::Vec(v)) => {
+            let joined: Vec<String> = v.into_iter().filter(|s| !s.trim().is_empty()).collect();
+            if joined.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(joined.join(" ")))
+            }
+        }
+    }
+}
 
 /// Skill metadata from YAML front matter
 ///
@@ -62,9 +98,17 @@ pub struct SkillMetadata {
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
 
-    /// Pre-approved tools (optional, space-separated list)
+    /// Pre-approved tools (optional, space-separated list or YAML array)
     /// Experimental field per Agent Skills Standard
-    #[serde(rename = "allowed-tools", default)]
+    ///
+    /// Accepts both formats:
+    /// - String: `"Read Write Edit"` (Moss native / Agent Skills Standard)
+    /// - Array:  `["Read", "Write", "Edit"]` (OpenClaw / ClawHub)
+    #[serde(
+        rename = "allowed-tools",
+        default,
+        deserialize_with = "deserialize_allowed_tools"
+    )]
     pub allowed_tools: Option<String>,
 
     /// Model recommendation (optional, Claude Code extension)
@@ -1346,6 +1390,37 @@ mod tests {
             summary.allowed_tools,
             vec!["mcp__search__query", "mcp__search__lookup"]
         );
+    }
+
+    #[test]
+    fn test_allowed_tools_yaml_array_format() {
+        let yaml = r#"
+name: humanizer-zh
+description: test skill
+allowed-tools:
+  - Read
+  - Write
+  - Edit
+  - AskUserQuestion
+"#;
+        let metadata: SkillMetadata = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            metadata.allowed_tools,
+            Some("Read Write Edit AskUserQuestion".to_string())
+        );
+        let tools = metadata.get_allowed_tools();
+        assert_eq!(tools, vec!["Read", "Write", "Edit", "AskUserQuestion"]);
+    }
+
+    #[test]
+    fn test_allowed_tools_string_format_still_works() {
+        let yaml = r#"
+name: test-skill
+description: test skill
+allowed-tools: Read Write Edit
+"#;
+        let metadata: SkillMetadata = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(metadata.allowed_tools, Some("Read Write Edit".to_string()));
     }
 
     // Tests for LoadedSkill methods

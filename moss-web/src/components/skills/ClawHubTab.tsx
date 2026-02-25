@@ -317,7 +317,7 @@ function LoadMoreSentinel({
 
   useEffect(() => {
     const el = sentinelRef.current;
-    if (!el) return;
+    if (!el || loading) return;
 
     // Find the Radix ScrollArea viewport as the intersection root
     const viewport = el.closest('[data-slot="scroll-area-viewport"]');
@@ -333,7 +333,7 @@ function LoadMoreSentinel({
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [loading]);
 
   return (
     <div ref={sentinelRef} className="flex justify-center py-6">
