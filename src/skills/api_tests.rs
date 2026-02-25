@@ -35,12 +35,14 @@ fn test_tap_001_skill_list_response_structure() {
                 description: "Query weather information".to_string(),
                 allowed_tools: vec!["WebFetch".to_string()],
                 parameters: None,
+                enabled: true,
             },
             SkillSummary {
                 name: "code-review".to_string(),
                 description: "Review code changes".to_string(),
                 allowed_tools: vec!["Read".to_string(), "Grep".to_string()],
                 parameters: None,
+                enabled: true,
             },
         ],
         total: 2,
@@ -84,6 +86,7 @@ fn test_tap_002_pagination_structure() {
             description: "First skill".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         }],
         total: 10, // Total is more than items in this page
     };
@@ -323,6 +326,7 @@ fn test_skill_summary_serialization() {
         description: "Test description".to_string(),
         allowed_tools: vec!["Bash".to_string(), "Read".to_string()],
         parameters: None,
+        enabled: true,
     };
 
     let json = serde_json::to_string(&summary).unwrap();
@@ -339,6 +343,7 @@ fn test_skill_summary_empty_tools() {
         description: "No tools allowed".to_string(),
         allowed_tools: vec![],
         parameters: None,
+        enabled: true,
     };
 
     let json = serde_json::to_string(&summary).unwrap();

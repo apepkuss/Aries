@@ -8473,6 +8473,7 @@ mod tests {
             description: "Query weather for a city".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         }];
 
         let messages = build_context_for_react_sync(
@@ -9036,12 +9037,14 @@ mod tests {
                 description: "Perform web searches with advanced filtering".to_string(),
                 allowed_tools: vec![],
                 parameters: None,
+                enabled: true,
             },
             SkillSummary {
                 name: "git-workflow".to_string(),
                 description: "Help with git operations and workflows".to_string(),
                 allowed_tools: vec![],
                 parameters: None,
+                enabled: true,
             },
         ];
 
@@ -9131,6 +9134,7 @@ mod tests {
             description: "Git workflow assistance".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         }];
 
         // Phase 1: no active skill
@@ -9809,6 +9813,7 @@ git commit -m "feat: add new feature"
             description: "Calculator operations".to_string(),
             allowed_tools: vec!["mcp__calc__sum".to_string(), "mcp__calc__sub".to_string()],
             parameters: None,
+            enabled: true,
         }];
 
         // Phase 1: no active skill, with skill summaries
@@ -9851,12 +9856,14 @@ git commit -m "feat: add new feature"
                 description: "Calculator".to_string(),
                 allowed_tools: vec!["mcp__calc__sum".to_string()],
                 parameters: None,
+                enabled: true,
             },
             SkillSummary {
                 name: "search".to_string(),
                 description: "Search".to_string(),
                 allowed_tools: vec!["mcp__search__query".to_string()],
                 parameters: None,
+                enabled: true,
             },
         ];
 
@@ -9917,6 +9924,7 @@ git commit -m "feat: add new feature"
             description: "A skill without tool restrictions".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         }];
 
         let filtered = filter_tools_by_skills(&tools, Some(&skills), &[]);
@@ -10050,6 +10058,7 @@ git commit -m "feat: add new feature"
             description: "Calculator".to_string(),
             allowed_tools: vec!["mcp__calc__sum".to_string()],
             parameters: None,
+            enabled: true,
         }];
 
         // ...when active skill is present, Phase 2 logic applies
@@ -10091,6 +10100,7 @@ git commit -m "feat: add new feature"
             description: "A skill".to_string(),
             allowed_tools: vec!["some_tool".to_string()],
             parameters: None,
+            enabled: true,
         }];
 
         let filtered = filter_tools_by_skills(&tools, Some(&skills), &[]);

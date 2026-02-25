@@ -30,6 +30,10 @@ pub struct SkillRegistry {
 
     /// Base directory for skills
     skills_dir: PathBuf,
+
+    /// Override path for the state file (used in tests)
+    #[cfg(test)]
+    state_file_override: Option<PathBuf>,
 }
 
 impl SkillRegistry {
@@ -38,10 +42,24 @@ impl SkillRegistry {
     /// # Arguments
     /// * `skills_dir` - Base directory containing skill subdirectories
     pub fn new(skills_dir: PathBuf) -> Self {
+        #[cfg(test)]
+        let state_file_override = Some(skills_dir.join(".skills-state-test.json"));
+
         Self {
             skills: RwLock::new(HashMap::new()),
             skills_dir,
+            #[cfg(test)]
+            state_file_override,
         }
+    }
+
+    /// Get the path to the state file
+    fn state_file_path(&self) -> PathBuf {
+        #[cfg(test)]
+        if let Some(ref path) = self.state_file_override {
+            return path.clone();
+        }
+        crate::skills::state::state_file_path()
     }
 
     /// Initialize the global registry
@@ -105,6 +123,21 @@ impl SkillRegistry {
             }
         }
 
+        // Apply persisted disabled state
+        let disabled = crate::skills::state::load_disabled_skills(&self.state_file_path());
+        if !disabled.is_empty() {
+            let mut skills = self.skills.write().await;
+            for name in &disabled {
+                if let Some(skill) = skills.get_mut(name) {
+                    skill.enabled = false;
+                }
+            }
+            tracing::info!(
+                "Applied {} disabled skill(s) from state file",
+                disabled.len()
+            );
+        }
+
         Ok(loaded_count)
     }
 
@@ -151,6 +184,18 @@ impl SkillRegistry {
             .collect()
     }
 
+    /// Get summaries of ALL loaded skills (including disabled ones).
+    ///
+    /// Used by the management API to show all skills with their enabled status.
+    pub async fn get_all_summaries_with_status(&self) -> Vec<SkillSummary> {
+        self.skills
+            .read()
+            .await
+            .values()
+            .map(SkillSummary::from)
+            .collect()
+    }
+
     /// Get all loaded and enabled skills
     ///
     /// Returns the full LoadedSkill objects for all enabled skills.
@@ -182,12 +227,25 @@ impl SkillRegistry {
     /// # Arguments
     /// * `name` - The skill name
     /// * `enabled` - Whether to enable or disable
-    #[allow(dead_code)]
     pub async fn set_enabled(&self, name: &str, enabled: bool) -> SkillResult<()> {
+        let state_file = self.state_file_path();
         let mut skills = self.skills.write().await;
 
         if let Some(skill) = skills.get_mut(name) {
             skill.enabled = enabled;
+
+            // Persist: collect all currently disabled skill names
+            let disabled: std::collections::HashSet<String> = skills
+                .values()
+                .filter(|s| !s.enabled)
+                .map(|s| s.metadata.name.clone())
+                .collect();
+
+            // Release lock before file I/O
+            drop(skills);
+
+            crate::skills::state::save_disabled_skills(&state_file, &disabled)?;
+
             Ok(())
         } else {
             Err(SkillError::NotFound(name.to_string()))
@@ -225,6 +283,16 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    /// Create a SkillRegistry with a temp-dir-based state file to avoid
+    /// parallel test interference on the global `~/.moss/skills-state.json`.
+    fn new_registry_with_state(skills_dir: &Path, state_dir: &Path) -> SkillRegistry {
+        SkillRegistry {
+            skills: RwLock::new(HashMap::new()),
+            skills_dir: skills_dir.to_path_buf(),
+            state_file_override: Some(state_dir.join("skills-state.json")),
+        }
+    }
 
     fn create_test_skill(dir: &Path, name: &str) {
         let skill_dir = dir.join(name);
@@ -341,9 +409,10 @@ This is a test skill.
     #[tokio::test]
     async fn test_set_enabled() {
         let temp_dir = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
         create_test_skill(temp_dir.path(), "toggle-skill");
 
-        let registry = SkillRegistry::new(temp_dir.path().to_path_buf());
+        let registry = new_registry_with_state(temp_dir.path(), state_dir.path());
         registry.load_all().await.unwrap();
 
         // Initially enabled
@@ -397,7 +466,8 @@ description: Updated description
     #[tokio::test]
     async fn test_set_enabled_nonexistent_skill() {
         let temp_dir = TempDir::new().unwrap();
-        let registry = SkillRegistry::new(temp_dir.path().to_path_buf());
+        let state_dir = TempDir::new().unwrap();
+        let registry = new_registry_with_state(temp_dir.path(), state_dir.path());
 
         let result = registry.set_enabled("nonexistent", true).await;
         assert!(matches!(result, Err(SkillError::NotFound(_))));
@@ -461,10 +531,11 @@ name: invalid-skill
     #[tokio::test]
     async fn test_get_summaries_excludes_disabled() {
         let temp_dir = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
         create_test_skill(temp_dir.path(), "enabled-skill");
         create_test_skill(temp_dir.path(), "disabled-skill");
 
-        let registry = SkillRegistry::new(temp_dir.path().to_path_buf());
+        let registry = new_registry_with_state(temp_dir.path(), state_dir.path());
         registry.load_all().await.unwrap();
 
         registry.set_enabled("disabled-skill", false).await.unwrap();
@@ -495,9 +566,10 @@ name: invalid-skill
     #[tokio::test]
     async fn test_enable_disable_toggle() {
         let temp_dir = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
         create_test_skill(temp_dir.path(), "toggle-test");
 
-        let registry = SkillRegistry::new(temp_dir.path().to_path_buf());
+        let registry = new_registry_with_state(temp_dir.path(), state_dir.path());
         registry.load_all().await.unwrap();
 
         // Toggle multiple times
@@ -513,9 +585,10 @@ name: invalid-skill
     #[tokio::test]
     async fn test_reload_preserves_enabled_state() {
         let temp_dir = TempDir::new().unwrap();
+        let state_dir = TempDir::new().unwrap();
         create_test_skill(temp_dir.path(), "state-skill");
 
-        let registry = SkillRegistry::new(temp_dir.path().to_path_buf());
+        let registry = new_registry_with_state(temp_dir.path(), state_dir.path());
         registry.load_all().await.unwrap();
 
         // Disable the skill

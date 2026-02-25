@@ -18,6 +18,7 @@ pub mod loader;
 pub mod middleware;
 pub mod parser;
 pub mod registry;
+pub mod state;
 pub mod types;
 pub mod validator;
 

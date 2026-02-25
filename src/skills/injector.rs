@@ -509,6 +509,7 @@ mod tests {
             description: description.to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         }
     }
 

@@ -138,7 +138,7 @@ fn get_registry() -> Result<&'static SkillRegistry, SkillError> {
 
 /// GET /api/skills - List all skills
 ///
-/// Returns a list of all loaded skills with their summaries.
+/// Returns a list of all loaded skills (including disabled) with their summaries.
 pub async fn list_skills_handler(headers: HeaderMap) -> ServerResult<Response<Body>> {
     let request_id = headers
         .get("x-request-id")
@@ -162,7 +162,7 @@ pub async fn list_skills_handler(headers: HeaderMap) -> ServerResult<Response<Bo
         }
     };
 
-    let summaries = registry.get_summaries().await;
+    let summaries = registry.get_all_summaries_with_status().await;
     let total = summaries.len();
 
     dual_info!("Found {} skills - request_id: {}", total, request_id);
@@ -737,6 +737,7 @@ mod tests {
                 description: "A test skill".to_string(),
                 allowed_tools: vec!["Bash".to_string()],
                 parameters: None,
+                enabled: true,
             }],
             total: 1,
         };

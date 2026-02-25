@@ -833,6 +833,10 @@ impl LoadedSkill {
     }
 }
 
+fn default_enabled() -> bool {
+    true
+}
+
 /// Skill summary for phase 1 injection
 ///
 /// Contains name, description, and allowed tools for tool filtering
@@ -854,6 +858,10 @@ pub struct SkillSummary {
     /// Allows frontends to dynamically generate input forms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
+
+    /// Whether this skill is enabled (included in model prompts)
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
 
 impl From<&LoadedSkill> for SkillSummary {
@@ -863,6 +871,7 @@ impl From<&LoadedSkill> for SkillSummary {
             description: skill.metadata.description.clone(),
             allowed_tools: skill.metadata.get_allowed_tools(),
             parameters: skill.metadata.parameters.clone(),
+            enabled: skill.enabled,
         }
     }
 }
@@ -874,6 +883,7 @@ impl From<&SkillMetadata> for SkillSummary {
             description: metadata.description.clone(),
             allowed_tools: metadata.get_allowed_tools(),
             parameters: metadata.parameters.clone(),
+            enabled: true,
         }
     }
 }
@@ -1185,6 +1195,7 @@ mod tests {
             description: "Create git commits".to_string(),
             allowed_tools: vec!["Bash".to_string(), "Read".to_string()],
             parameters: None,
+            enabled: true,
         };
 
         let json = serde_json::to_string(&summary).unwrap();

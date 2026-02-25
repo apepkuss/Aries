@@ -292,6 +292,7 @@ async fn test_ttp_001_with_skills_chain_methods() {
         description: "Test skill description".to_string(),
         allowed_tools: vec![],
         parameters: None,
+        enabled: true,
     }];
 
     // Test method chaining
@@ -317,12 +318,14 @@ async fn test_ttp_002_system_prompt_contains_skills_table() {
             description: "Query weather information".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         },
         SkillSummary {
             name: "code-review".to_string(),
             description: "Review code changes".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         },
     ];
 
@@ -359,6 +362,7 @@ async fn test_ttp_002_system_prompt_recommended_skill_tag() {
         description: "Test".to_string(),
         allowed_tools: vec![],
         parameters: None,
+        enabled: true,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -384,6 +388,7 @@ async fn test_ttp_002_system_prompt_skill_recommendation_rule() {
         description: "Test".to_string(),
         allowed_tools: vec![],
         parameters: None,
+        enabled: true,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -405,6 +410,7 @@ async fn test_ttp_002_system_prompt_tools_section_preserved() {
         description: "Test".to_string(),
         allowed_tools: vec![],
         parameters: None,
+        enabled: true,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -695,12 +701,14 @@ async fn test_integration_skills_table_format_matches_injector() {
             parameters: None,
             name: "skill-a".to_string(),
             description: "Description A".to_string(),
+            enabled: true,
         },
         SkillSummary {
             allowed_tools: vec![],
             parameters: None,
             name: "skill-b".to_string(),
             description: "Description B".to_string(),
+            enabled: true,
         },
     ];
 
@@ -784,6 +792,7 @@ async fn test_many_skills_in_prompt() {
             parameters: None,
             name: format!("skill-{:02}", i),
             description: format!("Description for skill {}", i),
+            enabled: true,
         });
     }
 
@@ -809,6 +818,7 @@ async fn test_skill_name_with_special_characters() {
         parameters: None,
         name: "my-awesome_skill.v2".to_string(),
         description: "A skill with special chars in name".to_string(),
+        enabled: true,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -827,6 +837,7 @@ async fn test_skill_description_with_pipe_character() {
         parameters: None,
         name: "test-skill".to_string(),
         description: "Query | Filter | Transform data".to_string(),
+        enabled: true,
     }];
 
     let planner = TaskPlanner::with_provider(Arc::new(MockLlmProvider::with_skills_plan()), 10)
@@ -845,6 +856,7 @@ async fn test_concurrent_planning_with_skills() {
         parameters: None,
         name: "shared-skill".to_string(),
         description: "A shared skill".to_string(),
+        enabled: true,
     }];
 
     // Create multiple planners sharing the same skill data

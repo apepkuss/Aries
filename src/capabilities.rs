@@ -247,6 +247,7 @@ mod tests {
             description: "Test description".to_string(),
             allowed_tools: vec!["Bash".to_string()],
             parameters: None,
+            enabled: true,
         };
 
         let capability: SkillCapability = summary.into();

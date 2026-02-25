@@ -368,18 +368,21 @@ async fn test_tpl_003_phase1_injection_preserves_order() {
             description: "Alpha skill".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         },
         SkillSummary {
             name: "beta".to_string(),
             description: "Beta skill".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         },
         SkillSummary {
             name: "gamma".to_string(),
             description: "Gamma skill".to_string(),
             allowed_tools: vec![],
             parameters: None,
+            enabled: true,
         },
     ];
 
@@ -834,6 +837,7 @@ async fn test_performance_phase1_injection() {
             description: format!("Description for skill {}", i),
             allowed_tools: vec![format!("tool-{}", i)],
             parameters: None,
+            enabled: true,
         })
         .collect();
 
