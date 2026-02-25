@@ -725,6 +725,238 @@ pub async fn update_skill_env_handler(
         })
 }
 
+// ============================================================
+// ClawHub proxy endpoints
+// ============================================================
+
+/// Query parameters for ClawHub search
+#[derive(Debug, Deserialize)]
+pub struct ClawHubSearchQuery {
+    pub q: String,
+    #[serde(default = "default_clawhub_limit")]
+    pub limit: usize,
+}
+
+/// Query parameters for ClawHub browse
+#[derive(Debug, Deserialize)]
+pub struct ClawHubBrowseQuery {
+    #[serde(default = "default_clawhub_limit")]
+    pub limit: usize,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub sort: Option<String>,
+}
+
+fn default_clawhub_limit() -> usize {
+    20
+}
+
+/// Request for installing a skill from ClawHub
+#[derive(Debug, Deserialize)]
+pub struct ClawHubInstallRequest {
+    pub slug: String,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub env_vars: Option<std::collections::HashMap<String, String>>,
+}
+
+/// GET /api/clawhub/search - Search ClawHub skills
+pub async fn clawhub_search_handler(
+    axum::extract::Query(params): axum::extract::Query<ClawHubSearchQuery>,
+) -> ServerResult<Response<Body>> {
+    let client = crate::cli::skill::clawhub::ClawHubClient::new();
+
+    match client.search(&params.q, params.limit).await {
+        Ok(skills) => {
+            let body = serde_json::json!({ "skills": skills });
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+        Err(e) => error_response(
+            StatusCode::BAD_GATEWAY,
+            &format!("ClawHub search failed: {}", e),
+        ),
+    }
+}
+
+/// GET /api/clawhub/skills - Browse ClawHub skills
+pub async fn clawhub_browse_handler(
+    axum::extract::Query(params): axum::extract::Query<ClawHubBrowseQuery>,
+) -> ServerResult<Response<Body>> {
+    let client = crate::cli::skill::clawhub::ClawHubClient::new();
+
+    match client
+        .browse(
+            params.limit,
+            params.cursor.as_deref(),
+            params.sort.as_deref(),
+        )
+        .await
+    {
+        Ok(result) => {
+            let body = serde_json::to_string(&result).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+        Err(e) => error_response(
+            StatusCode::BAD_GATEWAY,
+            &format!("ClawHub browse failed: {}", e),
+        ),
+    }
+}
+
+/// GET /api/clawhub/skills/{slug} - Get ClawHub skill details
+pub async fn clawhub_detail_handler(Path(slug): Path<String>) -> ServerResult<Response<Body>> {
+    let client = crate::cli::skill::clawhub::ClawHubClient::new();
+
+    match client.get_skill(&slug).await {
+        Ok(skill) => {
+            let body = serde_json::to_string(&skill).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+        Err(e) => {
+            let status = if e.to_string().contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            error_response(status, &format!("ClawHub error: {}", e))
+        }
+    }
+}
+
+/// POST /api/clawhub/install - Install a skill from ClawHub
+pub async fn clawhub_install_handler(
+    State(install_state): State<SkillsInstallState>,
+    headers: HeaderMap,
+    Json(request): Json<ClawHubInstallRequest>,
+) -> ServerResult<Response<Body>> {
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    dual_info!(
+        "Installing skill '{}' from ClawHub - request_id: {}",
+        request.slug,
+        request_id
+    );
+
+    let installer = crate::cli::skill::installer::SkillInstaller::new(
+        install_state.install_dir.clone(),
+        install_state.skill_config.as_ref(),
+    );
+    let source = crate::cli::skill::installer::SkillSource::ClawHub {
+        slug: request.slug.clone(),
+        version: request.version.clone(),
+    };
+
+    match installer.install(&source, request.name.as_deref()).await {
+        Ok(skill_name) => {
+            dual_info!(
+                "ClawHub skill '{}' installed as '{}' - request_id: {}",
+                request.slug,
+                skill_name,
+                request_id
+            );
+
+            // Write initial env vars if provided
+            if let Some(env_vars) = &request.env_vars
+                && !env_vars.is_empty()
+            {
+                let skill_dir = install_state.install_dir.join(&skill_name);
+                if let Err(e) = super::dotenv::write_dotenv(&skill_dir, env_vars) {
+                    dual_warn!(
+                        "Skill installed but failed to write .env: {} - request_id: {}",
+                        e,
+                        request_id
+                    );
+                }
+            }
+
+            // Reload skills registry
+            if let Ok(registry) = get_registry()
+                && let Err(e) = registry.reload_all().await
+            {
+                dual_warn!(
+                    "Skill installed but failed to reload registry: {} - request_id: {}",
+                    e,
+                    request_id
+                );
+            }
+
+            let response = InstallSkillResponse {
+                success: true,
+                message: format!("Skill '{}' installed from ClawHub successfully", skill_name),
+                skill_name: Some(skill_name),
+            };
+
+            let json_body = serde_json::to_string(&response).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json_body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+        Err(e) => {
+            dual_error!(
+                "Failed to install ClawHub skill '{}': {} - request_id: {}",
+                request.slug,
+                e,
+                request_id
+            );
+
+            let response = InstallSkillResponse {
+                success: false,
+                message: format!("Failed to install skill from ClawHub: {}", e),
+                skill_name: None,
+            };
+
+            let json_body = serde_json::to_string(&response).map_err(|e| {
+                crate::error::ServerError::Operation(format!("Failed to serialize response: {e}"))
+            })?;
+
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json_body))
+                .map_err(|e| {
+                    crate::error::ServerError::Operation(format!("Failed to create response: {e}"))
+                })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

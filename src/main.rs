@@ -572,6 +572,13 @@ async fn main() -> ServerResult<()> {
         };
 
         // Create install sub-router with its own state
+        let clawhub_install_router = Router::new()
+            .route(
+                "/api/clawhub/install",
+                post(skills::handlers::clawhub_install_handler),
+            )
+            .with_state(install_state.clone());
+
         let install_router = Router::new()
             .route(
                 "/api/skills/install",
@@ -604,6 +611,20 @@ async fn main() -> ServerResult<()> {
                 post(skills::handlers::reload_skill_handler),
             )
             .merge(install_router)
+            // ClawHub proxy routes
+            .route(
+                "/api/clawhub/search",
+                get(skills::handlers::clawhub_search_handler),
+            )
+            .route(
+                "/api/clawhub/skills",
+                get(skills::handlers::clawhub_browse_handler),
+            )
+            .route(
+                "/api/clawhub/skills/{slug}",
+                get(skills::handlers::clawhub_detail_handler),
+            )
+            .merge(clawhub_install_router)
             .layer(axum::middleware::from_fn_with_state(
                 skills_api_state,
                 skills::middleware::skills_api_middleware,

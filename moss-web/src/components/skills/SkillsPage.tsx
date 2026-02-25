@@ -26,7 +26,10 @@ import {
 import { useSkillsStore } from '@/stores';
 import { getSkillEnv, updateSkillEnv } from '@/api/skills';
 import { EnvVarsForm } from './EnvVarsForm';
+import { ClawHubTab } from './ClawHubTab';
 import type { SkillSummary } from '@/api/types';
+
+type TabId = 'installed' | 'clawhub';
 
 export function SkillsPage() {
   const {
@@ -39,6 +42,7 @@ export function SkillsPage() {
     clearInstallError,
   } = useSkillsStore();
 
+  const [activeTab, setActiveTab] = useState<TabId>('installed');
   const [showInstallForm, setShowInstallForm] = useState(false);
   const [installUrl, setInstallUrl] = useState('');
   const [installName, setInstallName] = useState('');
@@ -83,44 +87,112 @@ export function SkillsPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (showInstallForm) {
-                  handleCancelInstall();
-                } else {
-                  setShowInstallForm(true);
-                }
-              }}
-              disabled={isInstalling}
-            >
-              {showInstallForm ? (
-                <>
-                  <X className="h-3.5 w-3.5 mr-1.5" />
-                  取消
-                </>
-              ) : (
-                <>
-                  <Download className="h-3.5 w-3.5 mr-1.5" />
-                  安装
-                </>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchSkills}
-              disabled={isLoading}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
-              刷新
-            </Button>
+            {activeTab === 'installed' && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (showInstallForm) {
+                      handleCancelInstall();
+                    } else {
+                      setShowInstallForm(true);
+                    }
+                  }}
+                  disabled={isInstalling}
+                >
+                  {showInstallForm ? (
+                    <>
+                      <X className="h-3.5 w-3.5 mr-1.5" />
+                      取消
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-3.5 w-3.5 mr-1.5" />
+                      安装
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchSkills}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  刷新
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Install Form */}
-        {showInstallForm && (
+        {/* Tabs */}
+        <div className="mt-4 flex gap-1 border-b border-border">
+          <button
+            type="button"
+            className={cn(
+              'px-4 py-2 text-sm font-medium transition-colors relative',
+              activeTab === 'installed'
+                ? 'text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setActiveTab('installed')}
+          >
+            <div className="flex items-center gap-1.5">
+              <Blocks className="h-3.5 w-3.5" />
+              已安装
+              {skills.length > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  ({skills.length})
+                </span>
+              )}
+            </div>
+            {activeTab === 'installed' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+            )}
+          </button>
+          <button
+            type="button"
+            className={cn(
+              'px-4 py-2 text-sm font-medium transition-colors relative',
+              activeTab === 'clawhub'
+                ? 'text-foreground'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setActiveTab('clawhub')}
+          >
+            <div className="flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" className="h-3.5 w-3.5" aria-label="ClawHub">
+                <g fill="#ff4f40">
+                  <rect x="5" y="3" width="6" height="1"/><rect x="4" y="4" width="8" height="1"/>
+                  <rect x="3" y="5" width="10" height="1"/><rect x="3" y="6" width="10" height="1"/>
+                  <rect x="3" y="7" width="10" height="1"/><rect x="4" y="8" width="8" height="1"/>
+                  <rect x="5" y="9" width="6" height="1"/><rect x="5" y="12" width="6" height="1"/>
+                  <rect x="6" y="13" width="4" height="1"/>
+                </g>
+                <g fill="#ff775f">
+                  <rect x="1" y="6" width="2" height="1"/><rect x="2" y="5" width="1" height="1"/>
+                  <rect x="2" y="7" width="1" height="1"/><rect x="13" y="6" width="2" height="1"/>
+                  <rect x="13" y="5" width="1" height="1"/><rect x="13" y="7" width="1" height="1"/>
+                </g>
+                <g fill="#081016">
+                  <rect x="6" y="5" width="1" height="1"/><rect x="9" y="5" width="1" height="1"/>
+                </g>
+                <g fill="#f5fbff">
+                  <rect x="6" y="4" width="1" height="1"/><rect x="9" y="4" width="1" height="1"/>
+                </g>
+              </svg>
+              ClawHub
+            </div>
+            {activeTab === 'clawhub' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary" />
+            )}
+          </button>
+        </div>
+
+        {/* Install Form (only on installed tab) */}
+        {activeTab === 'installed' && showInstallForm && (
           <div className="mt-4 p-4 rounded-lg border border-border bg-muted/30">
             <div className="flex flex-col gap-3">
               <div className="flex gap-2">
@@ -192,31 +264,48 @@ export function SkillsPage() {
         )}
       </div>
 
-      {/* Content */}
-      <ScrollArea className="flex-1 px-8 pb-8">
-        {isLoading && skills.length === 0 ? (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            <RefreshCw className="h-5 w-5 animate-spin mr-2" />
-            加载中...
-          </div>
-        ) : skills.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-            <Blocks className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">暂无已加载的 Skills</p>
-          </div>
-        ) : (
-          <>
-            <div className="text-xs text-foreground mb-4 font-semibold">
-              已安装 {skills.length} 个 Skills
+      {/* Tab Content */}
+      {activeTab === 'installed' ? (
+        <ScrollArea className="flex-1 px-8 pb-8">
+          {isLoading && skills.length === 0 ? (
+            <div className="flex items-center justify-center py-20 text-muted-foreground">
+              <RefreshCw className="h-5 w-5 animate-spin mr-2" />
+              加载中...
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {skills.map((skill) => (
-                <SkillCard key={skill.name} skill={skill} />
-              ))}
+          ) : skills.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <Blocks className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm">暂无已加载的 Skills</p>
+              <Button
+                variant="link"
+                size="sm"
+                className="mt-2"
+                onClick={() => setActiveTab('clawhub')}
+              >
+                从 ClawHub 浏览和安装
+              </Button>
             </div>
-          </>
-        )}
-      </ScrollArea>
+          ) : (
+            <>
+              <div className="text-xs text-foreground mb-4 font-semibold">
+                已安装 {skills.length} 个 Skills
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {skills.map((skill) => (
+                  <SkillCard key={skill.name} skill={skill} />
+                ))}
+              </div>
+            </>
+          )}
+        </ScrollArea>
+      ) : (
+        <ClawHubTab
+          onInstalled={() => {
+            fetchSkills();
+            setActiveTab('installed');
+          }}
+        />
+      )}
     </div>
   );
 }

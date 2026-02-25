@@ -482,6 +482,40 @@ export interface UpdateSkillEnvResponse {
 }
 
 // ============================================================================
+// ClawHub API Types
+// ============================================================================
+
+export interface ClawHubSkill {
+  slug: string;
+  displayName?: string;
+  summary?: string;
+  owner?: { handle: string; name?: string };
+  stats?: { downloads: number; stars: number };
+  latestVersion?: { version: string; parsed?: Record<string, unknown> };
+  badges?: {
+    official?: unknown;
+    highlighted?: unknown;
+    deprecated?: unknown;
+  };
+}
+
+export interface ClawHubSearchResponse {
+  skills: ClawHubSkill[];
+}
+
+export interface ClawHubBrowseResponse {
+  skills: ClawHubSkill[];
+  cursor?: string;
+}
+
+export interface ClawHubInstallRequest {
+  slug: string;
+  version?: string;
+  name?: string;
+  env_vars?: Record<string, string>;
+}
+
+// ============================================================================
 // Artifacts API Types
 // ============================================================================
 

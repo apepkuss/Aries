@@ -22,6 +22,11 @@ pub enum SkillSource {
     },
     /// From a direct URL
     Url(String),
+    /// From ClawHub (OpenClaw skill marketplace)
+    ClawHub {
+        slug: String,
+        version: Option<String>,
+    },
 }
 
 impl SkillSource {
@@ -44,11 +49,23 @@ impl SkillSource {
                     version: None,
                 })
             }
+        } else if let Some(rest) = source.strip_prefix("clawhub:") {
+            if let Some((slug, version)) = rest.split_once('@') {
+                Ok(SkillSource::ClawHub {
+                    slug: slug.to_string(),
+                    version: Some(version.to_string()),
+                })
+            } else {
+                Ok(SkillSource::ClawHub {
+                    slug: rest.to_string(),
+                    version: None,
+                })
+            }
         } else if source.starts_with("https://") || source.starts_with("http://") {
             Ok(SkillSource::Url(source.to_string()))
         } else {
             Err(ServerError::Operation(format!(
-                "Invalid skill source: '{}'. Use 'skillsmp:name' or a URL.",
+                "Invalid skill source: '{}'. Use 'skillsmp:name', 'clawhub:slug', or a URL.",
                 source
             )))
         }
@@ -65,6 +82,13 @@ impl SkillSource {
                 }
             }
             SkillSource::Url(url) => url.clone(),
+            SkillSource::ClawHub { slug, version } => {
+                if let Some(v) = version {
+                    format!("clawhub:{}@{}", slug, v)
+                } else {
+                    format!("clawhub:{}", slug)
+                }
+            }
         }
     }
 }
@@ -121,6 +145,12 @@ impl SkillInstaller {
             SkillSource::Url(url) => {
                 let skill_name = self.install_from_url(url, name_override).await?;
                 (skill_name, None)
+            }
+            SkillSource::ClawHub { slug, version } => {
+                let skill_name = self
+                    .install_from_clawhub(slug, version.as_deref(), name_override)
+                    .await?;
+                (skill_name, version.clone())
             }
         };
 
@@ -212,6 +242,32 @@ impl SkillInstaller {
             let skill_name = self.extract_package(&package_data, name_hint)?;
             Ok(skill_name)
         }
+    }
+
+    /// Install a skill from ClawHub
+    async fn install_from_clawhub(
+        &self,
+        slug: &str,
+        version: Option<&str>,
+        name_override: Option<&str>,
+    ) -> ServerResult<String> {
+        use super::clawhub::ClawHubClient;
+
+        let client = ClawHubClient::new();
+
+        if let Some(ver) = version {
+            println!("  Downloading '{}@{}' from ClawHub...", slug, ver);
+        } else {
+            println!("  Downloading '{}' from ClawHub...", slug);
+        }
+
+        let package_data = client.download(slug, version).await?;
+        println!("  Downloaded {} bytes", package_data.len());
+
+        let name_hint = name_override.unwrap_or(slug);
+        let skill_name = self.extract_package(&package_data, name_hint)?;
+
+        Ok(skill_name)
     }
 
     /// Extract a skill package (zip format) to the installation directory
@@ -554,6 +610,30 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_clawhub_source() {
+        let source = SkillSource::parse("clawhub:web-researcher").unwrap();
+        match source {
+            SkillSource::ClawHub { slug, version } => {
+                assert_eq!(slug, "web-researcher");
+                assert!(version.is_none());
+            }
+            _ => panic!("Expected ClawHub source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_clawhub_source_with_version() {
+        let source = SkillSource::parse("clawhub:web-researcher@1.2.0").unwrap();
+        match source {
+            SkillSource::ClawHub { slug, version } => {
+                assert_eq!(slug, "web-researcher");
+                assert_eq!(version, Some("1.2.0".to_string()));
+            }
+            _ => panic!("Expected ClawHub source"),
+        }
+    }
+
+    #[test]
     fn test_parse_invalid_source() {
         let result = SkillSource::parse("invalid");
         assert!(result.is_err());
@@ -572,5 +652,17 @@ mod tests {
             version: Some("1.0.0".to_string()),
         };
         assert_eq!(source.display_name(), "skillsmp:test@1.0.0");
+
+        let source = SkillSource::ClawHub {
+            slug: "web-researcher".to_string(),
+            version: None,
+        };
+        assert_eq!(source.display_name(), "clawhub:web-researcher");
+
+        let source = SkillSource::ClawHub {
+            slug: "web-researcher".to_string(),
+            version: Some("1.0.0".to_string()),
+        };
+        assert_eq!(source.display_name(), "clawhub:web-researcher@1.0.0");
     }
 }

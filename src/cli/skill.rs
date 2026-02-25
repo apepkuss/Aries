@@ -713,6 +713,7 @@ async fn uninstall_skill(
 }
 
 // Submodules for skill management
+pub mod clawhub;
 pub mod installer;
 pub mod lockfile;
 pub mod marketplace;
