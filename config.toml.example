@@ -363,6 +363,22 @@ confirmation_threshold = "low"     # Minimum risk level that requires confirmati
 
 
 # ============================================================================
+# SECTION 1.10.5: SKILL ARTIFACT STORAGE CONFIGURATION
+# ============================================================================
+# When a skill script produces raw data output (JSON, text, markdown, images,
+# audio, etc.), Aries automatically saves it as a typed artifact file and
+# returns only the file path to the LLM — keeping large content out of the
+# conversation context window.
+#
+# storage_path: Override the artifact save directory.
+#   - Supports ~ for home directory expansion.
+#   - Default (when not set): ~/.moss/artifacts/
+
+# [artifacts]
+# storage_path = "~/.moss/artifacts"   # Custom artifact storage directory
+
+
+# ============================================================================
 # SECTION 1.11: SESSION HISTORY CONFIGURATION
 # ============================================================================
 # The session system provides JSONL-based chat history persistence for

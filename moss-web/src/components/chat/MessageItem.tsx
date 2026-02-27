@@ -1,6 +1,6 @@
 import { User, Copy, Check, AlertCircle, Loader2, ShieldCheck, FileText, FileImage, FileCode, File } from 'lucide-react';
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkEmoji from 'remark-emoji';
 import remarkMath from 'remark-math';
@@ -16,6 +16,14 @@ import type { UIMessage, UISubAgent } from '@/api/types';
 import type { ExecutionStatus } from '@/stores';
 import { ThinkingProcess } from './ThinkingProcess';
 import { MermaidDiagram } from './MermaidDiagram';
+
+// Matches absolute file paths commonly found in macOS/Linux artifact output.
+// Stops at whitespace, newlines, and common punctuation to avoid over-matching.
+const FILE_PATH_REGEX = /((?:\/(?:Users|home|tmp|var|root|mnt|private)|~\/)(?:[^\s\n，。；：:;,'"）)\]]+))/g;
+
+function linkifyFilePaths(content: string): string {
+  return content.replace(FILE_PATH_REGEX, (match) => `[${match}](moss-open:${encodeURIComponent(match)})`);
+}
 
 interface MessageItemProps {
   message: UIMessage;
@@ -156,6 +164,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkEmoji, remarkMath]}
                     rehypePlugins={[rehypeKatex]}
+                    urlTransform={(url) => url.startsWith('moss-open:') ? url : defaultUrlTransform(url)}
                     components={{
                       // Custom code block rendering with syntax highlighting
                       code({ className, children, ...props }) {
@@ -271,8 +280,25 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
                           </td>
                         );
                       },
-                      // Enhanced link styling
+                      // Enhanced link styling + local file path support
                       a({ href, children, ...props }) {
+                        if (href?.startsWith('moss-open:')) {
+                          const filePath = decodeURIComponent(href.slice('moss-open:'.length));
+                          const handleClick = (e: React.MouseEvent) => {
+                            e.preventDefault();
+                            const api = (window as unknown as Record<string, unknown>)?.electronAPI as { showItemInFolder?: (p: string) => void } | undefined;
+                            api?.showItemInFolder?.(filePath);
+                          };
+                          return (
+                            <span
+                              onClick={handleClick}
+                              className="text-primary hover:text-primary/80 underline underline-offset-2 transition-colors cursor-pointer font-mono text-sm"
+                              title="在 Finder 中显示"
+                            >
+                              {children}
+                            </span>
+                          );
+                        }
                         const isExternal = href?.startsWith('http');
                         return (
                           <a
@@ -288,7 +314,7 @@ export function MessageItem({ message, executionStatus, isStreaming, subAgents, 
                       },
                     }}
                   >
-                    {message.content}
+                    {isUser ? message.content : linkifyFilePaths(message.content)}
                   </ReactMarkdown>
                 </div>
                 )

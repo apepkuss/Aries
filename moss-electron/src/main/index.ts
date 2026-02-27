@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell, dialog, ipcMain, Notification } from 'electron'
 import path from 'path'
 import fs from 'fs'
+import { exec } from 'child_process'
 import { BackendManager } from './backend'
 import { initAutoUpdater, stopAutoUpdater } from './updater'
 
@@ -100,6 +101,17 @@ ipcMain.handle('select-files', async () => {
 // Check whether given file paths still exist on disk
 ipcMain.handle('check-files-exist', async (_event, paths: string[]) => {
   return paths.map((p) => fs.existsSync(p))
+})
+
+// Reveal a file in Finder (macOS) / File Explorer (Windows) / file manager (Linux).
+// Uses `open -R` on macOS for reliability; falls back to shell.showItemInFolder elsewhere.
+ipcMain.on('show-item-in-folder', (_event, filePath: string) => {
+  if (process.platform === 'darwin') {
+    // `open -R <path>` is the most reliable way to reveal a file in Finder on macOS.
+    exec(`open -R "${filePath.replace(/"/g, '\\"')}"`)
+  } else {
+    shell.showItemInFolder(filePath)
+  }
 })
 
 let mainWindow: BrowserWindow | null = null

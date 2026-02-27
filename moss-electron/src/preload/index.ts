@@ -19,5 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   checkFilesExist: (paths: string[]): Promise<boolean[]> => {
     return ipcRenderer.invoke('check-files-exist', paths)
+  },
+  showItemInFolder: (filePath: string): void => {
+    ipcRenderer.send('show-item-in-folder', filePath)
   }
 })

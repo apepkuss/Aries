@@ -67,8 +67,8 @@ use crate::{
     server::{RoutingPolicy, ServerKind},
     services::hitl::types::{DetectedPrivacyPattern, HitlResponse},
     skills::{
-        LoadedSkill, ScriptContext, SkillDependencyChecker, SkillDetector, SkillInjector,
-        SkillLoader, SkillRegistry, SkillSummary,
+        LoadedSkill, ScriptContext, SkillArtifactSaver, SkillDependencyChecker, SkillDetector,
+        SkillInjector, SkillLoader, SkillRegistry, SkillSummary,
         constants::{
             INTERNAL_TOOL_PREFIX, LANTAI_DELETE_MEMORY_TOOL, LANTAI_SEARCH_TOOL, LANTAI_STATS_TOOL,
             LANTAI_UPDATE_MEMORY_TOOL, LANTAI_WRITE_MEMORY_TOOL, SKILL_LOAD_ASSET_TOOL,
@@ -4724,6 +4724,13 @@ async fn execute_internal_tool(
 
     match tool_name {
         SKILL_RUN_SCRIPT_TOOL => {
+            let artifacts_dir = state
+                .config
+                .read()
+                .await
+                .artifacts
+                .as_ref()
+                .and_then(|a| a.storage_path.clone());
             execute_skill_run_script(
                 tool_args,
                 active_skills,
@@ -4735,6 +4742,7 @@ async fn execute_internal_tool(
                 &mut tool_trace,
                 iter_trace,
                 start_time,
+                artifacts_dir,
             )
             .await
         }
@@ -5523,6 +5531,7 @@ async fn execute_skill_run_script(
     tool_trace: &mut ToolCallTrace,
     iter_trace: &mut IterationTrace,
     start_time: Instant,
+    artifacts_dir: Option<String>,
 ) -> ServerResult<String> {
     // Require at least one active skill
     // For multi-skill scenarios, use the first skill that has the requested script
@@ -5582,6 +5591,7 @@ async fn execute_skill_run_script(
         let args_clone = args.clone();
         let conv_id_owned = conv_id.map(|s| s.to_string());
         let request_id_owned = request_id.to_string();
+        let artifacts_dir_clone = artifacts_dir.clone();
 
         let result = adapter
             .execute_with_hitl(
@@ -5595,6 +5605,7 @@ async fn execute_skill_run_script(
                     let cid = conv_id_owned;
                     let rid = request_id_owned;
                     let sk = skill_clone;
+                    let adir = artifacts_dir_clone;
                     async move {
                         let context = ScriptContext::with_ids(cid, Some(rid));
                         let output = sk
@@ -5603,10 +5614,19 @@ async fn execute_skill_run_script(
                             .map_err(|e| format!("Script execution failed: {}", e))?;
 
                         if output.exit_code == 0 {
+                            let processed = SkillArtifactSaver::process(
+                                &sk.metadata.name,
+                                output.stdout.trim(),
+                                adir.as_deref(),
+                            );
+                            let suffix = if processed.starts_with("[Artifact]") {
+                                "\n\nIMPORTANT: The skill output was saved to the artifact file path shown above. You MUST include the exact file path in your response to the user so they can access it."
+                            } else {
+                                ""
+                            };
                             Ok(format!(
-                                "Script '{}' executed successfully.\n\nOutput:\n{}",
-                                sn,
-                                output.stdout.trim()
+                                "Script '{}' executed successfully.\n\nOutput:\n{}{}",
+                                sn, processed, suffix
                             ))
                         } else {
                             Ok(format!(
@@ -5695,10 +5715,19 @@ async fn execute_skill_run_script(
     {
         Ok(output) => {
             let result = if output.exit_code == 0 {
+                let processed = SkillArtifactSaver::process(
+                    &skill.metadata.name,
+                    output.stdout.trim(),
+                    artifacts_dir.as_deref(),
+                );
+                let suffix = if processed.starts_with("[Artifact]") {
+                    "\n\nIMPORTANT: The skill output was saved to the artifact file path shown above. You MUST include the exact file path in your response to the user so they can access it."
+                } else {
+                    ""
+                };
                 format!(
-                    "Script '{}' executed successfully.\n\nOutput:\n{}",
-                    script_name,
-                    output.stdout.trim()
+                    "Script '{}' executed successfully.\n\nOutput:\n{}{}",
+                    script_name, processed, suffix
                 )
             } else {
                 format!(

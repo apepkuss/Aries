@@ -8,6 +8,7 @@
 //! 1. Discovery: Load skill summaries (name + description)
 //! 2. Activation: Load full SKILL.md content when selected
 
+pub mod artifact;
 pub mod constants;
 pub mod dependency;
 pub mod detector;
@@ -35,6 +36,7 @@ mod script_execution_tests;
 #[cfg(test)]
 mod api_tests;
 
+pub use artifact::SkillArtifactSaver;
 pub use dependency::SkillDependencyChecker;
 pub use detector::SkillDetector;
 #[allow(unused_imports)]
