@@ -379,9 +379,18 @@ impl SkillMetadata {
     /// Get required binaries from gating metadata.
     ///
     /// Reads `gating.requires.bins` from the `moss` or `openclaw` metadata block.
+    /// Also falls back to the flat `requires.bins` key (moss-format skills without
+    /// the `gating` wrapper, e.g. `{"moss": {"requires": {"bins": ["yt-dlp"]}}}`).
     pub fn get_required_bins(&self) -> Option<Vec<String>> {
+        // Primary: moss.gating.requires.bins
+        if let Some(root) = self.get_gating_metadata()
+            && let Some(val) = Self::resolve_path(root, "gating.requires.bins")
+        {
+            return Self::value_to_string_vec(val);
+        }
+        // Fallback: moss.requires.bins (no gating wrapper)
         self.get_gating_metadata()
-            .and_then(|root| Self::resolve_path(root, "gating.requires.bins"))
+            .and_then(|root| Self::resolve_path(root, "requires.bins"))
             .and_then(Self::value_to_string_vec)
     }
 
@@ -411,6 +420,19 @@ impl SkillMetadata {
         self.get_gating_metadata()
             .and_then(|root| Self::resolve_path(root, "gating.os"))
             .and_then(Self::value_to_string_vec)
+    }
+
+    /// Get install options from skill metadata.
+    ///
+    /// Reads the `install` array from the `moss` or `openclaw` block.
+    /// Follows the OpenClaw install spec (brew/node/go/uv/download).
+    /// Each element is a JSON object describing one installation method.
+    pub fn get_install_options(&self) -> Vec<serde_json::Value> {
+        self.get_gating_metadata()
+            .and_then(|root| root.get("install"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
     }
 }
 

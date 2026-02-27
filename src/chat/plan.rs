@@ -67,8 +67,8 @@ use crate::{
     server::{RoutingPolicy, ServerKind},
     services::hitl::types::{DetectedPrivacyPattern, HitlResponse},
     skills::{
-        LoadedSkill, ScriptContext, SkillDetector, SkillInjector, SkillLoader, SkillRegistry,
-        SkillSummary,
+        LoadedSkill, ScriptContext, SkillDependencyChecker, SkillDetector, SkillInjector,
+        SkillLoader, SkillRegistry, SkillSummary,
         constants::{
             INTERNAL_TOOL_PREFIX, LANTAI_DELETE_MEMORY_TOOL, LANTAI_SEARCH_TOOL, LANTAI_STATS_TOOL,
             LANTAI_UPDATE_MEMORY_TOOL, LANTAI_WRITE_MEMORY_TOOL, SKILL_LOAD_ASSET_TOOL,
@@ -3962,6 +3962,23 @@ async fn execute_subtask_with_react(
 
                             for skill_name in &resolved_skills {
                                 if let Some(loaded_skill) = registry.get(skill_name).await {
+                                    // ── Dependency gate ──────────────────────────────────
+                                    let meta = loaded_skill.metadata.clone();
+                                    let dep_result = tokio::task::spawn_blocking(move || {
+                                        SkillDependencyChecker::ensure_dependencies(&meta)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|e| Err(e.to_string()));
+                                    if let Err(dep_err) = dep_result {
+                                        dual_warn!(
+                                            "⚠️ Skill '{}' dependency check failed: {} — skipping (request_id: {})",
+                                            skill_name,
+                                            dep_err,
+                                            request_id
+                                        );
+                                        continue;
+                                    }
+                                    // ── End dependency gate ──────────────────────────────
                                     dual_info!(
                                         "📖 Loaded skill '{}' for subtask {} - request_id: {}",
                                         skill_name,
@@ -4081,6 +4098,23 @@ async fn execute_subtask_with_react(
 
                         for skill_name in &resolved_skills {
                             if let Some(loaded_skill) = registry.get(skill_name).await {
+                                // ── Dependency gate ──────────────────────────────────
+                                let meta = loaded_skill.metadata.clone();
+                                let dep_result = tokio::task::spawn_blocking(move || {
+                                    SkillDependencyChecker::ensure_dependencies(&meta)
+                                })
+                                .await
+                                .unwrap_or_else(|e| Err(e.to_string()));
+                                if let Err(dep_err) = dep_result {
+                                    dual_warn!(
+                                        "⚠️ Skill '{}' dependency check failed: {} — skipping (request_id: {})",
+                                        skill_name,
+                                        dep_err,
+                                        request_id
+                                    );
+                                    continue;
+                                }
+                                // ── End dependency gate ──────────────────────────────
                                 dual_info!(
                                     "📖 Loaded skill '{}' for subtask {} - request_id: {}",
                                     skill_name,
@@ -6095,8 +6129,7 @@ pub(crate) async fn build_context_for_react(
 - Do NOT use <action> tags
 
 Remember: Focus only on this specific subtask. Follow the skill instructions carefully."#,
-                subtask.description,
-                skill_section,
+                subtask.description, skill_section,
             )
         } else {
             // Script-based skill: full tool calling support
