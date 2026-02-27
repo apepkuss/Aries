@@ -9,8 +9,10 @@
 //! to an existing absolute path, it is treated as a file the skill already
 //! created and is returned unchanged.
 
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use tracing::info;
 
