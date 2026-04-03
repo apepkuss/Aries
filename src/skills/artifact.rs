@@ -79,6 +79,15 @@ impl ContentType {
     }
 }
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
+/// Text-based outputs (plain text, JSON, Markdown) at or below this size are
+/// returned inline to the LLM context instead of being saved as artifact files.
+/// This keeps short, data-oriented outputs (e.g. weather data, API responses)
+/// directly available for the model to reason about, while large outputs
+/// (e.g. video captions, full documents) are still offloaded to disk.
+const INLINE_THRESHOLD: usize = 4096; // 4 KB
+
 // ── Artifact saver ────────────────────────────────────────────────────────────
 
 /// Processes skill script stdout: detects content type, saves as artifact,
@@ -235,6 +244,8 @@ impl SkillArtifactSaver {
     /// Process skill script stdout.
     ///
     /// - If `stdout` is already a path to an existing file → return unchanged.
+    /// - If `stdout` is text-based (plain text, JSON, Markdown) and within
+    ///   [`INLINE_THRESHOLD`] → return inline so the LLM can reason about it.
     /// - Otherwise → detect content type, save as `<artifacts_dir>/<skill>_<ts>.<ext>`,
     ///   return a short replacement string for the LLM context.
     ///
@@ -248,6 +259,15 @@ impl SkillArtifactSaver {
         let content_type = Self::detect_type(data, stdout);
 
         if content_type == ContentType::FileRef {
+            return stdout.to_string();
+        }
+
+        // Small text-based outputs are returned inline for the LLM to use directly.
+        let is_text_type = matches!(
+            content_type,
+            ContentType::Text | ContentType::Json | ContentType::Markdown
+        );
+        if is_text_type && data.len() <= INLINE_THRESHOLD {
             return stdout.to_string();
         }
 
