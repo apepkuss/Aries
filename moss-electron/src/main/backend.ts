@@ -178,7 +178,7 @@ export class BackendManager {
       )
     }
 
-    const logDir = app.getPath('logs')
+    const logDir = path.join(app.getPath('home'), '.moss', 'logs')
     fs.mkdirSync(logDir, { recursive: true })
     const logFile = path.join(logDir, 'moss-backend.log')
 

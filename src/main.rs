@@ -943,6 +943,17 @@ fn init_logging(destination: &str, file_path: Option<&str>) -> ServerResult<()> 
         }
         "file" => {
             if let Some(path) = file_path {
+                // Create directory if it doesn't exist
+                if let Some(parent) = std::path::Path::new(path).parent()
+                    && !parent.exists()
+                {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        let err_msg = format!("Failed to create directory for log file: {e}");
+                        eprintln!("{err_msg}");
+                        ServerError::Operation(err_msg)
+                    })?;
+                }
+
                 let file = std::fs::File::create(path).map_err(|e| {
                     let err_msg = format!("Failed to create log file: {e}");
                     eprintln!("{err_msg}");

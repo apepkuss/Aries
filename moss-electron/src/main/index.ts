@@ -201,13 +201,13 @@ app.whenReady().then(async () => {
       detail =
         'The backend process started but did not respond in time.\n\n' +
         'Check the log file for details:\n' +
-        `${app.getPath('logs')}/moss-backend.log`
+        `${path.join(app.getPath('home'), '.moss', 'logs', 'moss-backend.log')}`
     } else if (msg.includes('exited unexpectedly')) {
       title = 'Backend crashed'
       detail =
         'The backend process exited unexpectedly.\n\n' +
         'Check the log file for details:\n' +
-        `${app.getPath('logs')}/moss-backend.log`
+        `${path.join(app.getPath('home'), '.moss', 'logs', 'moss-backend.log')}`
     }
 
     dialog.showErrorBox(title, detail)
